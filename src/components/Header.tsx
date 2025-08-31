@@ -1,9 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Link } from "react-router-dom";
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { session, signOut } = useAuth();
 
   return (
     <header className="fixed top-0 w-full z-50 bg-background/80 backdrop-blur-lg border-b border-border/50">
@@ -35,8 +38,25 @@ const Header = () => {
 
           {/* Desktop Actions */}
           <div className="hidden md:flex items-center space-x-4">
-            <Button variant="ghost">Entrar</Button>
-            <Button variant="default">Comece Grátis</Button>
+            {session ? (
+              <>
+                <Link to="/dashboard">
+                  <Button variant="ghost">Dashboard</Button>
+                </Link>
+                <Button variant="ghost" onClick={signOut}>
+                  Sair
+                </Button>
+              </>
+            ) : (
+              <>
+                <Link to="/auth/login">
+                  <Button variant="ghost">Entrar</Button>
+                </Link>
+                <Link to="/auth/login">
+                  <Button variant="default">Comece Grátis</Button>
+                </Link>
+              </>
+            )}
           </div>
 
           {/* Mobile Menu Button */}
@@ -65,8 +85,25 @@ const Header = () => {
                 Contato
               </a>
               <div className="flex flex-col space-y-2 pt-4">
-                <Button variant="ghost">Entrar</Button>
-                <Button variant="default">Comece Grátis</Button>
+                {session ? (
+                  <>
+                    <Link to="/dashboard">
+                      <Button variant="ghost" className="w-full justify-start">Dashboard</Button>
+                    </Link>
+                    <Button variant="ghost" onClick={signOut} className="w-full justify-start">
+                      Sair
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Link to="/auth/login">
+                      <Button variant="ghost" className="w-full justify-start">Entrar</Button>
+                    </Link>
+                    <Link to="/auth/login">
+                      <Button variant="default" className="w-full justify-start">Comece Grátis</Button>
+                    </Link>
+                  </>
+                )}
               </div>
             </nav>
           </div>
