@@ -1,11 +1,11 @@
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogOut, Play, Settings, User, Video } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { useUser } from '@clerk/clerk-react';
+import { LogOut, Play, Settings, Video } from 'lucide-react';
 
 const Dashboard = () => {
-  const { user, signOut } = useAuth();
+  const { user } = useUser();
 
   return (
     <div className="min-h-screen bg-background">
@@ -22,17 +22,8 @@ const Dashboard = () => {
             
             <div className="flex items-center space-x-4">
               <span className="text-sm text-muted-foreground">
-                {user?.email}
+                {user?.emailAddresses[0]?.emailAddress}
               </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={signOut}
-                className="flex items-center space-x-2"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Sair</span>
-              </Button>
             </div>
           </div>
         </div>

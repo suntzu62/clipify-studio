@@ -1,11 +1,13 @@
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogOut, Play, Settings as SettingsIcon, User, Video } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { useUser, useClerk } from '@clerk/clerk-react';
+import { Separator } from '@/components/ui/separator';
+import { LogOut, Play, Settings as SettingsIcon, User, Video } from 'lucide-react';
 
 const Settings = () => {
-  const { user, signOut } = useAuth();
+  const { user } = useUser();
+  const { signOut } = useClerk();
 
   return (
     <div className="min-h-screen bg-background">
@@ -22,17 +24,8 @@ const Settings = () => {
             
             <div className="flex items-center space-x-4">
               <span className="text-sm text-muted-foreground">
-                {user?.email}
+                {user?.emailAddresses[0]?.emailAddress}
               </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={signOut}
-                className="flex items-center space-x-2"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Sair</span>
-              </Button>
             </div>
           </div>
         </div>
@@ -96,7 +89,7 @@ const Settings = () => {
                       Email
                     </label>
                     <div className="mt-1 text-foreground">
-                      {user?.email}
+                      {user?.emailAddresses[0]?.emailAddress}
                     </div>
                   </div>
                   
@@ -105,7 +98,7 @@ const Settings = () => {
                       Data de cadastro
                     </label>
                     <div className="mt-1 text-foreground">
-                      {user?.created_at ? new Date(user.created_at).toLocaleDateString('pt-BR') : 'N/A'}
+                      {user?.createdAt ? new Date(user.createdAt).toLocaleDateString('pt-BR') : 'N/A'}
                     </div>
                   </div>
                 </CardContent>
@@ -137,7 +130,7 @@ const Settings = () => {
                 <CardContent>
                   <Button
                     variant="destructive"
-                    onClick={signOut}
+                    onClick={() => signOut({ redirectUrl: '/' })}
                     className="flex items-center space-x-2"
                   >
                     <LogOut className="w-4 h-4" />

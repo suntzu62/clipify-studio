@@ -1,13 +1,13 @@
-import { SignIn } from '@clerk/clerk-react';
+import { SignUp } from '@clerk/clerk-react';
 
-const Login = () => {
+const Register = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
-        <SignIn fallbackRedirectUrl="/dashboard" />
+        <SignUp fallbackRedirectUrl="/dashboard" />
       </div>
     </div>
   );
 };
 
-export default Login;
+export default Register;

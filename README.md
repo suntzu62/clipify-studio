@@ -203,33 +203,51 @@ npm run deploy:workers
 3. Commit suas mudanças (`git commit -m 'Add nova feature'`)
 4. Push para a branch (`git push origin feature/nova-feature`)
 
-## 🔐 Autenticação com Clerk (Next.js 14)
+## 🔐 Autenticação com Clerk (React + Vite)
 
-Um app Next.js com autenticação via Clerk foi adicionado em `cortai-next/`.
+Este projeto usa Clerk para autenticação com Google OAuth.
 
-Passos para configurar:
+### Configuração:
 
-1. Crie um projeto no Clerk (https://dashboard.clerk.com/) e copie as chaves.
-2. No arquivo `.env.local` dentro de `cortai-next/`, defina:
+1. **Crie uma conta no Clerk**:
+   - Acesse https://clerk.com/ e crie um projeto
+   - Em "Social Providers", habilite o Google
 
+2. **Configure as variáveis de ambiente**:
+   ```bash
+   # .env.local
+   VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_key
+   ```
+
+3. **URLs autorizadas no Clerk Dashboard**:
+   - JavaScript origins: sua URL do app (ex: https://preview-url.lovable.app)
+   - Redirect URIs: sua URL do app
+
+### Funcionalidades implementadas:
+
+- **Rotas protegidas**: `/dashboard`, `/projects`, `/settings`
+- **Componentes**: `<SignIn />`, `<SignUp />`, `<UserButton />`, `<SignedIn />`, `<SignedOut />`
+- **Header dinâmico**: Exibe botões de login/cadastro ou perfil do usuário
+- **Redirecionamento**: Usuários não autenticados são enviados para `/auth/login`
+
+### Uso dos componentes Clerk:
+
+```tsx
+import { SignedIn, SignedOut, UserButton, SignInButton } from '@clerk/clerk-react';
+
+// Proteção de rotas
+<ProtectedRoute><Dashboard /></ProtectedRoute>
+
+// Header com autenticação
+<SignedOut>
+  <SignInButton mode="modal">
+    <Button>Entrar</Button>
+  </SignInButton>
+</SignedOut>
+<SignedIn>
+  <UserButton />
+</SignedIn>
 ```
-CLERK_PUBLISHABLE_KEY=pk_test_xxx
-CLERK_SECRET_KEY=sk_test_xxx
-```
-
-3. Rode o app Next.js localmente:
-
-```
-cd cortai-next
-npm install
-npm run dev
-```
-
-Rotas principais:
-- `/auth/login` e `/auth/register`: páginas de autenticação (shadcn/ui + Clerk)
-- `/dashboard`: protegido; exibe nome/e-mail e botão de sair
-
-Redirecionamento: usuários não autenticados são enviados para `/auth/login` pelo `middleware.ts`.
 
 5. Abra um Pull Request
 

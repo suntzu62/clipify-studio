@@ -1,109 +1,118 @@
-import { Button } from "@/components/ui/button";
-import { Menu, X } from "lucide-react";
-import { useState } from "react";
-import { useAuth } from "@/contexts/AuthContext";
-import { Link } from "react-router-dom";
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Menu, X } from 'lucide-react';
+import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from '@clerk/clerk-react';
 
 const Header = () => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { session, signOut } = useAuth();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const toggleMobileMenu = () => {
+    setIsMobileMenuOpen(!isMobileMenuOpen);
+  };
 
   return (
-    <header className="fixed top-0 w-full z-50 bg-background/80 backdrop-blur-lg border-b border-border/50">
-      <div className="container mx-auto px-6">
-        <div className="flex items-center justify-between h-16">
+    <header className="bg-background/80 backdrop-blur-sm border-b sticky top-0 z-50">
+      <div className="container mx-auto px-4 py-4">
+        <div className="flex items-center justify-between">
           {/* Logo */}
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">
-              <span className="text-white font-bold text-sm">C</span>
+          <Link to="/" className="flex items-center space-x-2">
+            <div className="h-8 w-8 bg-primary rounded-lg flex items-center justify-center">
+              <span className="text-primary-foreground text-lg font-bold">C</span>
             </div>
-            <span className="text-xl font-bold text-foreground">Cortaí</span>
-          </div>
+            <span className="text-xl font-bold">Cortaí</span>
+          </Link>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-8">
-            <a href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
+            <Link to="/#features" className="text-foreground/80 hover:text-foreground transition-colors">
               Recursos
-            </a>
-            <a href="#pricing" className="text-muted-foreground hover:text-foreground transition-colors">
+            </Link>
+            <Link to="/#pricing" className="text-foreground/80 hover:text-foreground transition-colors">
               Preços
-            </a>
-            <a href="#about" className="text-muted-foreground hover:text-foreground transition-colors">
-              Sobre
-            </a>
-            <a href="#contact" className="text-muted-foreground hover:text-foreground transition-colors">
-              Contato
-            </a>
+            </Link>
+            <Link to="/#how-it-works" className="text-foreground/80 hover:text-foreground transition-colors">
+              Como Funciona
+            </Link>
           </nav>
 
-          {/* Desktop Actions */}
+          {/* Desktop Auth Buttons */}
           <div className="hidden md:flex items-center space-x-4">
-            {session ? (
-              <>
-                <Link to="/dashboard">
-                  <Button variant="ghost">Dashboard</Button>
-                </Link>
-                <Button variant="ghost" onClick={signOut}>
-                  Sair
-                </Button>
-              </>
-            ) : (
-              <>
-                <Link to="/auth/login">
-                  <Button variant="ghost">Entrar</Button>
-                </Link>
-                <Link to="/auth/login">
-                  <Button variant="default">Comece Grátis</Button>
-                </Link>
-              </>
-            )}
+            <SignedOut>
+              <SignInButton mode="modal">
+                <Button variant="ghost">Entrar</Button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <Button>Comece Grátis</Button>
+              </SignUpButton>
+            </SignedOut>
+            <SignedIn>
+              <Link to="/dashboard">
+                <Button variant="ghost">Dashboard</Button>
+              </Link>
+              <UserButton />
+            </SignedIn>
           </div>
 
           {/* Mobile Menu Button */}
           <button
             className="md:hidden"
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            onClick={toggleMobileMenu}
+            aria-label="Toggle mobile menu"
           >
-            {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
 
         {/* Mobile Menu */}
-        {isMenuOpen && (
-          <div className="md:hidden border-t border-border/50">
-            <nav className="flex flex-col space-y-4 py-4">
-              <a href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
+        {isMobileMenuOpen && (
+          <div className="md:hidden mt-4 py-4 border-t">
+            <nav className="flex flex-col space-y-4">
+              <Link 
+                to="/#features" 
+                className="text-foreground/80 hover:text-foreground transition-colors"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
                 Recursos
-              </a>
-              <a href="#pricing" className="text-muted-foreground hover:text-foreground transition-colors">
+              </Link>
+              <Link 
+                to="/#pricing" 
+                className="text-foreground/80 hover:text-foreground transition-colors"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
                 Preços
-              </a>
-              <a href="#about" className="text-muted-foreground hover:text-foreground transition-colors">
-                Sobre
-              </a>
-              <a href="#contact" className="text-muted-foreground hover:text-foreground transition-colors">
-                Contato
-              </a>
-              <div className="flex flex-col space-y-2 pt-4">
-                {session ? (
-                  <>
-                    <Link to="/dashboard">
-                      <Button variant="ghost" className="w-full justify-start">Dashboard</Button>
-                    </Link>
-                    <Button variant="ghost" onClick={signOut} className="w-full justify-start">
-                      Sair
+              </Link>
+              <Link 
+                to="/#how-it-works" 
+                className="text-foreground/80 hover:text-foreground transition-colors"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                Como Funciona
+              </Link>
+              
+              <div className="flex flex-col space-y-2 pt-4 border-t">
+                <SignedOut>
+                  <SignInButton mode="modal">
+                    <Button variant="ghost" className="w-full justify-start">
+                      Entrar
                     </Button>
-                  </>
-                ) : (
-                  <>
-                    <Link to="/auth/login">
-                      <Button variant="ghost" className="w-full justify-start">Entrar</Button>
-                    </Link>
-                    <Link to="/auth/login">
-                      <Button variant="default" className="w-full justify-start">Comece Grátis</Button>
-                    </Link>
-                  </>
-                )}
+                  </SignInButton>
+                  <SignUpButton mode="modal">
+                    <Button className="w-full justify-start">
+                      Comece Grátis
+                    </Button>
+                  </SignUpButton>
+                </SignedOut>
+                <SignedIn>
+                  <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Button variant="ghost" className="w-full justify-start">
+                      Dashboard
+                    </Button>
+                  </Link>
+                  <div className="px-3 py-2">
+                    <UserButton />
+                  </div>
+                </SignedIn>
               </div>
             </nav>
           </div>
