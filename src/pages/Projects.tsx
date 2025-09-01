@@ -1,11 +1,35 @@
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LogOut, Play, Settings, Video, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import NewProjectDialog from '@/components/projects/NewProjectDialog';
+import { listProjects, type Project } from '@/services/projects';
+import { useToast } from '@/hooks/use-toast';
 
 const Projects = () => {
   const { user, signOut } = useAuth();
+  const { toast } = useToast();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<Project[]>([]);
+
+  const fetchProjects = async () => {
+    try {
+      setLoading(true);
+      const data = await listProjects();
+      setItems(data);
+    } catch (err: any) {
+      toast({ title: 'Erro ao carregar projetos', description: err?.message ?? 'Tente novamente.', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProjects();
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -78,26 +102,55 @@ const Projects = () => {
                   Gerencie todos os seus projetos de conversão de vídeos
                 </p>
               </div>
-              <Button className="flex items-center space-x-2">
+              <Button className="flex items-center space-x-2" onClick={() => setDialogOpen(true)}>
                 <Plus className="w-4 h-4" />
                 <span>Novo Projeto</span>
               </Button>
             </div>
 
-            {/* Empty State */}
-            <Card className="text-center py-12">
-              <CardContent>
-                <Video className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                <CardTitle className="mb-2">Nenhum projeto ainda</CardTitle>
-                <CardDescription className="mb-6">
-                  Comece criando seu primeiro projeto para transformar vídeos do YouTube em clipes virais
-                </CardDescription>
-                <Button className="flex items-center space-x-2 mx-auto">
-                  <Plus className="w-4 h-4" />
-                  <span>Criar Primeiro Projeto</span>
-                </Button>
-              </CardContent>
-            </Card>
+            {loading ? (
+              <Card className="text-center py-12">
+                <CardContent>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                  <CardDescription>Carregando projetos...</CardDescription>
+                </CardContent>
+              </Card>
+            ) : items.length === 0 ? (
+              <Card className="text-center py-12">
+                <CardContent>
+                  <Video className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+                  <CardTitle className="mb-2">Nenhum projeto ainda</CardTitle>
+                  <CardDescription className="mb-6">
+                    Comece criando seu primeiro projeto para transformar vídeos do YouTube em clipes virais
+                  </CardDescription>
+                  <Button className="flex items-center space-x-2 mx-auto" onClick={() => setDialogOpen(true)}>
+                    <Plus className="w-4 h-4" />
+                    <span>Criar Primeiro Projeto</span>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {items.map((p) => (
+                  <Card key={p.id}>
+                    <CardHeader>
+                      <CardTitle className="text-base">{p.title || 'Projeto sem título'}</CardTitle>
+                      <CardDescription className="truncate">{p.youtube_url}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-sm text-muted-foreground">Status: {p.status}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Criado em {new Date(p.created_at).toLocaleString('pt-BR')}</div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            <NewProjectDialog
+              open={dialogOpen}
+              onOpenChange={setDialogOpen}
+              onCreated={fetchProjects}
+            />
           </main>
         </div>
       </div>

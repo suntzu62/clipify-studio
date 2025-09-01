@@ -123,6 +123,10 @@ VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
+# Clerk (para a app Next.js em cortai-next)
+CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+CLERK_SECRET_KEY=your_clerk_secret_key
+
 # Autenticação (escolha uma)
 CLERK_PUBLISHABLE_KEY=your_clerk_key
 # ou
@@ -198,6 +202,35 @@ npm run deploy:workers
 2. Crie uma branch (`git checkout -b feature/nova-feature`)
 3. Commit suas mudanças (`git commit -m 'Add nova feature'`)
 4. Push para a branch (`git push origin feature/nova-feature`)
+
+## 🔐 Autenticação com Clerk (Next.js 14)
+
+Um app Next.js com autenticação via Clerk foi adicionado em `cortai-next/`.
+
+Passos para configurar:
+
+1. Crie um projeto no Clerk (https://dashboard.clerk.com/) e copie as chaves.
+2. No arquivo `.env.local` dentro de `cortai-next/`, defina:
+
+```
+CLERK_PUBLISHABLE_KEY=pk_test_xxx
+CLERK_SECRET_KEY=sk_test_xxx
+```
+
+3. Rode o app Next.js localmente:
+
+```
+cd cortai-next
+npm install
+npm run dev
+```
+
+Rotas principais:
+- `/auth/login` e `/auth/register`: páginas de autenticação (shadcn/ui + Clerk)
+- `/dashboard`: protegido; exibe nome/e-mail e botão de sair
+
+Redirecionamento: usuários não autenticados são enviados para `/auth/login` pelo `middleware.ts`.
+
 5. Abra um Pull Request
 
 ## 📝 Licença
