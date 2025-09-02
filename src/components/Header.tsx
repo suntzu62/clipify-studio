@@ -50,6 +50,12 @@ const Header = () => {
               <Link to="/dashboard">
                 <Button variant="ghost">Dashboard</Button>
               </Link>
+              <Link to="/projects">
+                <Button variant="ghost">Projetos</Button>
+              </Link>
+              <Link to="/billing">
+                <Button variant="ghost">Billing</Button>
+              </Link>
               <UserButton />
             </SignedIn>
           </div>
@@ -107,6 +113,16 @@ const Header = () => {
                   <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)}>
                     <Button variant="ghost" className="w-full justify-start">
                       Dashboard
+                    </Button>
+                  </Link>
+                  <Link to="/projects" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Button variant="ghost" className="w-full justify-start">
+                      Projetos
+                    </Button>
+                  </Link>
+                  <Link to="/billing" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Button variant="ghost" className="w-full justify-start">
+                      Billing
                     </Button>
                   </Link>
                   <div className="px-3 py-2">
