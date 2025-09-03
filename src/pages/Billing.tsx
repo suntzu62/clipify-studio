@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useUser } from "@clerk/clerk-react";
+import { useAuth } from "@clerk/clerk-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -17,18 +17,21 @@ import {
 } from "@/lib/billing";
 
 const Billing = () => {
-  const { user } = useUser();
+  const { getToken, isSignedIn } = useAuth();
   const { toast } = useToast();
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState<string | null>(null);
 
   const loadUsage = async () => {
-    if (!user) return;
+    if (!isSignedIn) return;
     
     try {
       setLoading(true);
-      const usageData = await getUsage(user.id);
+      const token = await getToken();
+      if (!token) throw new Error("No session token available");
+      
+      const usageData = await getUsage(token);
       setUsage(usageData);
     } catch (error) {
       console.error("Error loading usage:", error);
@@ -44,14 +47,17 @@ const Billing = () => {
 
   useEffect(() => {
     loadUsage();
-  }, [user]);
+  }, [isSignedIn]);
 
   const handleCheckout = async (plan: "pro" | "scale") => {
-    if (!user) return;
+    if (!isSignedIn) return;
     
     try {
       setCreating(plan);
-      const { url } = await createCheckoutSession(plan, user.id);
+      const token = await getToken();
+      if (!token) throw new Error("No session token available");
+      
+      const { url } = await createCheckoutSession(plan, token);
       
       // Open in new tab
       window.open(url, '_blank');
@@ -73,10 +79,13 @@ const Billing = () => {
   };
 
   const handleCustomerPortal = async () => {
-    if (!user) return;
+    if (!isSignedIn) return;
     
     try {
-      const { url } = await createCustomerPortalSession(user.id);
+      const token = await getToken();
+      if (!token) throw new Error("No session token available");
+      
+      const { url } = await createCustomerPortalSession(token);
       
       // Open in new tab
       window.open(url, '_blank');

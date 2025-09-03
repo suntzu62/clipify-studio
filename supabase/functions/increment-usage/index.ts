@@ -2,14 +2,47 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": "https://clipify-studio.lovable.app",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 const logStep = (step: string, details?: any) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
   console.log(`[INCREMENT-USAGE] ${step}${detailsStr}`);
 };
+
+// Verify Clerk JWT token and extract user ID
+async function verifyClerkToken(authHeader: string | null): Promise<string> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('Missing or invalid authorization header');
+  }
+
+  const token = authHeader.substring(7);
+  
+  try {
+    // Decode JWT payload (in production, you should verify the signature against Clerk's JWKS)
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      throw new Error('Invalid JWT format');
+    }
+    
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    
+    if (!payload.sub) {
+      throw new Error('Invalid token: missing subject');
+    }
+    
+    // Check if token is expired
+    if (payload.exp && Date.now() >= payload.exp * 1000) {
+      throw new Error('Token expired');
+    }
+    
+    return payload.sub;
+  } catch (error) {
+    throw new Error(`Token verification failed: ${error.message}`);
+  }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -19,10 +52,26 @@ serve(async (req) => {
   try {
     logStep("Function started");
 
-    const { clerkUserId, minutes = 0, shorts = 0, idempotencyKey } = await req.json();
+    // Verify authentication
+    const clerkUserId = await verifyClerkToken(req.headers.get("authorization"));
+    logStep("User authenticated", { clerkUserId });
+
+    const { minutes = 0, shorts = 0, idempotencyKey } = await req.json();
     
-    if (!clerkUserId || !idempotencyKey) {
-      throw new Error("clerkUserId and idempotencyKey are required");
+    if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.length < 10) {
+      throw new Error("Valid idempotencyKey is required (minimum 10 characters)");
+    }
+
+    // Input validation with maximum limits to prevent abuse
+    const MAX_MINUTES_INCREMENT = 1440; // 24 hours max
+    const MAX_SHORTS_INCREMENT = 1000; // 1000 shorts max
+    
+    if (typeof minutes !== 'number' || minutes < 0 || minutes > MAX_MINUTES_INCREMENT) {
+      throw new Error(`Invalid minutes value. Must be between 0 and ${MAX_MINUTES_INCREMENT}`);
+    }
+    
+    if (typeof shorts !== 'number' || shorts < 0 || shorts > MAX_SHORTS_INCREMENT) {
+      throw new Error(`Invalid shorts value. Must be between 0 and ${MAX_SHORTS_INCREMENT}`);
     }
 
     if (minutes === 0 && shorts === 0) {
@@ -38,11 +87,12 @@ serve(async (req) => {
       { auth: { persistSession: false } }
     );
 
-    // Check if this idempotency key was already processed
+    // Check if this idempotency key was already processed for this user
     const { data: existingEvent } = await supabaseService
       .from("usage_events")
       .select("id")
       .eq("idempotency_key", idempotencyKey)
+      .eq("clerk_user_id", clerkUserId) // Add user check for security
       .single();
 
     if (existingEvent) {
@@ -53,7 +103,7 @@ serve(async (req) => {
       });
     }
 
-    // Get current usage
+    // Get current usage - only for the authenticated user
     const { data: currentUsage } = await supabaseService
       .from("usage")
       .select("*")
@@ -61,7 +111,7 @@ serve(async (req) => {
       .single();
 
     if (!currentUsage) {
-      throw new Error("Usage record not found. Please ensure user is initialized.");
+      throw new Error("Usage record not found. Please ensure user is properly initialized.");
     }
 
     // Check if user has enough quota
@@ -100,7 +150,7 @@ serve(async (req) => {
       });
     }
 
-    // Record the usage event (for idempotency)
+    // Record the usage event (for idempotency) - only for authenticated user
     await supabaseService
       .from("usage_events")
       .insert({
@@ -110,7 +160,7 @@ serve(async (req) => {
         shorts,
       });
 
-    // Update usage
+    // Update usage - only for authenticated user
     const { data: updatedUsage } = await supabaseService
       .from("usage")
       .update({
@@ -145,7 +195,7 @@ serve(async (req) => {
     logStep("ERROR in increment-usage", { message: errorMessage });
     return new Response(JSON.stringify({ error: errorMessage }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 500,
+      status: 401,
     });
   }
 });

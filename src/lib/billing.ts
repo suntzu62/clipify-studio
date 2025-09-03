@@ -18,11 +18,14 @@ export interface BillingError {
   remaining?: number;
 }
 
-export const createCheckoutSession = async (plan: "pro" | "scale", clerkUserId: string) => {
-  console.log("Creating checkout session", { plan, clerkUserId });
+export const createCheckoutSession = async (plan: "pro" | "scale", sessionToken: string) => {
+  console.log("Creating checkout session", { plan });
   
   const { data, error } = await supabase.functions.invoke("create-checkout", {
-    body: { plan, clerkUserId },
+    body: { plan },
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+    },
   });
 
   if (error) {
@@ -33,11 +36,14 @@ export const createCheckoutSession = async (plan: "pro" | "scale", clerkUserId: 
   return data;
 };
 
-export const createCustomerPortalSession = async (clerkUserId: string) => {
-  console.log("Creating customer portal session", { clerkUserId });
+export const createCustomerPortalSession = async (sessionToken: string) => {
+  console.log("Creating customer portal session");
   
   const { data, error } = await supabase.functions.invoke("customer-portal", {
-    body: { clerkUserId },
+    body: {},
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+    },
   });
 
   if (error) {
@@ -48,11 +54,14 @@ export const createCustomerPortalSession = async (clerkUserId: string) => {
   return data;
 };
 
-export const getUsage = async (clerkUserId: string): Promise<UsageData> => {
-  console.log("Getting usage data", { clerkUserId });
+export const getUsage = async (sessionToken: string): Promise<UsageData> => {
+  console.log("Getting usage data");
   
   const { data, error } = await supabase.functions.invoke("get-usage", {
-    body: { clerkUserId },
+    body: {},
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+    },
   });
 
   if (error) {
@@ -64,18 +73,20 @@ export const getUsage = async (clerkUserId: string): Promise<UsageData> => {
 };
 
 export const incrementUsage = async (
-  clerkUserId: string, 
+  sessionToken: string,
   usage: { minutes?: number; shorts?: number }, 
   idempotencyKey: string
 ) => {
-  console.log("Incrementing usage", { clerkUserId, usage, idempotencyKey });
+  console.log("Incrementing usage", { usage, idempotencyKey });
   
   const { data, error } = await supabase.functions.invoke("increment-usage", {
     body: { 
-      clerkUserId, 
       minutes: usage.minutes || 0, 
       shorts: usage.shorts || 0, 
       idempotencyKey 
+    },
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
     },
   });
 
@@ -88,11 +99,11 @@ export const incrementUsage = async (
 };
 
 export const ensureQuota = async (
-  clerkUserId: string, 
+  sessionToken: string,
   neededMinutes: number = 0, 
   neededShorts: number = 0
 ): Promise<void> => {
-  const usage = await getUsage(clerkUserId);
+  const usage = await getUsage(sessionToken);
   
   if (neededMinutes > usage.minutesRemaining) {
     throw new Error(`Insufficient minutes quota. Need ${neededMinutes}, have ${usage.minutesRemaining}`);
