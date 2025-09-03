@@ -1,5 +1,9 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@clerk/clerk-react";
+import { getAuthHeader } from "@/lib/auth-token";
+import { getUsage as getUsageClient, ensureQuota, incrementUsage } from "@/lib/usage";
+import { createCheckout, openPortal } from "@/lib/stripe";
+import { initPosthog } from "@/lib/posthog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -46,8 +50,16 @@ const Billing = () => {
   };
 
   useEffect(() => {
+    initPosthog();
     loadUsage();
   }, [isSignedIn]);
+
+  // Exemplo de uso com novos helpers
+  const onSubscribePro = async () => {
+    const headers = await getAuthHeader(getToken);
+    const { url } = await createCheckout('pro', headers);
+    window.open(url, '_blank');
+  };
 
   const handleCheckout = async (plan: "pro" | "scale") => {
     if (!isSignedIn) return;

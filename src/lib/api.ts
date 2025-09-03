@@ -1,0 +1,12 @@
+import { functions } from './supabase';
+
+export async function invokeFn<T = any>(
+  name: string,
+  opts: { method?: 'GET' | 'POST'; body?: any; headers?: Record<string, string> } = {}
+): Promise<T> {
+  const { method = 'POST', body, headers = {} } = opts;
+  const { data, error } = await functions.invoke<T>(name, { method, body, headers });
+  if (error) throw new Error(error.message);
+  return data as T;
+}
+
