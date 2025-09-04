@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --radius: 8px;
+}
+
+html, body { height: 100%; }
+body { @apply bg-background text-foreground; }
+
+.container { @apply mx-auto px-6; }
+

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+coverage/
+
+# Env and secrets
+.env
+**/.env
+workers/.env
+clipify-studio/.env
+
+# Logs and PIDs
+logs/
+.dev.pid
+
+# Editors/OS
+.vscode/
+.DS_Store
+Thumbs.db
