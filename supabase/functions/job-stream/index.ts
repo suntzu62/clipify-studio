@@ -7,11 +7,20 @@ const corsHeaders = {
 };
 
 function requireAuth(req: Request) {
+  // Check for token in Authorization header
   const auth = req.headers.get('authorization');
-  if (!auth || !auth.startsWith('Bearer ')) {
-    return { ok: false, res: new Response(JSON.stringify({ error: 'unauthorized' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }) };
+  if (auth && auth.startsWith('Bearer ')) {
+    return { ok: true };
   }
-  return { ok: true };
+  
+  // Check for token in query parameters (for SSE EventSource compatibility)
+  const url = new URL(req.url);
+  const token = url.searchParams.get('token');
+  if (token) {
+    return { ok: true };
+  }
+  
+  return { ok: false, res: new Response(JSON.stringify({ error: 'unauthorized' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }) };
 }
 
 serve(async (req) => {

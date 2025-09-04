@@ -1,11 +1,132 @@
 import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { useUser } from '@clerk/clerk-react';
-import { LogOut, Play, Settings, Video } from 'lucide-react';
+import { Dialog, DialogTrigger } from '@/components/ui/dialog';
+import { Progress } from '@/components/ui/progress';
+import { useUser, useAuth } from '@clerk/clerk-react';
+import { LogOut, Play, Settings, Video, Plus } from 'lucide-react';
+import { ClipCard } from '@/components/ClipCard';
+import { NewProjectForm } from '@/components/NewProjectForm';
+import { EmptyState } from '@/components/EmptyState';
+import { enqueuePipeline, getJobStatus, Job } from '@/lib/jobs-api';
+import { getUserJobs, saveUserJob, updateJobStatus } from '@/lib/storage';
+import { getUsage, UsageDTO } from '@/lib/usage';
+import { getAuthHeader } from '@/lib/auth-token';
+import { useToast } from '@/hooks/use-toast';
 
 const Dashboard = () => {
   const { user } = useUser();
+  const { getToken } = useAuth();
+  const { toast } = useToast();
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [usage, setUsage] = useState<UsageDTO | null>(null);
+  const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load jobs and usage on mount
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    const loadData = async () => {
+      try {
+        // Load jobs from localStorage
+        const userJobs = getUserJobs(user.id);
+        setJobs(userJobs);
+        
+        // Load usage data
+        const headers = await getAuthHeader(getToken);
+        const usageData = await getUsage(headers);
+        setUsage(usageData);
+        
+        // Poll for job status updates for active jobs
+        const activeJobs = userJobs.filter(job => 
+          job.status === 'queued' || job.status === 'active'
+        );
+        
+        if (activeJobs.length > 0) {
+          pollJobStatuses(activeJobs);
+        }
+      } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
+  }, [user?.id, getToken]);
+
+  const pollJobStatuses = async (activeJobs: Job[]) => {
+    try {
+      const headers = await getAuthHeader(getToken);
+      
+      for (const job of activeJobs) {
+        try {
+          const status = await getJobStatus(job.id, getToken);
+          if (status.status !== job.status || status.progress !== job.progress) {
+            updateJobStatus(user!.id, job.id, {
+              status: status.status,
+              progress: status.progress,
+              error: status.error
+            });
+            
+            // Update local state
+            setJobs(prev => prev.map(j => 
+              j.id === job.id ? { ...j, ...status } : j
+            ));
+          }
+        } catch (error) {
+          console.error(`Failed to get status for job ${job.id}:`, error);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to poll job statuses:', error);
+    }
+  };
+
+  const handleCreateProject = async (youtubeUrl: string, neededMinutes: number, targetDuration: string) => {
+    try {
+      const result = await enqueuePipeline(youtubeUrl, neededMinutes, targetDuration, getToken);
+      
+      const newJob: Job = {
+        id: result.jobId || result.id,
+        youtubeUrl,
+        status: 'queued',
+        progress: 0,
+        createdAt: new Date().toISOString(),
+        neededMinutes,
+        targetDuration
+      };
+      
+      // Save to localStorage
+      saveUserJob(user!.id, newJob);
+      
+      // Update local state
+      setJobs(prev => [newJob, ...prev]);
+      
+      toast({
+        title: "Projeto criado",
+        description: "Seu projeto foi criado e está na fila de processamento"
+      });
+    } catch (error: any) {
+      console.error('Failed to create project:', error);
+      toast({
+        title: "Erro ao criar projeto",
+        description: error.message || "Tente novamente",
+        variant: "destructive"
+      });
+      throw error;
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -61,12 +182,51 @@ const Dashboard = () => {
           {/* Main Content */}
           <main className="flex-1">
             <div className="mb-8">
-              <h1 className="text-3xl font-bold text-foreground mb-2">
-                Bem-vindo ao Cortaí!
-              </h1>
-              <p className="text-muted-foreground">
-                Transforme seus vídeos do YouTube em clipes virais para redes sociais
-              </p>
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+                <div>
+                  <h1 className="text-3xl font-bold text-foreground mb-2">
+                    Bem-vindo ao Cortaí!
+                  </h1>
+                  <p className="text-muted-foreground">
+                    Transforme seus vídeos do YouTube em clipes virais para redes sociais
+                  </p>
+                </div>
+                
+                <Dialog open={isNewProjectOpen} onOpenChange={setIsNewProjectOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="gap-2">
+                      <Plus className="w-4 h-4" />
+                      Novo Projeto
+                    </Button>
+                  </DialogTrigger>
+                  <NewProjectForm 
+                    onSubmit={handleCreateProject}
+                    onClose={() => setIsNewProjectOpen(false)}
+                  />
+                </Dialog>
+              </div>
+              
+              {/* Usage Bar */}
+              {usage && (
+                <Card className="mb-6">
+                  <CardContent className="pt-6">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-muted-foreground">Minutos Usados</span>
+                      <span className="font-medium">
+                        {usage.minutesUsed} / {usage.minutesQuota}
+                      </span>
+                    </div>
+                    <Progress 
+                      value={(usage.minutesUsed / usage.minutesQuota) * 100} 
+                      className="h-2 mb-2"
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Plano: {usage.plan}</span>
+                      <span>{usage.remaining} minutos restantes</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
@@ -78,7 +238,7 @@ const Dashboard = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">0</div>
+                  <div className="text-2xl font-bold">{jobs.length}</div>
                 </CardContent>
               </Card>
 
@@ -89,7 +249,9 @@ const Dashboard = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">0</div>
+                  <div className="text-2xl font-bold">
+                    {jobs.filter(j => j.status === 'completed').length}
+                  </div>
                 </CardContent>
               </Card>
 
@@ -100,25 +262,26 @@ const Dashboard = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">0</div>
+                  <div className="text-2xl font-bold">
+                    {usage?.minutesUsed || 0}
+                  </div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Getting Started */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Comece Agora</CardTitle>
-                <CardDescription>
-                  Crie seu primeiro projeto e transforme um vídeo do YouTube em clipes virais
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button className="w-full sm:w-auto">
-                  Criar Primeiro Projeto
-                </Button>
-              </CardContent>
-            </Card>
+            {/* Jobs List */}
+            <div>
+              <h2 className="text-xl font-semibold mb-4">Meus Projetos</h2>
+              {jobs.length === 0 ? (
+                <EmptyState onAction={() => setIsNewProjectOpen(true)} />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {jobs.map((job) => (
+                    <ClipCard key={job.id} job={job} />
+                  ))}
+                </div>
+              )}
+            </div>
           </main>
         </div>
       </div>

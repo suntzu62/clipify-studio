@@ -10,7 +10,7 @@ export type UsageDTO = {
 };
 
 export async function getUsage(headers?: Record<string, string>) {
-  return invokeFn<UsageDTO>('usage', { method: 'GET', headers });
+  return invokeFn<UsageDTO>('get-usage', { method: 'GET', headers });
 }
 
 export async function ensureQuota(neededMinutes: number, headers?: Record<string, string>) {
@@ -25,7 +25,7 @@ export async function incrementUsage(
   { idempotencyKey }: { idempotencyKey: string },
   headers?: Record<string, string>
 ) {
-  return invokeFn<UsageDTO>('usage', {
+  return invokeFn<UsageDTO>('increment-usage', {
     method: 'POST',
     body: { minutes, shorts, idempotencyKey },
     headers,
