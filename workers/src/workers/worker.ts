@@ -1,5 +1,7 @@
 import { Worker, Job } from 'bullmq';
 import { connection } from '../redis';
+import { QUEUES } from '../queues';
+import { runIngest } from './ingest';
 import pino from 'pino';
 
 const log = pino({ name: 'worker' });
@@ -8,7 +10,12 @@ export const makeWorker = (queueName: string) =>
   new Worker(
     queueName,
     async (job: Job) => {
-      // Simula processamento e reporta progress 0→100
+      // Route to specific worker implementations
+      if (queueName === QUEUES.INGEST) {
+        return await runIngest(job);
+      }
+      
+      // Fallback: simulate processing for other queues
       for (let p = 0; p <= 100; p += 20) {
         await job.updateProgress(p);
         await new Promise((r) => setTimeout(r, 200));
