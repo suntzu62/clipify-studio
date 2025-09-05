@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import fastifySSE from 'fastify-sse-v2';
 import { FlowProducer, Queue, QueueEvents } from 'bullmq';
 import pino from 'pino';
+import { randomUUID as crypto } from 'crypto';
 import { connection } from './redis';
 import { QUEUES } from './queues';
 
@@ -36,40 +37,43 @@ export async function start() {
     }
 
     const flow = new FlowProducer({ connection });
+    const rootId = crypto.randomUUID();
+    
     const tree = await flow.add({
       name: 'pipeline',
       queueName: QUEUES.INGEST,
-      data: { youtubeUrl, meta: body.meta || {} },
+      opts: { jobId: rootId },
+      data: { youtubeUrl, meta: body.meta || {}, rootId },
       children: [
         {
           name: 'transcribe',
           queueName: QUEUES.TRANSCRIBE,
-          data: {},
+          data: { rootId },
           children: [
             {
               name: 'scenes',
               queueName: QUEUES.SCENES,
-              data: {},
+              data: { rootId },
               children: [
                 {
                   name: 'rank',
                   queueName: QUEUES.RANK,
-                  data: {},
+                  data: { rootId },
                   children: [
                     {
                       name: 'render',
                       queueName: QUEUES.RENDER,
-                      data: {},
+                      data: { rootId },
                       children: [
                         {
                           name: 'texts',
                           queueName: QUEUES.TEXTS,
-                          data: {},
+                          data: { rootId },
                           children: [
                             {
                               name: 'export',
                               queueName: QUEUES.EXPORT,
-                              data: {},
+                              data: { rootId },
                             },
                           ],
                         },

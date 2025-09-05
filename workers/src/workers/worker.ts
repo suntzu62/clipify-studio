@@ -2,6 +2,7 @@ import { Worker, Job } from 'bullmq';
 import { connection } from '../redis';
 import { QUEUES } from '../queues';
 import { runIngest } from './ingest';
+import { runTranscribe } from './transcribe';
 import pino from 'pino';
 
 const log = pino({ name: 'worker' });
@@ -13,6 +14,9 @@ export const makeWorker = (queueName: string) =>
       // Route to specific worker implementations
       if (queueName === QUEUES.INGEST) {
         return await runIngest(job);
+      }
+      if (queueName === QUEUES.TRANSCRIBE) {
+        return await runTranscribe(job);
       }
       
       // Fallback: simulate processing for other queues

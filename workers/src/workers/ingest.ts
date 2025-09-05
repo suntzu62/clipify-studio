@@ -10,6 +10,7 @@ import pino from 'pino';
 const log = pino({ name: 'ingest' });
 
 interface IngestResult {
+  rootId: string;
   bucket: string;
   sourceKey: string;
   infoKey: string;
@@ -27,9 +28,10 @@ interface VideoInfo {
 
 export async function runIngest(job: Job): Promise<IngestResult> {
   const { youtubeUrl } = job.data;
+  const rootId = job.data.rootId || job.id!;
   const jobId = job.id!;
   
-  log.info({ jobId, youtubeUrl }, 'Ingest started');
+  log.info({ jobId, rootId, youtubeUrl }, 'Ingest started');
   
   // Create temp directory
   const tempDir = path.join(os.tmpdir(), `cortai-${jobId}`);
@@ -53,7 +55,7 @@ export async function runIngest(job: Job): Promise<IngestResult> {
     
     // Step 3: Upload to Supabase Storage (85-100%)
     log.info({ jobId }, 'UploadStarted');
-    const result = await uploadToStorage(videoPath, infoPath, jobId, job, info);
+    const result = await uploadToStorage(videoPath, infoPath, rootId, job, info);
     log.info({ jobId }, 'UploadOk');
     
     await job.updateProgress(100);
@@ -208,7 +210,7 @@ async function downloadVideo(
 async function uploadToStorage(
   videoPath: string,
   infoPath: string,
-  jobId: string,
+  rootId: string,
   job: Job,
   info: VideoInfo
 ): Promise<IngestResult> {
@@ -225,8 +227,8 @@ async function uploadToStorage(
   // Update progress to 85% (start of upload)
   await job.updateProgress(85);
   
-  const sourceKey = `projects/${jobId}/source.mp4`;
-  const infoKey = `projects/${jobId}/info.json`;
+  const sourceKey = `projects/${rootId}/source.mp4`;
+  const infoKey = `projects/${rootId}/info.json`;
   
   try {
     // Upload video file
@@ -258,6 +260,7 @@ async function uploadToStorage(
     }
     
     return {
+      rootId,
       bucket,
       sourceKey,
       infoKey,
