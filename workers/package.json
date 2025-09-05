@@ -1,0 +1,22 @@
+{
+  "name": "cortai-workers",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "enqueue:demo": "tsx scripts/enqueue-demo.ts"
+  },
+  "dependencies": {
+    "bullmq": "^5.58.4",
+    "ioredis": "^5.4.1",
+    "pino": "^9.0.0",
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.26.2",
+    "fastify-sse-v2": "^4.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.15.7",
+    "typescript": "^5.5.4"
+  }
+}
