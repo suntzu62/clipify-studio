@@ -49,6 +49,15 @@ Os workers simulam progresso 0→100 com `job.updateProgress(...)` e os eventos 
 - Sistema de pontuação heurística baseado em densidade de palavras, perguntas, números
 - Upload para `projects/${rootId}/scenes/scenes.json`
 
+### RANK
+- Seleção de 8-12 clipes finais a partir dos candidatos gerados pelo SCENES
+- Análise de CPS (Characters Per Second) - foco em 17-20 CPS para legibilidade
+- Hook scoring dos primeiros 10 segundos (perguntas, números, 2ª pessoa)
+- Otimização de duração com alvo de ~55s (ideal para Shorts)
+- Análise de diversidade via embeddings para evitar near-duplicates
+- Boost por palavras-chave educacionais (dicas, passos, listas)
+- Upload para `projects/${rootId}/rank/rank.json`
+
 ## Configuração de Transcrição
 
 ### TRANSCRIBE_MODEL
@@ -68,6 +77,15 @@ Os workers simulam progresso 0→100 com `job.updateProgress(...)` e os eventos 
 - `SCENES_SIM_THRESHOLD=0.85`: Threshold de similaridade semântica (0-1)
 - `SCENES_MIN=30`: Duração mínima de clipe em segundos
 - `SCENES_MAX=90`: Duração máxima de clipe em segundos
+
+### Configuração de Rank
+- `RANK_TOP_K=12`: Número máximo de clipes a selecionar
+- `RANK_MIN=30`: Duração mínima de clipe em segundos
+- `RANK_MAX=90`: Duração máxima de clipe em segundos
+- `RANK_TARGET=55`: Duração alvo para pontuação ótima
+- `RANK_EMBED_MODEL=text-embedding-3-small`: Modelo de embedding OpenAI
+
+A pontuação final combina força do hook (30%), qualidade CPS (15%), novidade/diversidade (20%), relevância de palavras-chave (15%) e adequação de duração (10%), com penalidades por gaps de silêncio excessivos.
 
 ## Notas
 - Para Redis Gerenciado, use o URL `rediss://...` do provedor (Upstash é compatível com BullMQ).

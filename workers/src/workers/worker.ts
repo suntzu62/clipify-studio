@@ -4,6 +4,7 @@ import { QUEUES } from '../queues';
 import { runIngest } from './ingest';
 import { runTranscribe } from './transcribe';
 import { runScenes } from './scenes';
+import { runRank } from './rank';
 import pino from 'pino';
 
 const log = pino({ name: 'worker' });
@@ -21,6 +22,9 @@ export const makeWorker = (queueName: string) =>
       }
       if (queueName === QUEUES.SCENES) {
         return await runScenes(job);
+      }
+      if (queueName === QUEUES.RANK) {
+        return await runRank(job);
       }
       
       // Fallback: simulate processing for other queues
