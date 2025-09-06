@@ -3,6 +3,7 @@ import { connection } from '../redis';
 import { QUEUES } from '../queues';
 import { runIngest } from './ingest';
 import { runTranscribe } from './transcribe';
+import { runScenes } from './scenes';
 import pino from 'pino';
 
 const log = pino({ name: 'worker' });
@@ -17,6 +18,9 @@ export const makeWorker = (queueName: string) =>
       }
       if (queueName === QUEUES.TRANSCRIBE) {
         return await runTranscribe(job);
+      }
+      if (queueName === QUEUES.SCENES) {
+        return await runScenes(job);
       }
       
       // Fallback: simulate processing for other queues

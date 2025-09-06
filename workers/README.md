@@ -41,6 +41,14 @@ Os workers simulam progresso 0→100 com `job.updateProgress(...)` e os eventos 
 - Geração de arquivos: transcript.json, segments.srt, segments.vtt
 - Upload para `projects/${rootId}/transcribe/`
 
+### SCENES
+- Análise da transcrição e áudio para gerar 8-12 clipes candidatos de 30-90s
+- Detecção de silêncios via FFmpeg silencedetect
+- Análise semântica usando embeddings OpenAI para detectar mudanças de tópico
+- Quebras por texto (final de sentenças)
+- Sistema de pontuação heurística baseado em densidade de palavras, perguntas, números
+- Upload para `projects/${rootId}/scenes/scenes.json`
+
 ## Configuração de Transcrição
 
 ### TRANSCRIBE_MODEL
@@ -53,6 +61,13 @@ Os workers simulam progresso 0→100 com `job.updateProgress(...)` e os eventos 
 - Segmentação automática em chunks de 900s para contornar limites
 - Arquivos temporários em `/tmp/${rootId}/` (cleanup automático)
 - Suporte a cookies para yt-dlp via `YTDLP_COOKIES_PATH`
+
+### Configuração de Scenes
+- `SCENES_SILENCE_DB=-35`: Threshold de silêncio em dB
+- `SCENES_SILENCE_MIN=0.3`: Duração mínima de silêncio em segundos
+- `SCENES_SIM_THRESHOLD=0.85`: Threshold de similaridade semântica (0-1)
+- `SCENES_MIN=30`: Duração mínima de clipe em segundos
+- `SCENES_MAX=90`: Duração máxima de clipe em segundos
 
 ## Notas
 - Para Redis Gerenciado, use o URL `rediss://...` do provedor (Upstash é compatível com BullMQ).
