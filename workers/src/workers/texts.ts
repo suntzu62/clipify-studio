@@ -2,7 +2,7 @@ import { Job } from 'bullmq';
 import pino from 'pino';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { downloadToTemp, uploadFile } from '../lib/storage';
+import { downloadToTemp, uploadFile, sbAdmin } from '../lib/storage';
 import { generateJSON } from '../lib/openai';
 import { enforceLimits, pickExcerpt, makeSlug, normalizeHashtag } from '../lib/texts-yt';
 import removeMd from 'remove-markdown';
@@ -24,6 +24,22 @@ export async function runTexts(job: Job): Promise<any> {
   await job.updateProgress(2);
 
   try {
+    // Idempotency: if key provided and marker exists, skip generation
+    if (idempotencyKey) {
+      const idemMarker = `projects/${rootId}/texts/_idem/${idempotencyKey}.txt`;
+      try {
+        const { error } = await sbAdmin().storage.from(bucket).download(idemMarker);
+        if (!error) {
+          log.info({ rootId, idempotencyKey }, 'TextsIdempotentHit');
+          return {
+            rootId,
+            items: [],
+            blogKey: `projects/${rootId}/texts/blog.md`,
+            seoKey: `projects/${rootId}/texts/seo.json`,
+          };
+        }
+      } catch {}
+    }
     // 0–10: carregar entradas
     const rankPath = path.join(tmpDir, 'rank.json');
     const transcriptPath = path.join(tmpDir, 'transcript.json');
@@ -202,6 +218,14 @@ export async function runTexts(job: Job): Promise<any> {
 
     // 95–100: uploads finais já feitos acima
     log.info({ rootId }, 'UploadDone');
+
+    // Write idempotency marker last
+    if (idempotencyKey) {
+      const markerLocal = path.join(tmpDir, 'idem.txt');
+      await fs.writeFile(markerLocal, new Date().toISOString());
+      const markerKey = `projects/${rootId}/texts/_idem/${idempotencyKey}.txt`;
+      await uploadFile(bucket, markerKey, markerLocal, 'text/plain');
+    }
     await job.updateProgress(100);
 
     return { rootId, items: outputs, blogKey, seoKey };
@@ -214,4 +238,3 @@ export async function runTexts(job: Job): Promise<any> {
 }
 
 export default runTexts;
-
