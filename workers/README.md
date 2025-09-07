@@ -58,6 +58,29 @@ Os workers simulam progresso 0→100 com `job.updateProgress(...)` e os eventos 
 - Boost por palavras-chave educacionais (dicas, passos, listas)
 - Upload para `projects/${rootId}/rank/rank.json`
 
+### TEXTS
+- Geração de metadados para YouTube Shorts e rascunho de blog (PT-BR)
+- Entrada: `projects/${rootId}/rank/rank.json` e `projects/${rootId}/transcribe/transcript.json`
+- Para cada clipe (8–12):
+  - Título (<=100 chars, com gancho)
+  - Descrição (1–2 frases fortes + 3 bullets + CTA curto)
+  - Hashtags 3–12 (sem espaços; evite genéricos; se duração <=60s, pode incluir `#Shorts` entre as 3 primeiras)
+- Saída por clipe:
+  - `projects/${rootId}/texts/<clipId>/title.txt`
+  - `projects/${rootId}/texts/<clipId>/description.md`
+  - `projects/${rootId}/texts/<clipId>/hashtags.txt`
+- Saída do projeto:
+  - `projects/${rootId}/texts/blog.md` (800–1200 palavras, Markdown)
+  - `projects/${rootId}/texts/seo.json` ({ slug, seoTitle, metaDescription })
+
+#### Limites YouTube (resumo)
+- Título: até 100 caracteres; Descrição: até 5000 caracteres
+- Hashtags: apenas 3 aparecem acima do título; use 3–12 úteis
+- Shorts: até 60s aparecem fortemente no feed; o YouTube expandiu o limite, mas 60s é o alvo preferido
+
+#### Notas de monetização
+- Evite conteúdo inautêntico/repetitivo: varie prompts e estilos, foque em valor real e originalidade.
+
 ## Configuração de Transcrição
 
 ### TRANSCRIBE_MODEL
@@ -86,6 +109,12 @@ Os workers simulam progresso 0→100 com `job.updateProgress(...)` e os eventos 
 - `RANK_EMBED_MODEL=text-embedding-3-small`: Modelo de embedding OpenAI
 
 A pontuação final combina força do hook (30%), qualidade CPS (15%), novidade/diversidade (20%), relevância de palavras-chave (15%) e adequação de duração (10%), com penalidades por gaps de silêncio excessivos.
+
+### Configuração de Texts
+- `TEXTS_MODEL=gpt-4o-mini`: modelo de geração
+- `TEXTS_TONE=informal-claro`: tom/voz do texto
+- `TEXTS_HASHTAG_MAX=12`: máximo de hashtags por clipe (mantém 3–12, hard cap 60)
+- `TEXTS_BLOG_WORDS_MIN=800` / `TEXTS_BLOG_WORDS_MAX=1200`: tamanho do rascunho de blog
 
 ## Notas
 - Para Redis Gerenciado, use o URL `rediss://...` do provedor (Upstash é compatível com BullMQ).
