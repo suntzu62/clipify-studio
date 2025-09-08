@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { requireUser } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,28 +15,15 @@ function requireAuth(req: Request) {
   return { ok: true, auth };
 }
 
-// Decode Clerk token minimally to get user id (no signature validation here)
-function getClerkUserId(authHeader: string | null): string | null {
-  try {
-    if (!authHeader) return null;
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-    const [, payload] = token.split('.');
-    if (!payload) return null;
-    const json = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-    return json?.sub ?? null;
-  } catch {
-    return null;
-  }
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const authCheck = requireAuth(req);
-  if (!authCheck.ok) return authCheck.res as Response;
-  const authHeader = (authCheck as any).auth as string;
+  const auth = await requireUser(req);
+  if ('error' in auth) {
+    return new Response(JSON.stringify({ error: auth.error }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: auth.status });
+  }
 
   try {
     const { youtubeUrl, neededMinutes = 0, meta } = await req.json();
@@ -47,7 +35,7 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const usageResp = await fetch(`${supabaseUrl}/functions/v1/get-usage`, {
       method: 'POST',
-      headers: { authorization: authHeader, 'content-type': 'application/json' },
+      headers: { authorization: req.headers.get('authorization') || '', 'content-type': 'application/json' },
       body: JSON.stringify({}),
     });
     if (!usageResp.ok) {
@@ -66,7 +54,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'workers_api_not_configured' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
     }
 
-    const userId = getClerkUserId(authHeader);
+    const userId = auth.userId;
     const resp = await fetch(`${apiUrl}/api/jobs/pipeline`, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
@@ -80,4 +68,3 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
-

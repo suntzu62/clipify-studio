@@ -34,6 +34,24 @@ Cortaí é uma plataforma SaaS que utiliza IA avançada para:
 - **PostHog** (analytics)
 - **Clerk/NextAuth** (autenticação)
 
+## 🔒 Hardening de Produção (PASSO 16)
+
+- Auth (Edge Functions): verificação de JWT do Clerk via JWKS (jose).
+  - Arquivo: `supabase/functions/_shared/auth.ts`
+  - Env: `CLERK_ISSUER`, `CLERK_JWKS_URL` em `supabase/functions/.env.example`
+  - Aplicado em: `enqueue-pipeline`, `job-status`, `job-stream` (suporte a `?token=` para SSE), `yt-oauth-start`, `yt-oauth-callback`.
+- API Workers: rate limit por `x-api-key`/IP com `@fastify/rate-limit`.
+- BullMQ: resiliência
+  - `attempts=5`, `backoff` exponencial, cleanup (removeOnComplete/Fail) ao enfileirar pipeline/export.
+  - Erros irrecuperáveis: usa `UnrecoverableError` (ex.: `VIDEO_TOO_SHORT`, 401/403 em export).
+  - Idempotência: IDs estáveis (ex.: `export:${rootId}:${clipId}`, e stages do pipeline).
+  - Limiter por fila: OpenAI/YouTube (`OPENAI_RATE_*`, `YOUTUBE_RATE_*`). Concurrency por fila (`*_CONCURRENCY`).
+- Download resiliente (yt-dlp): resume (`-c`) e sem overwrite (`-w`).
+- HTTP util: `workers/src/lib/http.ts` com timeout + backoff exponencial (para uso em integrações externas).
+- Webhook Stripe: verificação de assinatura com `STRIPE_WEBHOOK_SECRET` (suporta rotação de secret; mantenha múltiplos ativos durante a janela de rotação).
+- Observabilidade: logs JSON com correlação `{ queue, jobId, rootId, stage, attempt }`. Métricas PostHog (ver PASSO 15).
+- Uploads grandes: considerar TUS (retomável) com `tus-js-client` para uploads locais ao Storage.
+
 ## 🏗 Estrutura do Projeto
 
 ```
@@ -153,6 +171,42 @@ POSTHOG_KEY=your_posthog_key
 
 # Redis (produção)
 REDIS_URL=your_redis_url
+
+## 🎥 Export para YouTube (PASSO 14)
+
+### 1) Criar OAuth Client (Google)
+- Tipo: Aplicativo Web
+- URIs de Redirecionamento Autorizados:
+  - https://SEU_PROJETO.functions.supabase.co/yt-oauth-callback
+- Escopo: https://www.googleapis.com/auth/youtube.upload
+
+### 2) Variáveis de Ambiente
+- Em `clipify-studio/workers/.env` e `clipify-studio/supabase/functions/.env` defina:
+  - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+  - `YT_REDIRECT_URI` (aponta para a Edge Function de callback)
+  - `YT_SCOPES=https://www.googleapis.com/auth/youtube.upload`
+  - Defaults (workers): `YT_PRIVACY`, `YT_CATEGORY_ID=22`, `YT_MADE_FOR_KIDS=false`
+
+### 3) Banco (Supabase SQL)
+- Tabelas `public.youtube_accounts` e `public.clip_exports` + RLS de leitura por usuário.
+- A migração está em `supabase/migrations/*youtube_export.sql`.
+
+### 4) Edge Functions
+- `yt-oauth-start`: redireciona ao consentimento Google (offline + prompt=consent).
+- `yt-oauth-callback`: troca `code` por tokens e persiste em `youtube_accounts`.
+- `enqueue-export`: enfileira upload por clipe.
+
+### 5) Workers
+- Fila `EXPORT` (`workers/src/workers/export.ts`) faz upload resumable, define thumbnail, e aguarda processamento.
+
+### 6) UI
+- Página `/integrations` com botão “Conectar YouTube”.
+- Em ProjectDetail > Resultados: botão “Exportar para YouTube” (solicita `clipId`).
+
+Notas:
+- Uploads via API custam ~1600 unidades de quota por vídeo.
+- Apps não verificados costumam publicar como PRIVADO por padrão.
+- Shorts: vídeos verticais/quadrados ≤3 min são categorizados automaticamente; não há flag específica na API.
 ```
 
 ## 📊 Logs & Monitoramento

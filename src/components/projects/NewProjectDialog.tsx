@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { createProject } from "@/services/projects";
 import { isValidYouTubeUrl } from "@/lib/youtube";
+import posthog from 'posthog-js';
 
 const schema = z.object({
   youtube_url: z
@@ -39,6 +40,12 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
     try {
       setSubmitting(true);
       await createProject({ youtube_url: values.youtube_url.trim(), title: values.title?.trim() });
+      // Telemetry
+      try {
+        const urlLen = values.youtube_url.trim().length;
+        posthog.capture('project created', { youtubeUrl_len: urlLen });
+        posthog.capture('pipeline started', { source: 'ui' });
+      } catch {}
       toast({ title: "Projeto criado", description: "Seu projeto foi criado com sucesso." });
       onOpenChange(false);
       form.reset();
@@ -104,4 +111,3 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
     </Dialog>
   );
 }
-

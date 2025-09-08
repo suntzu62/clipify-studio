@@ -23,6 +23,12 @@ const apiKeyGuard = async (req: any, res: any) => {
 
 export async function start() {
   const app = Fastify({ logger: false });
+  // Rate limit per API key or IP
+  await app.register(await import('@fastify/rate-limit'), {
+    max: 60,
+    timeWindow: '1 minute',
+    keyGenerator: (req: any) => (req.headers['x-api-key'] as string) || req.ip,
+  } as any);
   app.register(fastifySSE);
 
   app.get('/health', async () => ({ ok: true }));
@@ -39,41 +45,54 @@ export async function start() {
     const flow = new FlowProducer({ connection });
     const rootId = crypto.randomUUID();
     
+    const jobOpts = {
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: { age: 86400, count: 2000 },
+      removeOnFail: { age: 604800 },
+    } as const;
+
     const tree = await flow.add({
       name: 'pipeline',
       queueName: QUEUES.INGEST,
-      opts: { jobId: rootId },
+      opts: { jobId: rootId, ...jobOpts },
       data: { youtubeUrl, meta: body.meta || {}, rootId },
       children: [
         {
           name: 'transcribe',
           queueName: QUEUES.TRANSCRIBE,
           data: { rootId },
+          opts: { jobId: `${rootId}:transcribe`, ...jobOpts },
           children: [
             {
               name: 'scenes',
               queueName: QUEUES.SCENES,
               data: { rootId },
+              opts: { jobId: `${rootId}:scenes`, ...jobOpts },
               children: [
                 {
                   name: 'rank',
                   queueName: QUEUES.RANK,
                   data: { rootId },
+                  opts: { jobId: `${rootId}:rank`, ...jobOpts },
                   children: [
                     {
                       name: 'render',
                       queueName: QUEUES.RENDER,
                       data: { rootId },
+                      opts: { jobId: `${rootId}:render`, ...jobOpts },
                       children: [
                         {
                           name: 'texts',
                           queueName: QUEUES.TEXTS,
                           data: { rootId },
+                          opts: { jobId: `${rootId}:texts`, ...jobOpts },
                           children: [
                             {
                               name: 'export',
                               queueName: QUEUES.EXPORT,
                               data: { rootId },
+                              opts: { jobId: `${rootId}:export`, ...jobOpts },
                             },
                           ],
                         },
@@ -89,6 +108,29 @@ export async function start() {
     });
 
     res.send({ jobId: tree.job.id });
+  });
+
+  // Enqueue a single export job (per clip)
+  app.post('/api/jobs/export', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
+    const body = (req.body || {}) as { rootId?: string; clipId?: string; meta?: Record<string, any> };
+    const { rootId, clipId } = body;
+    if (!rootId || !clipId) {
+      res.code(400).send({ error: 'rootId_and_clipId_required' });
+      return;
+    }
+    const q = new Queue(QUEUES.EXPORT, { connection });
+    const job = await q.add(
+      'export',
+      { rootId, clipId, meta: body.meta || {} },
+      {
+        jobId: `export:${rootId}:${clipId}`,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { age: 86400, count: 2000 },
+        removeOnFail: { age: 604800 },
+      }
+    );
+    res.send({ jobId: job.id });
   });
 
   // Status of a job (root in INGEST)
@@ -145,4 +187,3 @@ export async function start() {
 }
 
 export default start;
-

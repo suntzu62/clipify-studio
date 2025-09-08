@@ -24,6 +24,37 @@ Pipeline de processamento orquestrado com BullMQ.
 - Enfileire um pipeline demo:
   - `npm run enqueue:demo`
 
+### Demo E2E + PostHog
+
+Requisitos:
+- Configure PostHog no `./.env`:
+  - `POSTHOG_KEY=` e `POSTHOG_HOST=https://app.posthog.com`
+- Configure Supabase Admin (para listar arquivos no Storage):
+  - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`
+- Defina o vídeo de teste (≥10 min):
+  - `DEMO_YT_URL=https://www.youtube.com/watch?v=<video>`
+  - `DEMO_NEEDED_MINUTES=10`
+
+Rodar o script:
+- `npm run demo:e2e`
+
+O script irá:
+- Enfileirar um pipeline via Workers API (`/api/jobs/pipeline`)
+- Medir tempos com `performance.now()`
+- Polling a cada 3s por artefatos no Storage: transcribe, scenes, rank, primeiro clip renderizado, textos
+- Enviar eventos para PostHog:
+  - `pipeline started` { rootId, youtubeUrl }
+  - `stage completed` { stage, t_ms, rootId }
+  - `clip rendered` { clipId }
+  - `pipeline completed` { t_first_clip_ms, t_total_ms, clips, exports }
+  - `pipeline failed` { stage, error }
+
+Painéis sugeridos no PostHog (Dashboard "Cortaí v1"):
+- Média: `avg(time_to_first_clip_ms)`
+- % jobs concluídos e % falhas
+- Distribuição de duração dos clipes
+- Eventos por estágio (throughput por etapa)
+
 Os workers simulam progresso 0→100 com `job.updateProgress(...)` e os eventos (`waiting`, `active`, `progress`, `completed`, `failed`) são logados no console.
 
 ## Workers Implementados

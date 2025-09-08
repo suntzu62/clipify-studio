@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth, useUser } from '@clerk/clerk-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +12,8 @@ import { Player } from '@/components/Player';
 import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { Job } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
+import { enqueueExport } from '@/lib/exports';
+import posthog from 'posthog-js';
 
 const steps = [
   { id: 'ingest', label: 'Ingestão', description: 'Download e análise do vídeo' },
@@ -30,6 +32,7 @@ export default function ProjectDetail() {
   const { getToken } = useAuth();
   const { toast } = useToast();
   const [job, setJob] = useState<Job | null>(null);
+  const telemetryFired = useRef<'none' | 'completed' | 'failed'>('none');
   
   const { jobStatus, isConnected, error } = useJobStream(id || '');
 
@@ -69,6 +72,19 @@ export default function ProjectDetail() {
         progress: jobStatus.progress,
         error: jobStatus.error
       });
+
+      // Telemetry on completion/failure
+      try {
+        if (jobStatus.status === 'completed' && telemetryFired.current === 'none') {
+          telemetryFired.current = 'completed';
+          const clips = jobStatus?.result?.texts?.titles?.length ?? undefined;
+          posthog.capture('pipeline completed', { rootId: job.id, clips });
+        } else if (jobStatus.status === 'failed' && telemetryFired.current === 'none') {
+          telemetryFired.current = 'failed';
+          const stage = jobStatus.currentStep || 'unknown';
+          posthog.capture('pipeline failed', { rootId: job.id, stage });
+        }
+      } catch {}
     }
   }, [jobStatus, job, user?.id]);
 
@@ -115,6 +131,15 @@ export default function ProjectDetail() {
       return url;
     }
   };
+
+  function friendlyError(msg?: string | null) {
+    if (!msg) return null;
+    const m = String(msg);
+    if (m.includes('QUOTA_EXCEEDED') || m.toLowerCase().includes('quota')) {
+      return 'Quota do YouTube estourada (cada upload consome ~1600 unidades). Consulte a documentação de quotas.';
+    }
+    return m;
+  }
 
   if (!job) {
     return (
@@ -183,10 +208,10 @@ export default function ProjectDetail() {
                 label="Progresso Geral"
                 className="mb-4"
               />
-              {error && (
+              {friendlyError(job?.error || error) && (
                 <div className="mt-4 p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-destructive" />
-                  <span className="text-sm text-destructive">{error}</span>
+                  <span className="text-sm text-destructive">{friendlyError(job?.error || error)}</span>
                 </div>
               )}
             </CardContent>
@@ -249,7 +274,24 @@ export default function ProjectDetail() {
                 {jobStatus?.result?.previewUrl && (
                   <Card>
                     <CardHeader>
-                      <CardTitle>Preview do Clipe</CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle>Preview do Clipe</CardTitle>
+                        <Button
+                          variant="default"
+                          onClick={async () => {
+                            const clipId = window.prompt('ID do clipe para exportar (ex.: clip-default)')?.trim();
+                            if (!clipId) return;
+                            try {
+                              await enqueueExport(job.id, clipId, getToken);
+                              toast({ title: 'Exportação iniciada', description: `Clip ${clipId} enviado para fila` });
+                            } catch (e: any) {
+                              toast({ title: 'Falha ao enfileirar exportação', description: e?.message || String(e), variant: 'destructive' });
+                            }
+                          }}
+                        >
+                          Exportar para YouTube
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <Player url={jobStatus.result.previewUrl} />

@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { useUser, useClerk } from '@clerk/clerk-react';
 import { Separator } from '@/components/ui/separator';
-import { LogOut, Play, Settings as SettingsIcon, User, Video } from 'lucide-react';
+import { LogOut, Play, Settings as SettingsIcon, User, Video, Cable } from 'lucide-react';
 
 const Settings = () => {
   const { user } = useUser();
@@ -56,6 +56,13 @@ const Settings = () => {
               >
                 <SettingsIcon className="w-5 h-5" />
                 <span>Configurações</span>
+              </Link>
+              <Link
+                to="/integrations"
+                className="flex items-center space-x-3 px-3 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <Cable className="w-5 h-5" />
+                <span>Integrações</span>
               </Link>
             </nav>
           </aside>

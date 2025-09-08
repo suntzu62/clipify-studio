@@ -1,4 +1,4 @@
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import youtubedl from 'youtube-dl-exec';
 import { createClient } from '@supabase/supabase-js';
 import * as fs from 'fs/promises';
@@ -43,7 +43,7 @@ export async function runIngest(job: Job): Promise<IngestResult> {
     const info = await probeVideo(youtubeUrl);
     
     if (info.duration < 600) {
-      throw { code: 'VIDEO_TOO_SHORT', message: 'Video must be at least 10 minutes long' };
+      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
     }
     
     log.info({ jobId, duration: info.duration, title: info.title }, 'ProbeOk');
@@ -66,8 +66,8 @@ export async function runIngest(job: Job): Promise<IngestResult> {
     log.error({ jobId, error: error.message, code: error.code }, 'Ingest failed');
     
     // Map common error codes
-    if (error.code === 'VIDEO_TOO_SHORT') {
-      throw error;
+    if (error.code === 'VIDEO_TOO_SHORT' || String(error?.message || '').startsWith('VIDEO_TOO_SHORT')) {
+      throw new UnrecoverableError('VIDEO_TOO_SHORT');
     }
     
     // Handle yt-dlp specific errors
@@ -126,6 +126,9 @@ async function downloadVideo(
     remuxVideo: 'mp4',
     writeInfoJson: true,
     noPlaylist: true,
+    // Robustness: resume and avoid overwrites
+    continue: true,
+    noOverwrites: true,
     retries: 4,
     fragmentRetries: 'infinite',
     retrySleep: 'fragment:exp=1:20',
