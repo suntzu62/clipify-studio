@@ -2,6 +2,7 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifySSE from 'fastify-sse-v2';
 import { FlowProducer, Queue, QueueEvents } from 'bullmq';
+import { createHash } from 'crypto';
 import pino from 'pino';
 import { randomUUID as crypto } from 'crypto';
 import { connection } from './redis';
@@ -43,7 +44,9 @@ export async function start() {
     }
 
     const flow = new FlowProducer({ connection });
-    const rootId = crypto.randomUUID();
+    // Idempotent root based on source URL (dedupe via BullMQ jobId)
+    const digest = createHash('sha1').update(String(youtubeUrl)).digest('hex').slice(0, 16);
+    const rootId = `ingest:${digest}`;
     
     const jobOpts = {
       attempts: 5,

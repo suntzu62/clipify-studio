@@ -39,7 +39,8 @@ Cortaí é uma plataforma SaaS que utiliza IA avançada para:
 - Auth (Edge Functions): verificação de JWT do Clerk via JWKS (jose).
   - Arquivo: `supabase/functions/_shared/auth.ts`
   - Env: `CLERK_ISSUER`, `CLERK_JWKS_URL` em `supabase/functions/.env.example`
-  - Aplicado em: `enqueue-pipeline`, `job-status`, `job-stream` (suporte a `?token=` para SSE), `yt-oauth-start`, `yt-oauth-callback`.
+  - Aplicado em: `enqueue-pipeline`, `job-status`, `job-stream` (suporte a `?token=` para SSE), `yt-oauth-start` e `enqueue-export`.
+  - Observação: o `yt-oauth-callback` é chamado diretamente pelo Google; a autenticação do usuário é feita via `state` (user_id) e service role.
 - API Workers: rate limit por `x-api-key`/IP com `@fastify/rate-limit`.
 - BullMQ: resiliência
   - `attempts=5`, `backoff` exponencial, cleanup (removeOnComplete/Fail) ao enfileirar pipeline/export.
@@ -50,7 +51,7 @@ Cortaí é uma plataforma SaaS que utiliza IA avançada para:
 - HTTP util: `workers/src/lib/http.ts` com timeout + backoff exponencial (para uso em integrações externas).
 - Webhook Stripe: verificação de assinatura com `STRIPE_WEBHOOK_SECRET` (suporta rotação de secret; mantenha múltiplos ativos durante a janela de rotação).
 - Observabilidade: logs JSON com correlação `{ queue, jobId, rootId, stage, attempt }`. Métricas PostHog (ver PASSO 15).
-- Uploads grandes: considerar TUS (retomável) com `tus-js-client` para uploads locais ao Storage.
+- Uploads grandes: considerar TUS (retomável) com `tus-js-client` para uploads locais ao Storage. Ver: https://supabase.com/docs/guides/storage/resumable-uploads
 
 ## 🏗 Estrutura do Projeto
 

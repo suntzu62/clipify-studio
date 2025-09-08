@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { requireUser } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,29 +8,15 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function getUserId(authHeader: string | null): string | null {
-  try {
-    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-    const token = authHeader.substring(7);
-    const [, payload] = token.split('.');
-    if (!payload) return null;
-    const json = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-    return json?.sub ?? null;
-  } catch {
-    return null;
-  }
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const auth = req.headers.get('authorization');
-    const userId = getUserId(auth);
-    if (!userId) {
-      return new Response(JSON.stringify({ error: 'unauthorized' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 });
+    const auth = await requireUser(req);
+    if ('error' in auth) {
+      return new Response(JSON.stringify({ error: auth.error }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: auth.status });
     }
 
     const { rootId, clipId } = await req.json().catch(() => ({}));
@@ -45,11 +32,11 @@ serve(async (req) => {
         .select('id')
         .eq('root_id', rootId)
         .eq('clip_id', clipId)
-        .eq('user_id', userId)
+        .eq('user_id', auth.userId)
         .limit(1)
         .maybeSingle();
       if (!existing) {
-        await supabase.from('clip_exports').insert({ root_id: rootId, clip_id: clipId, user_id: userId, status: 'queued' });
+        await supabase.from('clip_exports').insert({ root_id: rootId, clip_id: clipId, user_id: auth.userId, status: 'queued' });
       }
     } catch (_) {}
 
@@ -63,7 +50,7 @@ serve(async (req) => {
     const resp = await fetch(`${apiUrl}/api/jobs/export`, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-      body: JSON.stringify({ rootId, clipId, meta: { userId } }),
+      body: JSON.stringify({ rootId, clipId, meta: { userId: auth.userId } }),
     });
     const data = await resp.json().catch(() => ({}));
     return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: resp.status });
@@ -72,4 +59,3 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
-

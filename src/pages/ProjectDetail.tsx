@@ -136,7 +136,7 @@ export default function ProjectDetail() {
     if (!msg) return null;
     const m = String(msg);
     if (m.includes('QUOTA_EXCEEDED') || m.toLowerCase().includes('quota')) {
-      return 'Quota do YouTube estourada (cada upload consome ~1600 unidades). Consulte a documentação de quotas.';
+      return 'Quota do YouTube estourada (cada upload consome ~1600 unidades). Veja as quotas em https://developers.google.com/youtube/v3/getting-started#quota';
     }
     return m;
   }
