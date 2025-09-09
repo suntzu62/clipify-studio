@@ -12,6 +12,22 @@ export interface Job {
   error?: string;
 }
 
+// Simple wrapper matching the Landing hero usage
+export async function enqueueFromUrl(
+  url: string,
+  getToken?: () => Promise<string | null>
+) {
+  const headers = await getAuthHeader(getToken);
+  const { data, error } = await supabase.functions.invoke('enqueue-pipeline', {
+    body: { youtubeUrl: url, neededMinutes: 10 },
+    headers,
+  });
+  if (error) throw new Error(error.message);
+  // Normalize return shape to { jobId }
+  const jobId = (data as any)?.jobId || (data as any)?.id;
+  return { jobId };
+}
+
 export async function enqueuePipeline(
   youtubeUrl: string, 
   neededMinutes: number,
