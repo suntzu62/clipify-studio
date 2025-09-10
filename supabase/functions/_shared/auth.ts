@@ -1,8 +1,9 @@
-import { jwtVerify, createLocalJWKSet } from "npm:jose";
+import { jwtVerify, createRemoteJWKSet } from "npm:jose";
 
 const jwksUrl = Deno.env.get("CLERK_JWKS_URL");
 const issuer = Deno.env.get("CLERK_ISSUER");
-const JWKS = jwksUrl ? createLocalJWKSet(new URL(jwksUrl)) : null;
+// Use remote JWKS so keys are fetched from Clerk correctly.
+const JWKS = jwksUrl ? createRemoteJWKSet(new URL(jwksUrl)) : null;
 
 export async function requireUser(req: Request): Promise<
   | { userId: string; email?: string }
@@ -33,4 +34,3 @@ export async function requireUser(req: Request): Promise<
     return { error: "invalid_token", status: 401 };
   }
 }
-
