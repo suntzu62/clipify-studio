@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      clip_exports: {
+        Row: {
+          clip_id: string
+          created_at: string | null
+          error: string | null
+          id: string
+          root_id: string
+          status: string
+          updated_at: string | null
+          user_id: string
+          youtube_url: string | null
+          youtube_video_id: string | null
+        }
+        Insert: {
+          clip_id: string
+          created_at?: string | null
+          error?: string | null
+          id?: string
+          root_id: string
+          status?: string
+          updated_at?: string | null
+          user_id: string
+          youtube_url?: string | null
+          youtube_video_id?: string | null
+        }
+        Update: {
+          clip_id?: string
+          created_at?: string | null
+          error?: string | null
+          id?: string
+          root_id?: string
+          status?: string
+          updated_at?: string | null
+          user_id?: string
+          youtube_url?: string | null
+          youtube_video_id?: string | null
+        }
+        Relationships: []
+      }
       subscriptions: {
         Row: {
           clerk_user_id: string
@@ -116,6 +155,42 @@ export type Database = {
           idempotency_key?: string
           minutes?: number
           shorts?: number
+        }
+        Relationships: []
+      }
+      youtube_accounts: {
+        Row: {
+          access_token: string | null
+          channel_id: string | null
+          channel_title: string | null
+          created_at: string | null
+          expiry_date: string | null
+          refresh_token: string
+          scope: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          access_token?: string | null
+          channel_id?: string | null
+          channel_title?: string | null
+          created_at?: string | null
+          expiry_date?: string | null
+          refresh_token: string
+          scope?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          access_token?: string | null
+          channel_id?: string | null
+          channel_title?: string | null
+          created_at?: string | null
+          expiry_date?: string | null
+          refresh_token?: string
+          scope?: string | null
+          updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
