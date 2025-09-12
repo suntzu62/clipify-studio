@@ -1,7 +1,8 @@
 import { Job } from 'bullmq';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import OpenAI from 'openai';
+import { getOpenAI } from '../lib/openai';
+import { toFile } from 'openai/uploads';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import pino from 'pino';
@@ -15,9 +16,7 @@ if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic);
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// defer OpenAI client creation until runtime to ensure dotenv has loaded
 
 interface TranscribeResult {
   rootId: string;
@@ -34,6 +33,7 @@ export async function runTranscribe(job: Job): Promise<TranscribeResult> {
   const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'raw';
   const tmpDir = `/tmp/${rootId}`;
   const model = process.env.TRANSCRIBE_MODEL || 'whisper-1';
+  const openai = getOpenAI();
   
   log.info({ rootId, bucket, model }, 'TranscribeStarted');
   
@@ -118,8 +118,8 @@ export async function runTranscribe(job: Job): Promise<TranscribeResult> {
       log.info({ rootId, chunk: i + 1, total: chunkFiles.length }, `ChunkTranscribing${i}`);
       
       try {
-        const file = await fs.readFile(chunkPath);
-        const fileStream = new File([file], chunkFile, { type: 'audio/wav' });
+        const fileBuf = await fs.readFile(chunkPath);
+        const fileStream = await toFile(fileBuf, chunkFile);
         
         let transcription;
         if (model === 'whisper-1') {

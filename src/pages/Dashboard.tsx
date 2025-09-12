@@ -63,7 +63,7 @@ const Dashboard = () => {
       
       for (const job of activeJobs) {
         try {
-          const status = await getJobStatus(job.id, getToken);
+          const status = await getJobStatus(job.id, async (opts?: any) => getToken({ template: 'supabase', ...(opts||{}) }));
           if (status.status !== job.status || status.progress !== job.progress) {
             updateJobStatus(user!.id, job.id, {
               status: status.status,
@@ -87,7 +87,12 @@ const Dashboard = () => {
 
   const handleCreateProject = async (youtubeUrl: string, neededMinutes: number, targetDuration: string) => {
     try {
-      const result = await enqueuePipeline(youtubeUrl, neededMinutes, targetDuration, getToken);
+      const result = await enqueuePipeline(
+        youtubeUrl,
+        neededMinutes,
+        targetDuration,
+        async () => await getToken({ template: 'supabase' })
+      );
       
       const newJob: Job = {
         id: result.jobId || result.id,

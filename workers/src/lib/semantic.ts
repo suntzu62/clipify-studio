@@ -1,11 +1,10 @@
-import OpenAI from 'openai';
-
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { getOpenAI } from './openai';
 
 export async function embedTextBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   
   try {
+    const client = getOpenAI();
     const response = await client.embeddings.create({
       model: 'text-embedding-3-small',
       input: texts,

@@ -1,6 +1,17 @@
 import OpenAI from 'openai';
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let client: OpenAI | null = null;
+
+export function getOpenAI(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not set');
+  }
+  if (!client) {
+    client = new OpenAI({ apiKey });
+  }
+  return client;
+}
 
 export async function generateJSON<T = any>(
   model: string,
@@ -8,7 +19,8 @@ export async function generateJSON<T = any>(
   prompt: string
 ): Promise<T> {
   try {
-    const resp: any = await client.responses.create({
+    const cli = getOpenAI();
+    const resp: any = await cli.responses.create({
       model: model || 'gpt-4o-mini',
       input: prompt,
       temperature: 0.7,
@@ -38,4 +50,3 @@ export async function generateJSON<T = any>(
     };
   }
 }
-

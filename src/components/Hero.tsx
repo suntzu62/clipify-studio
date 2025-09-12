@@ -74,7 +74,7 @@ export default function Hero() {
     try {
       setLoading(true);
       const normalized = normalizeYoutubeUrl(raw.trim());
-      const tokenProvider = async () => await getToken();
+      const tokenProvider = async () => await getToken({ template: 'supabase' });
       const data = await enqueueFromUrl(normalized, tokenProvider);
       const jobId = data.jobId as string;
       if (!jobId) throw new Error("Resposta inválida do servidor");

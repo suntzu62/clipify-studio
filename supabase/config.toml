@@ -23,3 +23,13 @@ verify_jwt = false
 
 [functions.enqueue-export]
 verify_jwt = false
+
+# Custom functions that fazem auth com Clerk (requireUser)
+[functions.enqueue-pipeline]
+verify_jwt = false
+
+[functions.job-status]
+verify_jwt = false
+
+[functions.job-stream]
+verify_jwt = false

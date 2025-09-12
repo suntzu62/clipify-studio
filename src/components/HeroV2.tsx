@@ -143,7 +143,7 @@ export default function HeroV2() {
 
     try {
       setLoading(true);
-      const tokenProvider = async () => await getToken();
+      const tokenProvider = async () => await getToken({ template: 'supabase' });
       const { jobId } = await enqueueFromUrl(normalizeYoutubeUrl(value), tokenProvider);
 
       if (user?.id) {

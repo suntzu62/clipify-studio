@@ -1,17 +1,25 @@
 import { PostHog } from 'posthog-node';
 
-export const ph = new PostHog(process.env.POSTHOG_KEY || '', {
-  host: process.env.POSTHOG_HOST || 'https://app.posthog.com',
-  flushAt: 1,
-  flushInterval: 500,
-});
+let ph: PostHog | null = null;
+if (process.env.POSTHOG_KEY) {
+  ph = new PostHog(process.env.POSTHOG_KEY, {
+    host: process.env.POSTHOG_HOST || 'https://app.posthog.com',
+    flushAt: 1,
+    flushInterval: 500,
+  });
+}
 
-export async function track(distinctId: string, event: string, properties: Record<string, any> = {}) {
-  if (!process.env.POSTHOG_KEY) return; // no-op when not configured
+export async function track(
+  distinctId: string,
+  event: string,
+  properties: Record<string, any> = {}
+) {
+  if (!ph) return; // no-op when not configured
   ph.capture({ distinctId, event, properties });
 }
 
 export async function shutdown() {
+  if (!ph) return;
   // Optional in newer SDKs
   // @ts-ignore
   if (typeof ph.shutdownAsync === 'function') {
@@ -21,4 +29,3 @@ export async function shutdown() {
     await new Promise<void>((resolve) => (ph as any).shutdown(() => resolve()));
   }
 }
-
