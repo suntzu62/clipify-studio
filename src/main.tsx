@@ -10,9 +10,11 @@ if (!PUBLISHABLE_KEY) {
   throw new Error('Missing VITE_CLERK_PUBLISHABLE_KEY');
 }
 
+// Initialize PostHog
+initPosthog();
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    {initPosthog()}
     <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
       <App />
     </ClerkProvider>

@@ -5,18 +5,20 @@ export type UsageDTO = {
   status: string;
   minutesUsed: number;
   minutesQuota: number;
+  minutesRemaining: number;
   remaining: number;
   periodEnd: string;
 };
 
 export async function getUsage(headers?: Record<string, string>) {
-  return invokeFn<UsageDTO>('get-usage', { method: 'GET', headers });
+  return invokeFn<UsageDTO>('get-usage', { method: 'POST', headers });
 }
 
 export async function ensureQuota(neededMinutes: number, headers?: Record<string, string>) {
   const usage = await getUsage(headers);
-  if (usage.remaining < neededMinutes) {
-    throw { status: 402, message: 'Quota exceeded', remaining: usage.remaining };
+  const remaining = usage.minutesRemaining || usage.remaining || 0;
+  if (remaining < neededMinutes) {
+    throw { status: 402, message: 'Quota exceeded', remaining };
   }
 }
 
