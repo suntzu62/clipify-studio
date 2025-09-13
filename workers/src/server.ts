@@ -11,7 +11,7 @@ import { QUEUES } from './queues';
 const log = pino({ name: 'api' });
 
 const API_KEY = process.env.WORKERS_API_KEY || '';
-const PORT = Number(process.env.WORKERS_API_PORT || 8787);
+const PORT = Number(process.env.PORT || process.env.WORKERS_API_PORT || 8787);
 
 const apiKeyGuard = async (req: any, res: any) => {
   const key = req.headers['x-api-key'];
