@@ -23,7 +23,21 @@ const apiKeyGuard = async (req: any, res: any) => {
 };
 
 export async function start() {
+  // Add error handlers for unhandled rejections
+  process.on('unhandledRejection', (reason, promise) => {
+    log.error({ reason, promise }, 'Unhandled rejection');
+  });
+  
+  process.on('uncaughtException', (error) => {
+    log.error({ error }, 'Uncaught exception');
+    process.exit(1);
+  });
+
   const app = Fastify({ logger: false });
+  
+  // Add root route
+  app.get('/', async () => 'OK');
+  
   // Rate limit per API key or IP
   await app.register(await import('@fastify/rate-limit'), {
     max: 60,
@@ -184,8 +198,17 @@ export async function start() {
     });
   });
 
-  await app.listen({ port: PORT, host: '0.0.0.0' });
-  log.info({ port: PORT }, 'Workers API listening');
+  try {
+    await app.listen({ port: PORT, host: '0.0.0.0' });
+    log.info({ 
+      port: PORT, 
+      apiKey: API_KEY ? 'configured' : 'missing',
+      redis: process.env.REDIS_URL ? 'configured' : 'missing'
+    }, 'Workers API listening successfully');
+  } catch (error) {
+    log.error({ error, port: PORT }, 'Failed to start server');
+    throw error;
+  }
   return app;
 }
 
