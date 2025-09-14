@@ -23,3 +23,6 @@ export const supabase = createClient<Database>('https://qibjqqucmbrtuirysexl.sup
     autoRefreshToken: true,
   }
 });
+
+// Use dedicated functions client with correct subdomain
+export const supabaseFunctions = createClient<Database>('https://qibjqqucmbrtuirysexl.functions.supabase.co', SUPABASE_PUBLISHABLE_KEY);

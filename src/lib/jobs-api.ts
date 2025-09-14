@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { supabaseFunctions } from '@/integrations/supabase/client';
 import { getAuthHeader } from './auth-token';
 
 export interface Job {
@@ -18,7 +18,7 @@ export async function enqueueFromUrl(
   getToken?: () => Promise<string | null>
 ) {
   const headers = await getAuthHeader(getToken);
-  const { data, error } = await supabase.functions.invoke('enqueue-pipeline', {
+  const { data, error } = await supabaseFunctions.functions.invoke('enqueue-pipeline', {
     body: { youtubeUrl: url, neededMinutes: 10 },
     headers,
   });
@@ -36,7 +36,7 @@ export async function enqueuePipeline(
 ) {
   const headers = await getAuthHeader(getToken);
   
-  const { data, error } = await supabase.functions.invoke('enqueue-pipeline', {
+  const { data, error } = await supabaseFunctions.functions.invoke('enqueue-pipeline', {
     body: {
       youtubeUrl,
       neededMinutes,
