@@ -6,8 +6,7 @@ import { useMemo, useState } from 'react';
 export default function Integrations() {
   const { getToken } = useAuth();
   const [connecting, setConnecting] = useState(false);
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-  const startUrlBase = useMemo(() => `${supabaseUrl}/functions/v1/yt-oauth-start`, [supabaseUrl]);
+  const startUrlBase = useMemo(() => 'https://qibjqqucmbrtuirysexl.functions.supabase.co/yt-oauth-start', []);
 
   const handleConnect = async () => {
     setConnecting(true);
