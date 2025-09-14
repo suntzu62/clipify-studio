@@ -168,7 +168,7 @@ export default function HeroV2() {
 
   return (
     <section className="relative">
-      <div className="absolute inset-0 bg-gradient-to-br from-[#6D28D9] via-[#7C3AED] to-[#9333EA]" aria-hidden />
+      <div className="absolute inset-0 bg-gradient-hero" aria-hidden />
       <div className="relative mx-auto max-w-4xl px-6 py-16 md:py-24">
         <Card className="bg-white/10 backdrop-blur-xl border-white/20 rounded-3xl shadow-xl animate-in fade-in-50 slide-in-from-bottom-2">
           <CardContent className="p-6 md:p-8">
@@ -178,33 +178,48 @@ export default function HeroV2() {
             <p className="mt-2 text-white/80">{SUBHEAD}</p>
 
             {/* Benefits row */}
-            <div className="mt-4 flex flex-wrap gap-4 text-sm text-white/80">
-              <span>Legendas queimadas auto</span>
-              <span>•</span>
-              <span>Cortes de 30–90s prontos</span>
-              <span>•</span>
-              <span>Upload direto como Shorts</span>
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-white/90">
+              <span className="flex items-center gap-1">
+                <CheckCircle className="h-4 w-4 text-green-300" />
+                Legendas queimadas auto
+              </span>
+              <span className="text-white/60">•</span>
+              <span className="flex items-center gap-1">
+                <CheckCircle className="h-4 w-4 text-green-300" />
+                Cortes de 30–90s prontos
+              </span>
+              <span className="text-white/60">•</span>
+              <span className="flex items-center gap-1">
+                <CheckCircle className="h-4 w-4 text-green-300" />
+                Upload direto como Shorts
+              </span>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-6 grid gap-3" aria-describedby="tips">
-              <Label htmlFor="yt" className="text-white/90">Cole o link do YouTube</Label>
+            <form onSubmit={handleSubmit} className="mt-8 grid gap-3" aria-describedby="tips">
+              <Label htmlFor="yt" className="text-white/90 font-medium">Cole o link do YouTube</Label>
               <div className="flex flex-col md:flex-row gap-3">
                 <div className="relative flex-1">
-                  <Youtube className="absolute left-3 top-1/2 -translate-y-1/2 opacity-70 text-white/80 h-5 w-5" />
+                  <Youtube className="absolute left-4 top-1/2 -translate-y-1/2 text-red-500 h-5 w-5" />
                   <Input
                     id="yt"
                     type="url"
-                    placeholder="https://youtube.com/watch?v=…"
+                    placeholder="https://youtube.com/watch?v=exemplo (≥10min)"
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
                     onPaste={handlePaste}
                     onBlur={handleBlur}
                     aria-invalid={!!error}
                     aria-describedby="tips"
-                    className={`pl-10 h-14 text-lg bg-white text-foreground placeholder:text-muted-foreground placeholder-caret-blink ${success ? 'ring-2 ring-green-500' : ''}`}
+                    className={`pl-12 h-14 text-lg bg-white/95 text-gray-900 placeholder:text-gray-500 border-0 focus:ring-2 focus:ring-white/50 placeholder-caret-blink transition-all duration-200 ${success ? 'ring-2 ring-green-400' : ''}`}
                   />
                 </div>
-                <Button ref={submitBtnRef} type="submit" className="h-14 px-6 text-base" aria-label="Gerar clipes agora" disabled={loading}>
+                <Button 
+                  ref={submitBtnRef} 
+                  type="submit" 
+                  className="h-14 px-8 text-base font-semibold bg-white text-primary hover:bg-white/90 hover:scale-105 transition-all duration-200 shadow-lg" 
+                  aria-label="Gerar clipes agora" 
+                  disabled={loading}
+                >
                   <Play className="mr-2 h-5 w-5" />
                   {loading ? 'Gerando…' : 'Gerar clipes agora'}
                 </Button>
