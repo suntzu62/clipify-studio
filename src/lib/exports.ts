@@ -1,4 +1,3 @@
-import { supabaseFunctions } from '@/integrations/supabase/client';
 import { getAuthHeader } from './auth-token';
 
 export async function enqueueExport(
@@ -6,12 +5,21 @@ export async function enqueueExport(
   clipId: string,
   getToken?: () => Promise<string | null>
 ): Promise<{ jobId: string }> {
-  const headers = await getAuthHeader(getToken);
-  const { data, error } = await supabaseFunctions.functions.invoke('enqueue-export', {
-    body: { rootId, clipId },
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(await getAuthHeader(getToken)),
+  } as Record<string, string>;
+
+  const resp = await fetch('https://qibjqqucmbrtuirysexl.functions.supabase.co/enqueue-export', {
+    method: 'POST',
     headers,
+    body: JSON.stringify({ rootId, clipId }),
   });
-  if (error) throw new Error(error.message);
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error((data && (data.error || data.message)) || 'Failed to enqueue export');
+  }
   return data as { jobId: string };
 }
 

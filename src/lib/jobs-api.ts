@@ -1,4 +1,3 @@
-import { supabaseFunctions } from '@/integrations/supabase/client';
 import { getAuthHeader } from './auth-token';
 
 export interface Job {
@@ -17,12 +16,21 @@ export async function enqueueFromUrl(
   url: string,
   getToken?: () => Promise<string | null>
 ) {
-  const headers = await getAuthHeader(getToken);
-  const { data, error } = await supabaseFunctions.functions.invoke('enqueue-pipeline', {
-    body: { youtubeUrl: url, neededMinutes: 10 },
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(await getAuthHeader(getToken)),
+  } as Record<string, string>;
+
+  const resp = await fetch('https://qibjqqucmbrtuirysexl.functions.supabase.co/enqueue-pipeline', {
+    method: 'POST',
     headers,
+    body: JSON.stringify({ youtubeUrl: url, neededMinutes: 10 }),
   });
-  if (error) throw new Error(error.message);
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error((data && (data.error || data.message)) || 'Failed to enqueue pipeline');
+  }
   // Normalize return shape to { jobId }
   const jobId = (data as any)?.jobId || (data as any)?.id;
   return { jobId };
@@ -34,19 +42,24 @@ export async function enqueuePipeline(
   targetDuration: string,
   getToken?: () => Promise<string | null>
 ) {
-  const headers = await getAuthHeader(getToken);
-  
-  const { data, error } = await supabaseFunctions.functions.invoke('enqueue-pipeline', {
-    body: {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(await getAuthHeader(getToken)),
+  } as Record<string, string>;
+
+  const resp = await fetch('https://qibjqqucmbrtuirysexl.functions.supabase.co/enqueue-pipeline', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
       youtubeUrl,
       neededMinutes,
       meta: { targetDuration }
-    },
-    headers
+    }),
   });
 
-  if (error) {
-    throw new Error(error.message);
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error((data && (data.error || data.message)) || 'Failed to enqueue pipeline');
   }
 
   return data;
