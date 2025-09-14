@@ -41,18 +41,33 @@ serve(async (req) => {
     } catch (_) {}
 
     // Enqueue job on Workers API
-    const apiUrl = Deno.env.get('WORKERS_API_URL') as string;
+    const raw = Deno.env.get('WORKERS_API_URL') as string;
     const apiKey = Deno.env.get('WORKERS_API_KEY') as string;
-    if (!apiUrl || !apiKey) {
+    if (!raw || !apiKey) {
       return new Response(JSON.stringify({ error: 'workers_api_not_configured' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
     }
 
-    const resp = await fetch(`${apiUrl}/api/jobs/export`, {
+    const base = raw.trim().replace(/\/+$/, '').replace(/\/api$/, '');
+    const primaryUrl = `${base}/api/jobs/export`;
+    console.log('[enqueue-export] upstream primary:', primaryUrl);
+    let resp = await fetch(primaryUrl, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
       body: JSON.stringify({ rootId, clipId, meta: { userId: auth.userId } }),
     });
+
+    if (resp.status === 404) {
+      const altUrl = `${base}/jobs/export`;
+      console.log('[enqueue-export] primary 404, trying alt:', altUrl);
+      resp = await fetch(altUrl, {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
+        body: JSON.stringify({ rootId, clipId, meta: { userId: auth.userId } }),
+      });
+    }
+
     const data = await resp.json().catch(() => ({}));
+    console.log('[enqueue-export] upstream status:', resp.status);
     return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: resp.status });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

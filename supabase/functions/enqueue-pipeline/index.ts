@@ -56,21 +56,36 @@ serve(async (req) => {
       // ignore and proceed
     }
 
-    // Proxy to Workers API
-    const apiUrl = Deno.env.get('WORKERS_API_URL') as string;
+    // Proxy to Workers API with normalized base and fallback
+    const raw = Deno.env.get('WORKERS_API_URL') as string;
     const apiKey = Deno.env.get('WORKERS_API_KEY') as string;
-    if (!apiUrl || !apiKey) {
+    if (!raw || !apiKey) {
       return new Response(JSON.stringify({ error: 'workers_api_not_configured' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
     }
 
+    const base = raw.trim().replace(/\/+$/, '').replace(/\/api$/, '');
+    const primaryUrl = `${base}/api/jobs/pipeline`;
+    console.log('[enqueue-pipeline] upstream primary:', primaryUrl);
+
     const userId = auth.userId;
-    const resp = await fetch(`${apiUrl}/api/jobs/pipeline`, {
+    let resp = await fetch(primaryUrl, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
       body: JSON.stringify({ youtubeUrl, meta: { ...(meta || {}), userId, targetDuration, neededMinutes } }),
     });
 
+    if (resp.status === 404) {
+      const altUrl = `${base}/jobs/pipeline`;
+      console.log('[enqueue-pipeline] primary 404, trying alt:', altUrl);
+      resp = await fetch(altUrl, {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
+        body: JSON.stringify({ youtubeUrl, meta: { ...(meta || {}), userId, targetDuration, neededMinutes } }),
+      });
+    }
+
     const data = await resp.json().catch(() => ({}));
+    console.log('[enqueue-pipeline] upstream status:', resp.status);
     return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: resp.status });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

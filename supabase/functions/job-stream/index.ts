@@ -41,9 +41,23 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'id required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
     }
 
-    const apiUrl = Deno.env.get('WORKERS_API_URL') as string;
+    const raw = Deno.env.get('WORKERS_API_URL') as string;
     const apiKey = Deno.env.get('WORKERS_API_KEY') as string;
-    const upstream = await fetch(`${apiUrl}/api/jobs/${id}/stream`, { headers: { 'x-api-key': apiKey } });
+    if (!raw || !apiKey) {
+      return new Response(JSON.stringify({ error: 'workers_api_not_configured' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    }
+
+    const base = raw.trim().replace(/\/+$/, '').replace(/\/api$/, '');
+    const primaryUrl = `${base}/api/jobs/${id}/stream`;
+    console.log('[job-stream] upstream primary:', primaryUrl);
+    let upstream = await fetch(primaryUrl, { headers: { 'x-api-key': apiKey } });
+
+    if (upstream.status === 404) {
+      const altUrl = `${base}/jobs/${id}/stream`;
+      console.log('[job-stream] primary 404, trying alt:', altUrl);
+      upstream = await fetch(altUrl, { headers: { 'x-api-key': apiKey } });
+    }
+    console.log('[job-stream] upstream status:', upstream.status);
 
     const headers = new Headers(upstream.headers);
     headers.set('Access-Control-Allow-Origin', '*');

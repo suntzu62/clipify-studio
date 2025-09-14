@@ -32,10 +32,25 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'id required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
     }
 
-    const apiUrl = Deno.env.get('WORKERS_API_URL') as string;
+    const raw = Deno.env.get('WORKERS_API_URL') as string;
     const apiKey = Deno.env.get('WORKERS_API_KEY') as string;
-    const resp = await fetch(`${apiUrl}/api/jobs/${id}/status`, { headers: { 'x-api-key': apiKey } });
+    if (!raw || !apiKey) {
+      return new Response(JSON.stringify({ error: 'workers_api_not_configured' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    }
+
+    const base = raw.trim().replace(/\/+$/, '').replace(/\/api$/, '');
+    const primaryUrl = `${base}/api/jobs/${id}/status`;
+    console.log('[job-status] upstream primary:', primaryUrl);
+    let resp = await fetch(primaryUrl, { headers: { 'x-api-key': apiKey } });
+
+    if (resp.status === 404) {
+      const altUrl = `${base}/jobs/${id}/status`;
+      console.log('[job-status] primary 404, trying alt:', altUrl);
+      resp = await fetch(altUrl, { headers: { 'x-api-key': apiKey } });
+    }
+
     const data = await resp.json().catch(() => ({}));
+    console.log('[job-status] upstream status:', resp.status);
     return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: resp.status });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
