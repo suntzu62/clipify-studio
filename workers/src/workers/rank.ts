@@ -199,7 +199,7 @@ export async function runRank(job: Job): Promise<{ count: number; top3: string[]
         textFull: textFull.slice(0, 1000), // Limit for embeddings
         textFirst10s,
         hook,
-        cps,
+        cps: { avg: cps.cpsAvg, p95: cps.cpsP95 },
         baseScore,
         finalScore: baseScore, // Will be updated with novelty
         novelty: 1, // Will be calculated
@@ -274,8 +274,8 @@ export async function runRank(job: Job): Promise<{ count: number; top3: string[]
         novelty: Math.round(candidate.novelty * 100) / 100,
         hook: Math.round(candidate.hook * 100) / 100,
         cps: {
-          avg: Math.round(candidate.cps.cpsAvg * 10) / 10,
-          p95: Math.round(candidate.cps.cpsP95 * 10) / 10,
+          avg: Math.round(candidate.cps.avg * 10) / 10,
+          p95: Math.round(candidate.cps.p95 * 10) / 10,
         },
         reasons,
         excerpt: candidate.excerpt,

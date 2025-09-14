@@ -100,7 +100,7 @@ async function probeVideo(url: string): Promise<VideoInfo> {
   try {
     const info = await youtubedl(url, {
       dumpSingleJson: true,
-      noDownload: true,
+      skipDownload: true,
       noPlaylist: true,
     });
     

@@ -20,9 +20,9 @@ export async function generateJSON<T = any>(
 ): Promise<T> {
   try {
     const cli = getOpenAI();
-    const resp: any = await cli.responses.create({
+    const resp: any = await cli.chat.completions.create({
       model: model || 'gpt-4o-mini',
-      input: prompt,
+      messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
       response_format: {
         type: 'json_schema',

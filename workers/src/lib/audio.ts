@@ -61,7 +61,7 @@ export async function runSilenceDetect(inputPath: string): Promise<SilenceBounda
         resolve(boundaries);
       })
       .on('error', (err) => {
-        logger.error('FFmpeg silence detection failed:', err);
+        logger.error('FFmpeg silence detection failed:', { error: err.message });
         reject({ code: 'AUDIO_ANALYSIS_ERROR', message: err.message });
       })
       .run();

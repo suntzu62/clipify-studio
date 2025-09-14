@@ -40,11 +40,11 @@ export async function start() {
   app.get('/', async () => 'OK');
   
   // Rate limit per API key or IP
-  await app.register(await import('@fastify/rate-limit'), {
+  await app.register((await import('@fastify/rate-limit')).default, {
     max: 60,
     timeWindow: '1 minute',
     keyGenerator: (req: any) => (req.headers['x-api-key'] as string) || req.ip,
-  } as any);
+  });
   app.register(fastifySSE);
 
   app.get('/health', async () => ({ ok: true }));

@@ -67,8 +67,8 @@ export async function runTranscribe(job: Job): Promise<TranscribeResult> {
           const percent = Math.min(35, 10 + (progress.percent || 0) * 0.25);
           job.updateProgress(Math.floor(percent));
         })
-        .on('end', resolve)
-        .on('error', reject)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
         .run();
     });
     
@@ -88,7 +88,7 @@ export async function runTranscribe(job: Job): Promise<TranscribeResult> {
           '-c copy'
         ])
         .output(join(chunksDir, 'chunk_%03d.wav'))
-        .on('end', resolve)
+        .on('end', () => resolve())
         .on('error', (err) => {
           if (err.message.includes('too long') || err.message.includes('size')) {
             reject({ code: 'AUDIO_TOO_LONG', message: 'Audio file exceeds processing limits' });

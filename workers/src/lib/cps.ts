@@ -22,8 +22,8 @@ export function computeCPS(segments: Segment[], start: number, end: number): { c
       totalChars += charsInOverlap;
       
       // Calculate CPS for this segment overlap
-      const segmentCPS = charsInOverlap / overlapDuration;
-      segmentCPS.push({ cps: segmentCPS, duration: overlapDuration });
+      const segmentCPS_value = charsInOverlap / overlapDuration;
+      segmentCPS.push({ cps: segmentCPS_value, duration: overlapDuration });
     }
   }
   
