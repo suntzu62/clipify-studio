@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { requireUser } from "../_shared/auth.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,25 +27,33 @@ serve(async (req) => {
   }
 
   try {
-    const { youtubeUrl, neededMinutes = 0, meta } = await req.json();
+    const { youtubeUrl, neededMinutes = 0, targetDuration, meta } = await req.json();
     if (!youtubeUrl) {
       return new Response(JSON.stringify({ error: 'youtubeUrl required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
     }
 
-    // Check usage quota via existing get-usage function
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const usageResp = await fetch(`${supabaseUrl}/functions/v1/get-usage`, {
-      method: 'POST',
-      headers: { authorization: req.headers.get('authorization') || '', 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    if (!usageResp.ok) {
-      return new Response(JSON.stringify({ error: 'usage_check_failed' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
-    }
-    const usage = await usageResp.json();
-    const remaining = Number(usage?.minutesRemaining ?? 0);
-    if (remaining < Number(neededMinutes)) {
-      return new Response(JSON.stringify({ error: 'quota_exceeded', remaining }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 402 });
+    // Best-effort usage check via get-usage (do not block on failure)
+    try {
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+        { auth: { persistSession: false } }
+      );
+      const authHeader = req.headers.get('authorization') || undefined;
+      const { data: usage } = await supabase.functions.invoke('get-usage', {
+        method: 'GET',
+        headers: authHeader ? { authorization: authHeader } : undefined,
+      });
+      const remaining = Number((usage as any)?.minutesRemaining ?? 0);
+      const need = Number(neededMinutes) || 0;
+      if (remaining && need && remaining < need) {
+        return new Response(
+          JSON.stringify({ error: 'quota_exceeded', remaining, needed: need }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 402 }
+        );
+      }
+    } catch (_) {
+      // ignore and proceed
     }
 
     // Proxy to Workers API
@@ -58,7 +67,7 @@ serve(async (req) => {
     const resp = await fetch(`${apiUrl}/api/jobs/pipeline`, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-      body: JSON.stringify({ youtubeUrl, meta: { ...meta, userId } }),
+      body: JSON.stringify({ youtubeUrl, meta: { ...(meta || {}), userId, targetDuration, neededMinutes } }),
     });
 
     const data = await resp.json().catch(() => ({}));
