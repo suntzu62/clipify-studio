@@ -23,7 +23,7 @@ export async function listProjects() {
     .select("*")
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data || []) as Project[];
+  return (data ?? []) as unknown as Project[];
 }
 
 export async function createProject(input: CreateProjectInput) {
@@ -35,18 +35,18 @@ export async function createProject(input: CreateProjectInput) {
   };
   const { data, error } = await supabase
     .from("projects")
-    .insert(payload)
+    .insert(payload as any)
     .select("*")
     .single();
   if (error) throw error;
-  return data as Project;
+  return data as unknown as Project;
 }
 
 export async function deleteProject(id: string) {
   const { error } = await supabase
     .from("projects")
     .delete()
-    .eq("id", id);
+    .eq("id", id as any);
   if (error) throw error;
 }
 

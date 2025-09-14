@@ -24,5 +24,11 @@ export const supabase = createClient<Database>('https://qibjqqucmbrtuirysexl.sup
   }
 });
 
-// Use dedicated functions client with correct subdomain
-export const supabaseFunctions = createClient<Database>('https://qibjqqucmbrtuirysexl.functions.supabase.co', SUPABASE_PUBLISHABLE_KEY);
+// Use dedicated functions client with project base URL (functions will route via /functions/v1)
+export const supabaseFunctions = createClient<Database>('https://qibjqqucmbrtuirysexl.supabase.co', SUPABASE_PUBLISHABLE_KEY, {
+  auth: {
+    storage: localStorage,
+    persistSession: true,
+    autoRefreshToken: true,
+  }
+});
