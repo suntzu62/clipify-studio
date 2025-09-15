@@ -48,6 +48,16 @@ export async function runTexts(job: Job): Promise<any> {
     const rank = JSON.parse(await fs.readFile(rankPath, 'utf-8')) as { items: RankItem[] };
     const transcript = JSON.parse(await fs.readFile(transcriptPath, 'utf-8')) as Transcript;
 
+    // Validate input data
+    if (!rank.items || !Array.isArray(rank.items)) {
+      throw { code: 'INVALID_RANK_DATA', message: 'rank.json does not contain valid items array' };
+    }
+    if (!transcript.segments || !Array.isArray(transcript.segments)) {
+      throw { code: 'INVALID_TRANSCRIPT_DATA', message: 'transcript.json does not contain valid segments array' };
+    }
+    
+    log.info({ rootId, rankItems: rank.items.length, transcriptSegments: transcript.segments.length }, 'InputDataValidated');
+
     const items = Array.isArray(rank.items) ? rank.items.slice(0, 12) : [];
     if (items.length === 0) throw { code: 'TEXTS_NO_ITEMS', message: 'rank.json sem items' };
 
@@ -68,77 +78,129 @@ export async function runTexts(job: Job): Promise<any> {
       const { id: clipId, start, end } = it;
       const durationSec = Math.max(0, (end ?? 0) - (start ?? 0));
 
-      const baseText = transcript.segments
-        .filter(s => Math.max(s.start, start) < Math.min(s.end, end))
-        .map(s => s.text)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      try {
+        const baseText = transcript.segments
+          .filter(s => Math.max(s.start, start) < Math.min(s.end, end))
+          .map(s => s.text)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
 
-      const excerpt = it.excerpt || pickExcerpt(transcript.segments, start, end, 240);
+        const excerpt = it.excerpt || pickExcerpt(transcript.segments, start, end, 240);
 
-      const system = [
-        'Você escreve títulos curtos com gancho; descrições objetivas; hashtags relevantes; siga estritamente limites do YouTube.',
-        `TOM/VOZ: ${tone}. Idioma: PT-BR.`,
-      ].join('\n');
+        // Skip if no text content found
+        if (!baseText.trim() && !excerpt.trim()) {
+          log.warn({ rootId, clipId }, 'No text content found for clip, using fallback');
+          
+          // Create fallback content
+          const clipDir = path.join(tmpDir, clipId);
+          await fs.mkdir(clipDir, { recursive: true });
+          const titlePath = path.join(clipDir, 'title.txt');
+          const descPath = path.join(clipDir, 'description.md');
+          const tagsPath = path.join(clipDir, 'hashtags.txt');
+          
+          await fs.writeFile(titlePath, `Clip Interessante ${idx + 1}\n`);
+          await fs.writeFile(descPath, 'Conteúdo de vídeo gerado automaticamente.\n');
+          await fs.writeFile(tagsPath, 'video clip conteudo\n');
 
-      const schema = {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          title: { type: 'string' },
-          description: { type: 'string' },
-          hashtags: { type: 'array', items: { type: 'string' } },
-        },
-        required: ['title', 'description', 'hashtags'],
-      };
+          // Upload fallback
+          const titleKey = `projects/${rootId}/texts/${clipId}/title.txt`;
+          const descriptionKey = `projects/${rootId}/texts/${clipId}/description.md`;
+          const hashtagsKey = `projects/${rootId}/texts/${clipId}/hashtags.txt`;
+          await uploadFile(bucket, titleKey, titlePath, 'text/plain');
+          await uploadFile(bucket, descriptionKey, descPath, 'text/markdown');
+          await uploadFile(bucket, hashtagsKey, tagsPath, 'text/plain');
 
-      const user = [
-        `INSTRUÇÕES DO CLIPE (${clipId}):`,
-        '- Gere TÍTULO (<=100 chars) com gancho nos 3–10s; sem clickbait vazio; use números quando fizer sentido; PT-BR.',
-        '- Gere DESCRIÇÃO: 1–2 frases fortes na primeira linha; depois 3 bullets de valor; CTA curto; links placeholders.',
-        `- Gere HASHTAGS 3–12, únicas, sem espaços/acentos; priorize 3–5 principais. durationSec=${durationSec}.`,
-        'VALIDAÇÃO: Título <=100; Descrição <=5000; Se duration<=60, incluir opcionalmente #Shorts entre as primeiras 3; até 3 aparecem acima do título.',
-        '',
-        'Contexto do clipe:',
-        `- Trecho transcrito: ${JSON.stringify(excerpt)}`,
-        `- Texto base (para referência): ${JSON.stringify(baseText.slice(0, 1200))}`,
-        '',
-        'Responda estritamente em JSON: { "title": string, "description": string, "hashtags": string[] }',
-      ].join('\n');
+          outputs.push({ clipId, titleKey, descriptionKey, hashtagsKey });
+          continue;
+        }
 
-      const prompt = `${system}\n\n${user}`;
-      const raw = await generateJSON<{ title: string; description: string; hashtags: string[] }>(model, schema, prompt);
+        const system = [
+          'Você escreve títulos curtos com gancho; descrições objetivas; hashtags relevantes; siga estritamente limites do YouTube.',
+          `TOM/VOZ: ${tone}. Idioma: PT-BR.`,
+        ].join('\n');
 
-      const sanitized = enforceLimits({
-        title: raw.title || '',
-        description: raw.description || '',
-        hashtags: Array.isArray(raw.hashtags) ? raw.hashtags : [],
-        durationSec,
-        hashtagMax,
-      });
+        const schema = {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string' },
+            description: { type: 'string' },
+            hashtags: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['title', 'description', 'hashtags'],
+        };
 
-      // Write temp files
-      const clipDir = path.join(tmpDir, clipId);
-      await fs.mkdir(clipDir, { recursive: true });
-      const titlePath = path.join(clipDir, 'title.txt');
-      const descPath = path.join(clipDir, 'description.md');
-      const tagsPath = path.join(clipDir, 'hashtags.txt');
-      await fs.writeFile(titlePath, sanitized.title + '\n');
-      await fs.writeFile(descPath, sanitized.description.trim() + '\n');
-      await fs.writeFile(tagsPath, sanitized.hashtags.join(' ') + '\n');
+        const user = [
+          `INSTRUÇÕES DO CLIPE (${clipId}):`,
+          '- Gere TÍTULO (<=100 chars) com gancho nos 3–10s; sem clickbait vazio; use números quando fizer sentido; PT-BR.',
+          '- Gere DESCRIÇÃO: 1–2 frases fortes na primeira linha; depois 3 bullets de valor; CTA curto; links placeholders.',
+          `- Gere HASHTAGS 3–12, únicas, sem espaços/acentos; priorize 3–5 principais. durationSec=${durationSec}.`,
+          'VALIDAÇÃO: Título <=100; Descrição <=5000; Se duration<=60, incluir opcionalmente #Shorts entre as primeiras 3; até 3 aparecem acima do título.',
+          '',
+          'Contexto do clipe:',
+          `- Trecho transcrito: ${JSON.stringify(excerpt)}`,
+          `- Texto base (para referência): ${JSON.stringify(baseText.slice(0, 1200))}`,
+          '',
+          'Responda estritamente em JSON: { "title": string, "description": string, "hashtags": string[] }',
+        ].join('\n');
 
-      // Upload
-      const titleKey = `projects/${rootId}/texts/${clipId}/title.txt`;
-      const descriptionKey = `projects/${rootId}/texts/${clipId}/description.md`;
-      const hashtagsKey = `projects/${rootId}/texts/${clipId}/hashtags.txt`;
-      await uploadFile(bucket, titleKey, titlePath, 'text/plain');
-      await uploadFile(bucket, descriptionKey, descPath, 'text/markdown');
-      await uploadFile(bucket, hashtagsKey, tagsPath, 'text/plain');
+        const prompt = `${system}\n\n${user}`;
+        const raw = await generateJSON<{ title: string; description: string; hashtags: string[] }>(model, schema, prompt);
 
-      log.info({ rootId, clipId }, 'ClipTextDone');
+        const sanitized = enforceLimits({
+          title: raw.title || '',
+          description: raw.description || '',
+          hashtags: Array.isArray(raw.hashtags) ? raw.hashtags : [],
+          durationSec,
+          hashtagMax,
+        });
 
-      outputs.push({ clipId, titleKey, descriptionKey, hashtagsKey });
+        // Write temp files
+        const clipDir = path.join(tmpDir, clipId);
+        await fs.mkdir(clipDir, { recursive: true });
+        const titlePath = path.join(clipDir, 'title.txt');
+        const descPath = path.join(clipDir, 'description.md');
+        const tagsPath = path.join(clipDir, 'hashtags.txt');
+        await fs.writeFile(titlePath, sanitized.title + '\n');
+        await fs.writeFile(descPath, sanitized.description.trim() + '\n');
+        await fs.writeFile(tagsPath, sanitized.hashtags.join(' ') + '\n');
+
+        // Upload
+        const titleKey = `projects/${rootId}/texts/${clipId}/title.txt`;
+        const descriptionKey = `projects/${rootId}/texts/${clipId}/description.md`;
+        const hashtagsKey = `projects/${rootId}/texts/${clipId}/hashtags.txt`;
+        await uploadFile(bucket, titleKey, titlePath, 'text/plain');
+        await uploadFile(bucket, descriptionKey, descPath, 'text/markdown');
+        await uploadFile(bucket, hashtagsKey, tagsPath, 'text/plain');
+
+        log.info({ rootId, clipId }, 'ClipTextDone');
+        outputs.push({ clipId, titleKey, descriptionKey, hashtagsKey });
+
+      } catch (clipError: any) {
+        log.warn({ rootId, clipId, error: clipError?.message || clipError }, 'ClipGenerationFailed, using fallback');
+        
+        // Create fallback content for this clip
+        const clipDir = path.join(tmpDir, clipId);
+        await fs.mkdir(clipDir, { recursive: true });
+        const titlePath = path.join(clipDir, 'title.txt');
+        const descPath = path.join(clipDir, 'description.md');
+        const tagsPath = path.join(clipDir, 'hashtags.txt');
+        
+        await fs.writeFile(titlePath, `Clip ${idx + 1}\n`);
+        await fs.writeFile(descPath, 'Conteúdo interessante de vídeo.\n');
+        await fs.writeFile(tagsPath, 'video clip\n');
+
+        // Upload fallback
+        const titleKey = `projects/${rootId}/texts/${clipId}/title.txt`;
+        const descriptionKey = `projects/${rootId}/texts/${clipId}/description.md`;
+        const hashtagsKey = `projects/${rootId}/texts/${clipId}/hashtags.txt`;
+        await uploadFile(bucket, titleKey, titlePath, 'text/plain');
+        await uploadFile(bucket, descriptionKey, descPath, 'text/markdown');
+        await uploadFile(bucket, hashtagsKey, tagsPath, 'text/plain');
+
+        outputs.push({ clipId, titleKey, descriptionKey, hashtagsKey });
+      }
 
       const progress = Math.min(70, 10 + (idx + 1) * perItemSpan);
       await job.updateProgress(progress);
@@ -230,7 +292,14 @@ export async function runTexts(job: Job): Promise<any> {
 
     return { rootId, items: outputs, blogKey, seoKey };
   } catch (error: any) {
-    log.error({ rootId, error: error?.message || error }, 'TextsFailed');
+    const errorDetails = {
+      message: error?.message || 'Unknown error',
+      code: error?.code || 'UNKNOWN_ERROR',
+      stack: error?.stack?.split('\n').slice(0, 5).join('\n'), // First 5 lines of stack
+      name: error?.name,
+      raw: JSON.stringify(error).slice(0, 500), // Limit raw error size
+    };
+    log.error({ rootId, error: errorDetails }, 'TextsFailed');
     throw error;
   } finally {
     try { await fs.rm(tmpDir, { recursive: true, force: true }); } catch {}

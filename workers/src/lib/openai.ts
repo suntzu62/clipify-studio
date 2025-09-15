@@ -18,35 +18,55 @@ export async function generateJSON<T = any>(
   schema: any,
   prompt: string
 ): Promise<T> {
-  try {
-    const cli = getOpenAI();
-    const resp: any = await cli.chat.completions.create({
-      model: model || 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'structured_output',
-          schema,
-          strict: true,
-        },
+  const cli = getOpenAI();
+  const modelToUse = model || 'gpt-4o-mini';
+  
+  // Try different response formats for compatibility
+  const responseFormats = [
+    // Modern structured output
+    {
+      type: 'json_schema',
+      json_schema: {
+        name: 'structured_output',
+        schema,
+        strict: true,
       },
-    });
+    },
+    // Fallback to json_object
+    { type: 'json_object' },
+  ];
 
-    // New SDK provides a convenience aggregator
-    const text: string = resp?.output_text
-      ?? resp?.content?.[0]?.text
-      ?? resp?.choices?.[0]?.message?.content
-      ?? '';
+  for (let i = 0; i < responseFormats.length; i++) {
+    try {
+      const resp: any = await cli.chat.completions.create({
+        model: modelToUse,
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant that responds with valid JSON only.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        response_format: responseFormats[i],
+      });
 
-    if (!text) throw new Error('Empty response from OpenAI');
+      const text: string = resp?.output_text
+        ?? resp?.content?.[0]?.text
+        ?? resp?.choices?.[0]?.message?.content
+        ?? '';
 
-    return JSON.parse(text) as T;
-  } catch (error: any) {
-    throw {
-      code: 'OPENAI_JSON_ERROR',
-      message: `generateJSON failed: ${error?.message || error}`,
-    };
+      if (!text) throw new Error('Empty response from OpenAI');
+
+      return JSON.parse(text) as T;
+    } catch (error: any) {
+      console.error(`OpenAI attempt ${i + 1} failed:`, error?.message || error);
+      
+      // If this is the last attempt, throw the error
+      if (i === responseFormats.length - 1) {
+        throw {
+          code: 'OPENAI_JSON_ERROR',
+          message: `generateJSON failed after ${responseFormats.length} attempts: ${error?.message || error}`,
+          originalError: error,
+        };
+      }
+    }
   }
 }
