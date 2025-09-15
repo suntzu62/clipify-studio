@@ -7,6 +7,12 @@ import * as os from 'os';
 import ffmpegPath from 'ffmpeg-static';
 import pino from 'pino';
 
+// Configure youtube-dl-exec to use system binary when available
+const ytdlBinaryPath = process.env.YTDL_BINARY_PATH || '/usr/bin/yt-dlp';
+if (process.env.YTDL_BINARY_PATH || await fs.access(ytdlBinaryPath).then(() => true).catch(() => false)) {
+  youtubedl.setOpt('binaryPath', ytdlBinaryPath);
+}
+
 const log = pino({ name: 'ingest' });
 
 interface IngestResult {
