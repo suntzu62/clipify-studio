@@ -39,7 +39,7 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
   const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'raw';
   const tmpDir = `/tmp/${rootId}`;
   
-  logger.info('Scenes processing started', { rootId });
+  logger.info({ rootId }, 'Scenes processing started');
   
   try {
     // Ensure tmp directory exists
@@ -266,11 +266,11 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
     
     await job.updateProgress(100);
     
-    logger.info('Scenes processing completed', { 
+    logger.info({ 
       rootId, 
       candidateCount: finalCandidates.length,
       topScore: finalCandidates[0]?.score 
-    });
+    }, 'Scenes processing completed');
     
     return {
       count: finalCandidates.length,
@@ -278,14 +278,14 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
     };
     
   } catch (error: any) {
-    logger.error('Scenes processing failed', { rootId, error: error.message });
+    logger.error({ rootId, error: error.message }, 'Scenes processing failed');
     throw error;
   } finally {
     // Cleanup
     try {
       await fs.rm(tmpDir, { recursive: true, force: true });
     } catch (cleanupError) {
-      logger.warn('Failed to cleanup temp directory', { tmpDir });
+      logger.warn({ tmpDir }, 'Failed to cleanup temp directory');
     }
   }
 }
