@@ -9,7 +9,6 @@ import pino from 'pino';
 
 // Configure youtube-dl-exec to use system binary when available
 const ytdlBinaryPath = process.env.YTDL_BINARY_PATH || '/usr/bin/yt-dlp';
-const ytdl = youtubedl.create();
 
 // Check if system binary exists and configure if available
 async function configureYtdl() {
@@ -20,7 +19,7 @@ async function configureYtdl() {
     await fs.access(ytdlBinaryPath);
     return youtubedl.create(ytdlBinaryPath);
   } catch {
-    return youtubedl.create(); // Use default binary
+    return youtubedl; // Use default binary
   }
 }
 
