@@ -9,6 +9,17 @@ export interface Job {
   neededMinutes: number;
   targetDuration?: string;
   error?: string;
+  result?: {
+    texts?: {
+      titles?: string[];
+      descriptions?: string[];
+      hashtags?: string[];
+    };
+    previewUrl?: string;
+    downloadUrl?: string;
+    thumbnailUrl?: string;
+    scenes?: any[];
+  };
 }
 
 // Simple wrapper matching the Landing hero usage

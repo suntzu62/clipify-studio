@@ -41,7 +41,14 @@ export default function ProjectDetail() {
     jobStatus?.currentStep, 
     jobStatus?.status
   );
-  const { clips, readyCount, setEstimatedClipCount } = useClipList(jobStatus?.result);
+  // Get clips data - pass jobStatus.result or job.result
+  const clipData = jobStatus?.result || job?.result;
+  const { clips, readyCount, setEstimatedClipCount } = useClipList(clipData);
+  
+  console.log('🎬 ProjectDetail - job:', job);
+  console.log('🎬 ProjectDetail - jobStatus:', jobStatus);
+  console.log('🎬 ProjectDetail - clipData:', clipData);
+  console.log('🎬 ProjectDetail - readyCount:', readyCount);
 
   useEffect(() => {
     if (!id || !user?.id) return;
@@ -253,11 +260,11 @@ export default function ProjectDetail() {
                 </TabsTrigger>
                 <TabsTrigger 
                   value="results" 
-                  disabled={job.status !== 'completed' && readyCount === 0}
+                  disabled={job?.status === 'queued'}
                   className="gap-2"
                 >
                   <Sparkles className="w-4 h-4" />
-                  Resultados ({readyCount})
+                  Resultados {readyCount > 0 ? `(${readyCount})` : ''}
                 </TabsTrigger>
               </TabsList>
               
@@ -304,7 +311,7 @@ export default function ProjectDetail() {
               </TabsContent>
               
               <TabsContent value="results" className="space-y-6">
-                {job.status === 'completed' || readyCount > 0 ? (
+                {readyCount > 0 ? (
                   <>
                     {/* Results Header */}
                     <Card className="bg-gradient-primary text-primary-foreground">
@@ -344,23 +351,52 @@ export default function ProjectDetail() {
                     )}
                   </>
                 ) : (
-                  <Card className="bg-gradient-card">
-                    <CardContent className="py-16 text-center">
-                      <div className="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <Sparkles className="w-10 h-10 text-primary animate-pulse" />
-                      </div>
-                      <h3 className="text-xl font-semibold mb-3">
-                        Preparando Algo Incrível...
-                      </h3>
-                      <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-                        Estamos analisando seu conteúdo para criar os clipes mais envolventes. 
-                        Os primeiros resultados aparecerão aqui em breve!
-                      </p>
-                      <div className="text-sm text-primary font-medium">
-                        ⏱️ Primeiro clipe em aproximadamente {getEstimatedTime()}
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <>
+                    {/* Show all clips including processing ones */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                      {clips.map((clip, index) => (
+                        <ClipCard key={clip.id} clip={clip} index={index} />
+                      ))}
+                    </div>
+                    
+                    {/* No clips message */}
+                    {clips.length === 0 && job?.status === 'completed' && (
+                      <Card className="p-8 text-center">
+                        <div className="space-y-4">
+                          <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto">
+                            <AlertCircle className="w-8 h-8 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold mb-2">Nenhum clipe disponível</h3>
+                            <p className="text-muted-foreground">
+                              Não foi possível gerar clipes a partir deste vídeo. Tente com um vídeo mais longo ou com conteúdo diferente.
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    )}
+                    
+                    {/* Processing message */}
+                    {clips.length === 0 && job?.status !== 'completed' && (
+                      <Card className="bg-gradient-card">
+                        <CardContent className="py-16 text-center">
+                          <div className="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <Sparkles className="w-10 h-10 text-primary animate-pulse" />
+                          </div>
+                          <h3 className="text-xl font-semibold mb-3">
+                            Preparando Algo Incrível...
+                          </h3>
+                          <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                            Estamos analisando seu conteúdo para criar os clipes mais envolventes. 
+                            Os primeiros resultados aparecerão aqui em breve!
+                          </p>
+                          <div className="text-sm text-primary font-medium">
+                            ⏱️ Primeiro clipe em aproximadamente {getEstimatedTime()}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </>
                 )}
               </TabsContent>
             </Tabs>
