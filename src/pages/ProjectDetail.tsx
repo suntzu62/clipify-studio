@@ -5,25 +5,20 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Copy, Clock, ExternalLink, CheckCircle, Circle, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Copy, ExternalLink, AlertCircle, Sparkles, TrendingUp } from 'lucide-react';
 import { useJobStream } from '@/hooks/useJobStream';
-import { JobProgress } from '@/components/JobProgress';
-import { Player } from '@/components/Player';
+import { usePolling } from '@/hooks/usePolling';
+import { useTimeline } from '@/hooks/useTimeline';
+import { useClipList } from '@/hooks/useClipList';
+import { ProgressHeader } from '@/components/progress/ProgressHeader';
+import { TimelineStep } from '@/components/timeline/TimelineStep';
+import { ClipCard } from '@/components/clips/ClipCard';
+import { SocialProof } from '@/components/social/SocialProof';
 import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { Job } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
 import { enqueueExport } from '@/lib/exports';
 import posthog from 'posthog-js';
-
-const steps = [
-  { id: 'ingest', label: 'Ingestão', description: 'Download e análise do vídeo' },
-  { id: 'transcribe', label: 'Transcrição', description: 'Geração de legendas' },
-  { id: 'scenes', label: 'Cenas', description: 'Detecção de cenas' },
-  { id: 'rank', label: 'Classificação', description: 'Ranking de momentos' },
-  { id: 'render', label: 'Renderização', description: 'Criação do clipe' },
-  { id: 'texts', label: 'Textos', description: 'Geração de títulos' },
-  { id: 'export', label: 'Exportação', description: 'Finalização' },
-];
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -34,7 +29,19 @@ export default function ProjectDetail() {
   const [job, setJob] = useState<Job | null>(null);
   const telemetryFired = useRef<'none' | 'completed' | 'failed'>('none');
   
-  const { jobStatus, isConnected, error } = useJobStream(id || '');
+  // Try SSE first, fallback to polling on failure
+  const { jobStatus: sseJobStatus, isConnected, error: sseError } = useJobStream(id || '');
+  const { jobStatus: pollingJobStatus, isPolling } = usePolling(id || '', !isConnected && !!sseError, getToken);
+  
+  // Use SSE data when available, otherwise use polling data
+  const jobStatus = sseJobStatus || pollingJobStatus;
+  
+  // Custom hooks for timeline and clips
+  const { steps, activeStep, completedCount, totalSteps, overallProgress } = useTimeline(
+    jobStatus?.currentStep, 
+    jobStatus?.status
+  );
+  const { clips, readyCount, setEstimatedClipCount } = useClipList(jobStatus?.result);
 
   useEffect(() => {
     if (!id || !user?.id) return;
@@ -57,19 +64,19 @@ export default function ProjectDetail() {
   }, [id, user?.id, navigate, toast]);
 
   useEffect(() => {
-    // Update local job status when SSE provides updates
+    // Update local job status when we get updates
     if (jobStatus && job && user?.id) {
       const updatedJob = {
         ...job,
         status: jobStatus.status,
-        progress: jobStatus.progress,
+        progress: overallProgress,
         error: jobStatus.error
       };
       
       setJob(updatedJob);
       updateJobStatus(user.id, job.id, {
         status: jobStatus.status,
-        progress: jobStatus.progress,
+        progress: overallProgress,
         error: jobStatus.error
       });
 
@@ -77,7 +84,7 @@ export default function ProjectDetail() {
       try {
         if (jobStatus.status === 'completed' && telemetryFired.current === 'none') {
           telemetryFired.current = 'completed';
-          const clips = jobStatus?.result?.texts?.titles?.length ?? undefined;
+          const clips = jobStatus?.result?.texts?.titles?.length ?? readyCount;
           posthog.capture('pipeline completed', { rootId: job.id, clips });
         } else if (jobStatus.status === 'failed' && telemetryFired.current === 'none') {
           telemetryFired.current = 'failed';
@@ -86,13 +93,13 @@ export default function ProjectDetail() {
         }
       } catch {}
     }
-  }, [jobStatus, job, user?.id]);
+  }, [jobStatus, job, user?.id, overallProgress, readyCount]);
 
   const handleCopyJobId = () => {
     if (id) {
       navigator.clipboard.writeText(id);
       toast({
-        title: "ID copiado",
+        title: "ID copiado! ✨",
         description: "ID do projeto copiado para a área de transferência"
       });
     }
@@ -102,7 +109,7 @@ export default function ProjectDetail() {
     switch (status) {
       case 'queued': return 'secondary';
       case 'active': return 'default';
-      case 'completed': return 'secondary';
+      case 'completed': return 'default';
       case 'failed': return 'destructive';
       default: return 'secondary';
     }
@@ -110,17 +117,12 @@ export default function ProjectDetail() {
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'queued': return 'Na Fila';
-      case 'active': return 'Processando';
-      case 'completed': return 'Concluído';
-      case 'failed': return 'Falhou';
+      case 'queued': return '⏰ Na Fila';
+      case 'active': return '🚀 Criando Magia';
+      case 'completed': return '✅ Pronto para Viralizar';
+      case 'failed': return '⚠️ Precisa de Atenção';
       default: return status;
     }
-  };
-
-  const getCurrentStepIndex = () => {
-    if (!jobStatus?.currentStep) return -1;
-    return steps.findIndex(step => step.id === jobStatus.currentStep);
   };
 
   const formatUrl = (url: string) => {
@@ -136,41 +138,58 @@ export default function ProjectDetail() {
     if (!msg) return null;
     const m = String(msg);
     if (m.includes('QUOTA_EXCEEDED') || m.toLowerCase().includes('quota')) {
-      return 'Quota do YouTube estourada (cada upload consome ~1600 unidades). Veja as quotas em https://developers.google.com/youtube/v3/getting-started#quota';
+      return 'Quota do YouTube estourada. Vamos tentar novamente em breve! 🔄';
     }
-    return m;
+    if (m.includes('401') || m.includes('unauthorized')) {
+      return 'Problema de autenticação. Recarregue a página! 🔐';
+    }
+    return 'Ops! Algo deu errado, mas vamos resolver rapidinho 💪';
   }
+
+  const getEstimatedTime = () => {
+    if (!job || !jobStatus) return '3-5 min';
+    
+    if (jobStatus.status === 'completed') return 'Concluído';
+    if (jobStatus.status === 'failed') return 'Pausado';
+    
+    const remaining = Math.max(0, 5 - Math.floor(overallProgress / 20));
+    return remaining > 0 ? `~${remaining} min` : 'Quase pronto!';
+  };
 
   if (!job) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Carregando seu projeto...</p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      {/* Minimalist Header */}
+      <header className="border-b border-border bg-background/95 backdrop-blur">
         <div className="container mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             <Button
               variant="ghost" 
               onClick={() => navigate('/dashboard')}
-              className="gap-2"
+              className="gap-2 hover:bg-primary/10"
             >
               <ArrowLeft className="w-4 h-4" />
-              Voltar
+              Dashboard
             </Button>
             
             <div className="flex items-center gap-3">
-              <Badge variant={getStatusColor(job.status)}>
+              <Badge variant={getStatusColor(job.status)} className="gap-1">
                 {getStatusText(job.status)}
               </Badge>
-              {!isConnected && job.status === 'active' && (
-                <Badge variant="outline" className="text-yellow-600">
-                  Reconectando...
+              {isPolling && (
+                <Badge variant="outline" className="text-yellow-600 gap-1">
+                  <TrendingUp className="w-3 h-3" />
+                  Sincronizando...
                 </Badge>
               )}
             </div>
@@ -178,199 +197,180 @@ export default function ProjectDetail() {
         </div>
       </header>
 
-      <div className="container mx-auto px-6 py-8">
-        {/* Project Header */}
+      <div className="container mx-auto px-6 py-8 max-w-6xl">
+        {/* Hero Progress Header */}
         <div className="mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">
-                Projeto #{job.id.slice(0, 8)}
-              </h1>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <ExternalLink className="w-4 h-4" />
-                <span>{formatUrl(job.youtubeUrl)}</span>
+          <ProgressHeader
+            progress={overallProgress}
+            activeStepLabel={activeStep?.label}
+            completedSteps={completedCount}
+            totalSteps={totalSteps}
+            estimatedTime={getEstimatedTime()}
+            clipCount={clips.length}
+            status={job.status as any}
+          />
+        </div>
+
+        {/* Project Info */}
+        <Card className="mb-8 bg-gradient-card">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  Projeto #{job.id.slice(0, 8)}
+                </h2>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <ExternalLink className="w-4 h-4" />
+                  <span className="text-sm">{formatUrl(job.youtubeUrl)}</span>
+                </div>
               </div>
-            </div>
-            
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handleCopyJobId} className="gap-2">
+              
+              <Button variant="outline" onClick={handleCopyJobId} className="gap-2 hover:bg-primary/10">
                 <Copy className="w-4 h-4" />
                 Copiar ID
               </Button>
             </div>
-          </div>
-          
-          {/* Progress Overview */}
-          <Card>
-            <CardContent className="pt-6">
-              <JobProgress 
-                value={job.progress} 
-                label="Progresso Geral"
-                className="mb-4"
-              />
-              {friendlyError(job?.error || error) && (
-                <div className="mt-4 p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-destructive" />
-                  <span className="text-sm text-destructive">{friendlyError(job?.error || error)}</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+            
+            {/* Error Display */}
+            {friendlyError(job?.error || sseError) && (
+              <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
+                <span className="text-sm text-destructive">{friendlyError(job?.error || sseError)}</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-        <Tabs defaultValue="timeline" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="results" disabled={job.status !== 'completed'}>
-              Resultados
-            </TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="timeline" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Pipeline de Processamento</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {steps.map((step, index) => {
-                    const currentStepIndex = getCurrentStepIndex();
-                    const isCompleted = currentStepIndex > index;
-                    const isCurrent = currentStepIndex === index;
-                    const isPending = currentStepIndex < index;
-                    
-                    return (
-                      <div key={step.id} className="flex items-center gap-4">
-                        <div className="flex-shrink-0">
-                          {isCompleted ? (
-                            <CheckCircle className="w-6 h-6 text-green-500" />
-                          ) : isCurrent ? (
-                            <div className="w-6 h-6 rounded-full border-2 border-primary bg-primary/20 animate-pulse" />
-                          ) : (
-                            <Circle className="w-6 h-6 text-muted-foreground" />
-                          )}
-                        </div>
-                        
-                        <div className="flex-1">
-                          <h4 className={`font-medium ${isCurrent ? 'text-primary' : isCompleted ? 'text-foreground' : 'text-muted-foreground'}`}>
-                            {step.label}
-                          </h4>
-                          <p className="text-sm text-muted-foreground">
-                            {step.description}
-                          </p>
-                        </div>
+        <div className="grid lg:grid-cols-3 gap-8">
+          {/* Main Content */}
+          <div className="lg:col-span-2">
+            <Tabs defaultValue="progress" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="progress" className="gap-2">
+                  <TrendingUp className="w-4 h-4" />
+                  Progresso
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="results" 
+                  disabled={job.status !== 'completed' && readyCount === 0}
+                  className="gap-2"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  Resultados ({readyCount})
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="progress" className="space-y-6">
+                {/* Visual Timeline */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-primary" />
+                      Pipeline de Criação
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {steps.map((step, index) => (
+                      <TimelineStep 
+                        key={step.id} 
+                        step={step} 
+                        index={index} 
+                        total={steps.length} 
+                      />
+                    ))}
+                  </CardContent>
+                </Card>
+
+                {/* Current Status Card */}
+                {job.status === 'active' && activeStep && (
+                  <Card className="bg-primary/5 border-primary/20">
+                    <CardContent className="p-6 text-center">
+                      <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <TrendingUp className="w-8 h-8 text-primary animate-pulse" />
                       </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="results" className="space-y-6">
-            {job.status === 'completed' ? (
-              <>
-                {/* Video Player */}
-                {jobStatus?.result?.previewUrl && (
-                  <Card>
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <CardTitle>Preview do Clipe</CardTitle>
-                        <Button
-                          variant="default"
-                          onClick={async () => {
-                            const clipId = window.prompt('ID do clipe para exportar (ex.: clip-default)')?.trim();
-                            if (!clipId) return;
-                            try {
-                              await enqueueExport(job.id, clipId, getToken);
-                              toast({ title: 'Exportação iniciada', description: `Clip ${clipId} enviado para fila` });
-                            } catch (e: any) {
-                              toast({ title: 'Falha ao enfileirar exportação', description: e?.message || String(e), variant: 'destructive' });
-                            }
-                          }}
-                        >
-                          Exportar para YouTube
-                        </Button>
+                      <h3 className="text-lg font-semibold mb-2">
+                        {activeStep.label} em Andamento
+                      </h3>
+                      <p className="text-muted-foreground mb-4">
+                        Estamos na etapa mais importante: criar conteúdo que vai fazer você brilhar! ✨
+                      </p>
+                      <div className="text-sm text-primary font-medium">
+                        Primeiro clipe pronto em ~{Math.max(1, 5 - completedCount)} minutos
                       </div>
-                    </CardHeader>
-                    <CardContent>
-                      <Player url={jobStatus.result.previewUrl} />
                     </CardContent>
                   </Card>
                 )}
-                
-                {/* Generated Texts */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Textos Gerados</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    {jobStatus?.result?.texts?.titles && (
-                      <div>
-                        <h4 className="font-medium mb-2">Títulos Sugeridos</h4>
-                        <div className="space-y-2">
-                          {jobStatus.result.texts.titles.map((title, index) => (
-                            <div key={index} className="p-3 bg-muted rounded-md">
-                              <p className="text-sm">{title}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+              </TabsContent>
+              
+              <TabsContent value="results" className="space-y-6">
+                {job.status === 'completed' || readyCount > 0 ? (
+                  <>
+                    {/* Results Header */}
+                    <Card className="bg-gradient-primary text-primary-foreground">
+                      <CardContent className="p-6 text-center">
+                        <h2 className="text-2xl font-bold mb-2">
+                          🎉 {readyCount} Shorts Prontos para Viralizar!
+                        </h2>
+                        <p className="text-primary-foreground/90">
+                          Cada clipe foi criado para maximizar engajamento e alcance
+                        </p>
+                      </CardContent>
+                    </Card>
+
+                    {/* Clips Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                      {clips.map((clip, index) => (
+                        <ClipCard key={clip.id} clip={clip} index={index} />
+                      ))}
+                    </div>
+
+                    {/* Success CTA */}
+                    {job.status === 'completed' && (
+                      <Card className="bg-green-50 border-green-200">
+                        <CardContent className="p-6 text-center">
+                          <h3 className="text-lg font-semibold text-green-800 mb-2">
+                            Pronto para Conquistar as Redes! 🚀
+                          </h3>
+                          <p className="text-green-700 mb-4">
+                            Seus clipes estão otimizados para YouTube Shorts, Instagram Reels e TikTok
+                          </p>
+                          <Button className="bg-green-600 hover:bg-green-700 text-white">
+                            <TrendingUp className="w-4 h-4 mr-2" />
+                            Baixar Todos os Clipes
+                          </Button>
+                        </CardContent>
+                      </Card>
                     )}
-                    
-                    {jobStatus?.result?.texts?.descriptions && (
-                      <div>
-                        <h4 className="font-medium mb-2">Descrições</h4>
-                        <div className="space-y-2">
-                          {jobStatus.result.texts.descriptions.map((desc, index) => (
-                            <div key={index} className="p-3 bg-muted rounded-md">
-                              <p className="text-sm">{desc}</p>
-                            </div>
-                          ))}
-                        </div>
+                  </>
+                ) : (
+                  <Card className="bg-gradient-card">
+                    <CardContent className="py-16 text-center">
+                      <div className="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <Sparkles className="w-10 h-10 text-primary animate-pulse" />
                       </div>
-                    )}
-                    
-                    {jobStatus?.result?.texts?.hashtags && (
-                      <div>
-                        <h4 className="font-medium mb-2">Hashtags</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {jobStatus.result.texts.hashtags.map((tag, index) => (
-                            <Badge key={index} variant="outline">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
+                      <h3 className="text-xl font-semibold mb-3">
+                        Preparando Algo Incrível...
+                      </h3>
+                      <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                        Estamos analisando seu conteúdo para criar os clipes mais envolventes. 
+                        Os primeiros resultados aparecerão aqui em breve!
+                      </p>
+                      <div className="text-sm text-primary font-medium">
+                        ⏱️ Primeiro clipe em aproximadamente {getEstimatedTime()}
                       </div>
-                    )}
-                    
-                    {jobStatus?.result?.blogDraftUrl && (
-                      <div>
-                        <h4 className="font-medium mb-2">Blog Draft</h4>
-                        <Button asChild variant="outline">
-                          <a href={jobStatus.result.blogDraftUrl} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink className="w-4 h-4 mr-2" />
-                            Abrir Draft
-                          </a>
-                        </Button>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </>
-            ) : (
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-medium mb-2">Processamento em Andamento</h3>
-                  <p className="text-muted-foreground">
-                    Os resultados aparecerão aqui quando o processamento for concluído
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-        </Tabs>
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            <SocialProof />
+          </div>
+        </div>
       </div>
     </div>
   );

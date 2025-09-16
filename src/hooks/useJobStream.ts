@@ -36,6 +36,8 @@ export const useJobStream = (jobId: string) => {
           return;
         }
 
+        // SSE doesn't support custom headers, so we still need to use query params
+        // The backend will validate the token from query params
         const url = `https://qibjqqucmbrtuirysexl.functions.supabase.co/job-stream?id=${jobId}&token=${token}`;
         const eventSource = new EventSource(url);
         eventSourceRef.current = eventSource;
@@ -56,8 +58,18 @@ export const useJobStream = (jobId: string) => {
 
         eventSource.onerror = (event) => {
           setIsConnected(false);
-          setError('Connection error');
+          setError('SSE connection failed - will retry');
           console.error('SSE error:', event);
+          
+          // Close the failed connection
+          eventSource.close();
+          
+          // Retry after a delay
+          setTimeout(() => {
+            if (!eventSourceRef.current || eventSourceRef.current.readyState === EventSource.CLOSED) {
+              connectSSE();
+            }
+          }, 3000);
         };
 
       } catch (err) {
