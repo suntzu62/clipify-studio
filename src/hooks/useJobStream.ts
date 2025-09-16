@@ -14,6 +14,17 @@ export interface JobStatus {
       descriptions?: string[];
       hashtags?: string[];
     };
+    clips?: Array<{
+      id: string;
+      title: string;
+      description: string;
+      hashtags: string[];
+      previewUrl?: string;
+      downloadUrl?: string;
+      thumbnailUrl?: string;
+      duration: number;
+      status: 'processing' | 'ready' | 'failed';
+    }>;
     blogDraftUrl?: string;
   };
 }
@@ -47,14 +58,52 @@ export const useJobStream = (jobId: string) => {
           setError(null);
         };
 
+        // Handle different event types
         eventSource.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            console.log('📡 SSE message received:', data);
             setJobStatus(data);
           } catch (err) {
             console.error('Failed to parse SSE message:', err);
           }
         };
+
+        // Listen for specific named events
+        eventSource.addEventListener('connected', (event) => {
+          console.log('📡 SSE connected event');
+          setIsConnected(true);
+        });
+
+        eventSource.addEventListener('progress', (event) => {
+          try {
+            const data = JSON.parse((event as MessageEvent).data);
+            console.log('📡 SSE progress:', data);
+            setJobStatus(data);
+          } catch (err) {
+            console.error('Failed to parse progress event:', err);
+          }
+        });
+
+        eventSource.addEventListener('completed', (event) => {
+          try {
+            const data = JSON.parse((event as MessageEvent).data);
+            console.log('📡 SSE completed:', data);
+            setJobStatus(data);
+          } catch (err) {
+            console.error('Failed to parse completed event:', err);
+          }
+        });
+
+        eventSource.addEventListener('failed', (event) => {
+          try {
+            const data = JSON.parse((event as MessageEvent).data);
+            console.log('📡 SSE failed:', data);
+            setJobStatus(data);
+          } catch (err) {
+            console.error('Failed to parse failed event:', err);
+          }
+        });
 
         eventSource.onerror = (event) => {
           setIsConnected(false);

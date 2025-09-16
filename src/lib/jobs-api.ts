@@ -15,6 +15,17 @@ export interface Job {
       descriptions?: string[];
       hashtags?: string[];
     };
+    clips?: Array<{
+      id: string;
+      title: string;
+      description: string;
+      hashtags: string[];
+      previewUrl?: string;
+      downloadUrl?: string;
+      thumbnailUrl?: string;
+      duration: number;
+      status: 'processing' | 'ready' | 'failed';
+    }>;
     previewUrl?: string;
     downloadUrl?: string;
     thumbnailUrl?: string;

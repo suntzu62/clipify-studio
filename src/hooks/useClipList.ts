@@ -33,13 +33,20 @@ export const useClipList = (jobResult?: any) => {
       return;
     }
 
-    // Handle different data structures from API
+    // Check for ready clips first (from enhanced job-status response)
+    if (jobResult.result?.clips && jobResult.result.clips.length > 0) {
+      console.log('🎬 Using clips from result:', jobResult.result.clips);
+      setClips(jobResult.result.clips);
+      return;
+    }
+
+    // Fallback to extracting from texts (legacy support)
     const texts = jobResult.texts || jobResult.result?.texts;
     const titles = texts?.titles || [];
     const descriptions = texts?.descriptions || [];
     const hashtags = texts?.hashtags || [];
 
-    console.log('🎬 Extracted data:', { titles, descriptions, hashtags });
+    console.log('🎬 Extracted text data:', { titles, descriptions, hashtags });
 
     if (titles.length > 0) {
       const processedClips = titles.map((title: string, index: number) => ({
@@ -53,10 +60,10 @@ export const useClipList = (jobResult?: any) => {
         duration: 45, // Default duration
         status: 'ready' as const
       }));
-      console.log('🎬 Processed clips:', processedClips);
+      console.log('🎬 Processed clips from texts:', processedClips);
       setClips(processedClips);
     } else {
-      // Keep placeholder clips if no titles yet
+      // Keep placeholder clips if no data yet
       const placeholderClips = Array.from({ length: estimatedClipCount }, (_, index) => ({
         id: `clip-${index + 1}`,
         title: `Clipe ${index + 1}`,
