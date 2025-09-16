@@ -45,13 +45,11 @@ export default function ProjectDetail() {
     jobStatus?.currentStep, 
     jobStatus?.status
   );
-  // Get clips data - pass jobStatus.result or job.result
-  const clipData = jobStatus?.result || job?.result;
-  const { clips, readyCount, setEstimatedClipCount } = useClipList(clipData);
+  // Get clips data - pass full jobStatus or job object
+  const { clips, readyCount, setEstimatedClipCount } = useClipList(jobStatus || job);
   
   console.log('🎬 ProjectDetail - job:', job);
   console.log('🎬 ProjectDetail - jobStatus:', jobStatus);
-  console.log('🎬 ProjectDetail - clipData:', clipData);
   console.log('🎬 ProjectDetail - readyCount:', readyCount);
 
   useEffect(() => {

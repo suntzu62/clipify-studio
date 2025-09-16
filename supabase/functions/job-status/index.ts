@@ -76,28 +76,22 @@ async function enrichWithClipData(jobId: string, originalData: any) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
+    const bucket = 'raw'; // Use the correct bucket name
     
     // List files in clips and texts folders
     const { data: clipFiles, error: clipError } = await supabase.storage
-      .from('raw')
+      .from(bucket)
       .list(`projects/${jobId}/clips`, { limit: 1000 });
       
-    const { data: textFiles, error: textError } = await supabase.storage
-      .from('raw')  
+    const { data: textFolders, error: textError } = await supabase.storage
+      .from(bucket)  
       .list(`projects/${jobId}/texts`, { limit: 1000 });
     
     console.log('📁 Storage clips for jobId:', jobId, clipFiles?.length || 0, 'files');
-    console.log('📁 Storage texts for jobId:', jobId, textFiles?.length || 0, 'files');
+    console.log('📁 Storage text folders for jobId:', jobId, textFolders?.length || 0, 'folders');
 
     if (clipError || textError) {
       console.error('❌ Error listing files:', clipError || textError);
-      return normalizeJobData(originalData);
-    }
-
-    const allFiles = [...(clipFiles || []), ...(textFiles || [])];
-    
-    if (allFiles.length === 0) {
-      console.log('📭 No files found in storage for job:', jobId);
       return normalizeJobData(originalData);
     }
 
@@ -110,80 +104,105 @@ async function enrichWithClipData(jobId: string, originalData: any) {
     // Group MP4 and JPG files by base name
     const fileGroups = new Map<string, { mp4?: any, jpg?: any }>();
 
-    for (const file of allFiles) {
-      // Determine the full path based on source
-      let fullPath = '';
-      if (clipFiles?.includes(file)) {
-        fullPath = `projects/${jobId}/clips/${file.name}`;
-      } else if (textFiles?.includes(file)) {
-        fullPath = `projects/${jobId}/texts/${file.name}`;
-      }
-      
-      if (file.name.endsWith('.txt')) {
-        // Read text files for titles, descriptions, hashtags
-        const { data: textData } = await supabase.storage
-          .from('raw')
-          .download(fullPath);
-          
-        if (textData) {
-          const text = await textData.text();
-          const lines = text.split('\n').filter(line => line.trim());
-          
-          if (file.name.includes('title')) {
-            titles.push(...lines);
-          } else if (file.name.includes('description')) {
-            descriptions.push(...lines);
-          } else if (file.name.includes('hashtag')) {
-            hashtags.push(...lines);
+    // Process clip files (videos and thumbnails)
+    if (clipFiles && clipFiles.length > 0) {
+      for (const file of clipFiles) {
+        const fullPath = `projects/${jobId}/clips/${file.name}`;
+        
+        if (file.name.endsWith('.mp4')) {
+          // Handle video files
+          const baseName = file.name.replace('.mp4', '');
+          if (!fileGroups.has(baseName)) {
+            fileGroups.set(baseName, {});
           }
+          fileGroups.get(baseName)!.mp4 = { ...file, fullPath };
+        } else if (file.name.endsWith('.jpg')) {
+          // Handle thumbnail
+          const baseName = file.name.replace('.jpg', '');
+          if (!fileGroups.has(baseName)) {
+            fileGroups.set(baseName, {});
+          }
+          fileGroups.get(baseName)!.jpg = { ...file, fullPath };
         }
-      } else if (file.name.endsWith('.mp4')) {
-        // Handle video files
-        const baseName = file.name.replace('.mp4', '');
-        if (!fileGroups.has(baseName)) {
-          fileGroups.set(baseName, {});
-        }
-        fileGroups.get(baseName)!.mp4 = { ...file, fullPath };
-      } else if (file.name.endsWith('.jpg')) {
-        // Handle thumbnail
-        const baseName = file.name.replace('.jpg', '');
-        if (!fileGroups.has(baseName)) {
-          fileGroups.set(baseName, {});
-        }
-        fileGroups.get(baseName)!.jpg = { ...file, fullPath };
       }
     }
 
-    // Create clips from grouped files
+    // Process text folders to extract titles, descriptions, hashtags
+    if (textFolders && textFolders.length > 0) {
+      for (const folder of textFolders) {
+        if (folder.name && folder.name !== '.emptyFolderPlaceholder') {
+          // List files in each text subfolder
+          const { data: textFiles } = await supabase.storage
+            .from(bucket)
+            .list(`projects/${jobId}/texts/${folder.name}`, { limit: 100 });
+          
+          if (textFiles) {
+            for (const textFile of textFiles) {
+              const fullPath = `projects/${jobId}/texts/${folder.name}/${textFile.name}`;
+              
+              if (textFile.name.endsWith('.txt') || textFile.name.endsWith('.md')) {
+                // Read text files for titles, descriptions, hashtags
+                const { data: textData } = await supabase.storage
+                  .from(bucket)
+                  .download(fullPath);
+                  
+                if (textData) {
+                  const text = await textData.text();
+                  const content = text.trim();
+                  
+                  if (textFile.name.includes('title')) {
+                    if (content) titles.push(content);
+                  } else if (textFile.name.includes('description')) {
+                    if (content) descriptions.push(content);
+                  } else if (textFile.name.includes('hashtag')) {
+                    // Split hashtags by lines or spaces and clean them
+                    const hashtagList = content
+                      .split(/[\n\s,]+/)
+                      .map(tag => tag.trim())
+                      .filter(tag => tag.length > 0);
+                    hashtags.push(...hashtagList);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Create clips from grouped files with signed URLs for private bucket
+    let clipIndex = 0;
     for (const [baseName, group] of fileGroups) {
       if (group.mp4) {
-        const { data: { publicUrl: previewUrl } } = supabase.storage
-          .from('raw')
-          .getPublicUrl(group.mp4.fullPath);
+        // Generate signed URLs for private bucket (valid for 7 days)
+        const { data: previewSignedUrl } = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(group.mp4.fullPath, 7 * 24 * 60 * 60); // 7 days
 
-        const { data: { publicUrl: downloadUrl } } = supabase.storage
-          .from('raw')
-          .getPublicUrl(group.mp4.fullPath);
+        const { data: downloadSignedUrl } = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(group.mp4.fullPath, 7 * 24 * 60 * 60); // 7 days
 
         let thumbnailUrl = '';
         if (group.jpg) {
-          const { data: { publicUrl } } = supabase.storage
-            .from('raw')
-            .getPublicUrl(group.jpg.fullPath);
-          thumbnailUrl = publicUrl;
+          const { data: thumbnailSignedUrl } = await supabase.storage
+            .from(bucket)
+            .createSignedUrl(group.jpg.fullPath, 7 * 24 * 60 * 60); // 7 days
+          thumbnailUrl = thumbnailSignedUrl?.signedUrl || '';
         }
 
         clips.push({
           id: baseName,
-          title: titles[clips.length] || `Clipe ${clips.length + 1}`,
-          description: descriptions[clips.length] || 'Descrição gerada automaticamente',
-          hashtags: hashtags.slice(clips.length * 3, (clips.length + 1) * 3),
-          previewUrl,
-          downloadUrl,
+          title: titles[clipIndex] || `Clipe ${clipIndex + 1}`,
+          description: descriptions[clipIndex] || 'Descrição gerada automaticamente',
+          hashtags: hashtags.slice(clipIndex * 3, (clipIndex + 1) * 3),
+          previewUrl: previewSignedUrl?.signedUrl || '',
+          downloadUrl: downloadSignedUrl?.signedUrl || '',
           thumbnailUrl: thumbnailUrl || undefined,
           duration: 60,
           status: 'ready'
         });
+        clipIndex++;
       }
     }
 

@@ -19,6 +19,9 @@ export const useClipList = (jobResult?: any) => {
   useEffect(() => {
     console.log('🎬 useClipList - jobResult:', jobResult);
     
+    // Extract result from jobResult (support both full job object and result-only)
+    const result = jobResult?.result ?? jobResult ?? {};
+    
     if (!jobResult) {
       // Create placeholder clips while processing
       const placeholderClips = Array.from({ length: estimatedClipCount }, (_, index) => ({
@@ -34,14 +37,14 @@ export const useClipList = (jobResult?: any) => {
     }
 
     // Check for ready clips first (from enhanced job-status response)
-    if (jobResult.result?.clips && jobResult.result.clips.length > 0) {
-      console.log('🎬 Using clips from result:', jobResult.result.clips);
-      setClips(jobResult.result.clips);
+    if (result.clips && result.clips.length > 0) {
+      console.log('🎬 Using clips from result:', result.clips);
+      setClips(result.clips);
       return;
     }
 
     // Fallback to extracting from texts (legacy support)
-    const texts = jobResult.texts || jobResult.result?.texts;
+    const texts = result.texts || jobResult.texts;
     const titles = texts?.titles || [];
     const descriptions = texts?.descriptions || [];
     const hashtags = texts?.hashtags || [];
