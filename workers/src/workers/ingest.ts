@@ -9,8 +9,19 @@ import pino from 'pino';
 
 // Configure youtube-dl-exec to use system binary when available
 const ytdlBinaryPath = process.env.YTDL_BINARY_PATH || '/usr/bin/yt-dlp';
-if (process.env.YTDL_BINARY_PATH || await fs.access(ytdlBinaryPath).then(() => true).catch(() => false)) {
-  youtubedl.setOpt('binaryPath', ytdlBinaryPath);
+const ytdl = youtubedl.create();
+
+// Check if system binary exists and configure if available
+async function configureYtdl() {
+  try {
+    if (process.env.YTDL_BINARY_PATH) {
+      return youtubedl.create(ytdlBinaryPath);
+    }
+    await fs.access(ytdlBinaryPath);
+    return youtubedl.create(ytdlBinaryPath);
+  } catch {
+    return youtubedl.create(); // Use default binary
+  }
 }
 
 const log = pino({ name: 'ingest' });
@@ -104,7 +115,8 @@ export async function runIngest(job: Job): Promise<IngestResult> {
 
 async function probeVideo(url: string): Promise<VideoInfo> {
   try {
-    const info = await youtubedl(url, {
+    const ytdl = await configureYtdl();
+    const info = await ytdl(url, {
       dumpSingleJson: true,
       skipDownload: true,
       noPlaylist: true,
@@ -152,8 +164,9 @@ async function downloadVideo(
     options.ffmpegLocation = ffmpegPath;
   }
   
-  return new Promise((resolve, reject) => {
-    const process = youtubedl.exec(url, options);
+  return new Promise(async (resolve, reject) => {
+    const ytdl = await configureYtdl();
+    const process = ytdl.exec(url, options);
     
     let lastProgress = 0;
     

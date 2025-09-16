@@ -22,10 +22,10 @@ export async function generateJSON<T = any>(
   const modelToUse = model || 'gpt-4o-mini';
   
   // Try different response formats for compatibility
-  const responseFormats = [
+  const responseFormats: Array<{ type: 'json_schema'; json_schema: any } | { type: 'json_object' } | undefined> = [
     // Modern structured output
     {
-      type: 'json_schema',
+      type: 'json_schema' as const,
       json_schema: {
         name: 'structured_output',
         schema,
@@ -33,7 +33,9 @@ export async function generateJSON<T = any>(
       },
     },
     // Fallback to json_object
-    { type: 'json_object' },
+    { type: 'json_object' as const },
+    // Final fallback with no response format
+    undefined,
   ];
 
   for (let i = 0; i < responseFormats.length; i++) {
@@ -45,7 +47,7 @@ export async function generateJSON<T = any>(
           { role: 'user', content: prompt }
         ],
         temperature: 0.7,
-        response_format: responseFormats[i],
+        ...(responseFormats[i] && { response_format: responseFormats[i] }),
       });
 
       const text: string = resp?.output_text
@@ -69,4 +71,7 @@ export async function generateJSON<T = any>(
       }
     }
   }
+
+  // This should never be reached due to the throw above, but TypeScript needs it
+  throw new Error('Unexpected end of generateJSON function');
 }
