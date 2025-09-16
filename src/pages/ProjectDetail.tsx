@@ -29,9 +29,13 @@ export default function ProjectDetail() {
   const [job, setJob] = useState<Job | null>(null);
   const telemetryFired = useRef<'none' | 'completed' | 'failed'>('none');
   
-  // Try SSE first, fallback to polling on failure
+  // Try SSE first, fallback to polling on failure or as continuous backup
   const { jobStatus: sseJobStatus, isConnected, error: sseError } = useJobStream(id || '');
-  const { jobStatus: pollingJobStatus, isPolling } = usePolling(id || '', !isConnected && !!sseError, getToken);
+  const { jobStatus: pollingJobStatus, isPolling } = usePolling(
+    id || '', 
+    !isConnected || !!sseError || (!sseJobStatus && job?.status !== 'completed'), 
+    getToken
+  );
   
   // Use SSE data when available, otherwise use polling data
   const jobStatus = sseJobStatus || pollingJobStatus;

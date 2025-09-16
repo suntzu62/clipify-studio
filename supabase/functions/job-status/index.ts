@@ -77,73 +77,111 @@ async function enrichWithClipData(jobId: string, originalData: any) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
     
-    // List files in the raw bucket for this job
-    const { data: files, error } = await supabase.storage
+    // List files in clips and texts folders
+    const { data: clipFiles, error: clipError } = await supabase.storage
       .from('raw')
-      .list(jobId, { limit: 100 });
+      .list(`projects/${jobId}/clips`, { limit: 1000 });
+      
+    const { data: textFiles, error: textError } = await supabase.storage
+      .from('raw')  
+      .list(`projects/${jobId}/texts`, { limit: 1000 });
+    
+    console.log('📁 Storage clips for jobId:', jobId, clipFiles?.length || 0, 'files');
+    console.log('📁 Storage texts for jobId:', jobId, textFiles?.length || 0, 'files');
 
-    if (error) {
-      console.error('[job-status] Storage list error:', error);
+    if (clipError || textError) {
+      console.error('❌ Error listing files:', clipError || textError);
       return normalizeJobData(originalData);
     }
 
-    console.log('[job-status] Found files:', files?.length || 0);
-
-    // Extract clips and metadata
-    const clips = [];
-    const texts: { titles?: string[], descriptions?: string[], hashtags?: string[] } = {};
+    const allFiles = [...(clipFiles || []), ...(textFiles || [])];
     
-    if (files && files.length > 0) {
-      // Group files by type
-      const mp4Files = files.filter(f => f.name.endsWith('.mp4')).sort();
-      const jpgFiles = files.filter(f => f.name.endsWith('.jpg')).sort();
-      const textFiles = files.filter(f => f.name.includes('texts'));
+    if (allFiles.length === 0) {
+      console.log('📭 No files found in storage for job:', jobId);
+      return normalizeJobData(originalData);
+    }
 
-      console.log('[job-status] MP4s:', mp4Files.length, 'JPGs:', jpgFiles.length, 'Texts:', textFiles.length);
+    // Process files to extract texts and clips
+    const titles: string[] = [];
+    const descriptions: string[] = [];
+    const hashtags: string[] = [];
+    const clips: any[] = [];
 
-      // Process text files to extract titles, descriptions, hashtags
-      for (const textFile of textFiles) {
-        try {
-          const { data: textData } = await supabase.storage
-            .from('raw')
-            .download(`${jobId}/${textFile.name}`);
-          
-          if (textData) {
-            const content = await textData.text();
-            const parsed = JSON.parse(content);
-            
-            if (parsed.titles) texts.titles = parsed.titles;
-            if (parsed.descriptions) texts.descriptions = parsed.descriptions;
-            if (parsed.hashtags) texts.hashtags = parsed.hashtags;
-          }
-        } catch (err) {
-          console.error('[job-status] Error parsing text file:', textFile.name, err);
-        }
+    // Group MP4 and JPG files by base name
+    const fileGroups = new Map<string, { mp4?: any, jpg?: any }>();
+
+    for (const file of allFiles) {
+      // Determine the full path based on source
+      let fullPath = '';
+      if (clipFiles?.includes(file)) {
+        fullPath = `projects/${jobId}/clips/${file.name}`;
+      } else if (textFiles?.includes(file)) {
+        fullPath = `projects/${jobId}/texts/${file.name}`;
       }
-
-      // Create clips from MP4 files
-      for (let i = 0; i < mp4Files.length; i++) {
-        const mp4File = mp4Files[i];
-        const jpgFile = jpgFiles.find(j => j.name.includes(`clip-${i + 1}`) || j.name.includes(`${i + 1}`));
-        
-        // Generate public URLs for the files
-        const { data: videoUrl } = supabase.storage
+      
+      if (file.name.endsWith('.txt')) {
+        // Read text files for titles, descriptions, hashtags
+        const { data: textData } = await supabase.storage
           .from('raw')
-          .getPublicUrl(`${jobId}/${mp4File.name}`);
+          .download(fullPath);
           
-        const thumbnailUrl = jpgFile ? supabase.storage
+        if (textData) {
+          const text = await textData.text();
+          const lines = text.split('\n').filter(line => line.trim());
+          
+          if (file.name.includes('title')) {
+            titles.push(...lines);
+          } else if (file.name.includes('description')) {
+            descriptions.push(...lines);
+          } else if (file.name.includes('hashtag')) {
+            hashtags.push(...lines);
+          }
+        }
+      } else if (file.name.endsWith('.mp4')) {
+        // Handle video files
+        const baseName = file.name.replace('.mp4', '');
+        if (!fileGroups.has(baseName)) {
+          fileGroups.set(baseName, {});
+        }
+        fileGroups.get(baseName)!.mp4 = { ...file, fullPath };
+      } else if (file.name.endsWith('.jpg')) {
+        // Handle thumbnail
+        const baseName = file.name.replace('.jpg', '');
+        if (!fileGroups.has(baseName)) {
+          fileGroups.set(baseName, {});
+        }
+        fileGroups.get(baseName)!.jpg = { ...file, fullPath };
+      }
+    }
+
+    // Create clips from grouped files
+    for (const [baseName, group] of fileGroups) {
+      if (group.mp4) {
+        const { data: { publicUrl: previewUrl } } = supabase.storage
           .from('raw')
-          .getPublicUrl(`${jobId}/${jpgFile.name}`).data.publicUrl : undefined;
+          .getPublicUrl(group.mp4.fullPath);
+
+        const { data: { publicUrl: downloadUrl } } = supabase.storage
+          .from('raw')
+          .getPublicUrl(group.mp4.fullPath);
+
+        let thumbnailUrl = '';
+        if (group.jpg) {
+          const { data: { publicUrl } } = supabase.storage
+            .from('raw')
+            .getPublicUrl(group.jpg.fullPath);
+          thumbnailUrl = publicUrl;
+        }
 
         clips.push({
-          id: `clip-${i + 1}`,
-          title: texts.titles?.[i] || `Clipe ${i + 1}`,
-          description: texts.descriptions?.[i] || 'Descrição gerada automaticamente',
-          hashtags: texts.hashtags?.slice(i * 3, (i + 1) * 3) || [],
-          previewUrl: videoUrl.publicUrl,
-          downloadUrl: videoUrl.publicUrl,
-          thumbnailUrl,
-          duration: 45,
+          id: baseName,
+          title: titles[clips.length] || `Clipe ${clips.length + 1}`,
+          description: descriptions[clips.length] || 'Descrição gerada automaticamente',
+          hashtags: hashtags.slice(clips.length * 3, (clips.length + 1) * 3),
+          previewUrl,
+          downloadUrl,
+          thumbnailUrl: thumbnailUrl || undefined,
+          duration: 60,
           status: 'ready'
         });
       }
@@ -153,12 +191,16 @@ async function enrichWithClipData(jobId: string, originalData: any) {
       ...normalizeJobData(originalData),
       result: {
         ...originalData.result,
-        texts,
+        texts: {
+          titles: titles.length > 0 ? titles : undefined,
+          descriptions: descriptions.length > 0 ? descriptions : undefined,
+          hashtags: hashtags.length > 0 ? hashtags : undefined
+        },
         clips: clips.length > 0 ? clips : undefined
       }
     };
 
-    console.log('[job-status] Enhanced with clips:', clips.length);
+    console.log('[job-status] Enhanced with clips:', clips.length, 'titles:', titles.length);
     return result;
   } catch (err) {
     console.error('[job-status] Error enriching data:', err);

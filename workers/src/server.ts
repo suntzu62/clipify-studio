@@ -182,13 +182,19 @@ export async function start() {
       await qe.waitUntilReady();
 
       qe.on('progress', ({ jobId, data }) => {
-        if (jobId === id) send('progress', { queue: q, jobId, progress: data });
+        if (jobId === id || jobId.startsWith(id + ':')) {
+          send('progress', { queue: q, jobId, progress: data });
+        }
       });
       qe.on('completed', ({ jobId, returnvalue }) => {
-        if (jobId === id) send('completed', { queue: q, jobId, returnvalue });
+        if (jobId === id || jobId.startsWith(id + ':')) {
+          send('completed', { queue: q, jobId, returnvalue });
+        }
       });
       qe.on('failed', ({ jobId, failedReason }) => {
-        if (jobId === id) send('failed', { queue: q, jobId, failedReason });
+        if (jobId === id || jobId.startsWith(id + ':')) {
+          send('failed', { queue: q, jobId, failedReason });
+        }
       });
 
       events.push(qe);
