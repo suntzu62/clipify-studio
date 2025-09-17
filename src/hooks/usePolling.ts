@@ -31,8 +31,9 @@ export const usePolling = (
         setJobStatus(status as JobStatus);
         setError(null);
         
-        // Stop polling if job is completed or failed
-        if (status.status === 'completed' || status.status === 'failed') {
+        // Stop polling if job is completed/failed AND we have clips, or if job failed
+        const hasClips = status.result?.clips && status.result.clips.length > 0;
+        if (status.status === 'failed' || (status.status === 'completed' && hasClips)) {
           setIsPolling(false);
           if (intervalRef.current) {
             clearInterval(intervalRef.current);

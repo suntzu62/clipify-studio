@@ -63,7 +63,13 @@ export const useJobStream = (jobId: string) => {
           try {
             const data = JSON.parse(event.data);
             console.log('📡 SSE message received:', data);
-            setJobStatus(data);
+            
+            // Only update jobStatus if the event contains meaningful status or result data
+            if (data && (data.status || data.state || data.result)) {
+              setJobStatus(data);
+            } else {
+              console.log('📡 SSE event ignored (no status/result):', data);
+            }
           } catch (err) {
             console.error('Failed to parse SSE message:', err);
           }
@@ -79,7 +85,13 @@ export const useJobStream = (jobId: string) => {
           try {
             const data = JSON.parse((event as MessageEvent).data);
             console.log('📡 SSE progress:', data);
-            setJobStatus(data);
+            
+            // Only update if it has meaningful status or result data
+            if (data && (data.status || data.state || data.result)) {
+              setJobStatus(data);
+            } else {
+              console.log('📡 SSE progress ignored (no status/result):', data);
+            }
           } catch (err) {
             console.error('Failed to parse progress event:', err);
           }

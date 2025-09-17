@@ -33,12 +33,15 @@ export default function ProjectDetail() {
   const { jobStatus: sseJobStatus, isConnected, error: sseError } = useJobStream(id || '');
   const { jobStatus: pollingJobStatus, isPolling } = usePolling(
     id || '', 
-    !isConnected || !!sseError || (!sseJobStatus && job?.status !== 'completed'), 
+    true, // Keep polling active to get enriched data with clips
     getToken
   );
   
-  // Use SSE data when available, otherwise use polling data
-  const jobStatus = sseJobStatus || pollingJobStatus;
+  // Prioritize polling data over SSE unless SSE provides complete data
+  // This ensures we get the enriched data from job-status endpoint with clips
+  const hasClips = (data: any) => data?.result?.clips && data.result.clips.length > 0;
+  const jobStatus = (pollingJobStatus && hasClips(pollingJobStatus)) ? pollingJobStatus : 
+                    (sseJobStatus || pollingJobStatus);
   
   // Custom hooks for timeline and clips
   const { steps, activeStep, completedCount, totalSteps, overallProgress } = useTimeline(
