@@ -72,23 +72,57 @@ export async function enqueuePipeline(
     ...(await getAuthHeader(getToken)),
   } as Record<string, string>;
 
-  const resp = await fetch('https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/enqueue-pipeline', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      youtubeUrl,
-      neededMinutes,
-      meta: { targetDuration }
-    }),
-  });
+  let retryCount = 0;
+  const maxRetries = 3;
 
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to enqueue pipeline';
-    throw new Error(`enqueue-pipeline failed: ${resp.status} ${resp.statusText} - ${msg}`);
+  while (retryCount <= maxRetries) {
+    try {
+      const resp = await fetch('https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/enqueue-pipeline', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          youtubeUrl,
+          neededMinutes,
+          meta: { targetDuration }
+        }),
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      
+      if (resp.ok) {
+        return data;
+      }
+
+      // Handle 429 errors with exponential backoff
+      if (resp.status === 429) {
+        if (retryCount === maxRetries) {
+          const isUserLimit = (data as any)?.error === 'user_rate_limit_exceeded';
+          const msg = isUserLimit 
+            ? 'Você atingiu o limite de 10 projetos por hora. Tente novamente em alguns minutos.'
+            : 'Sistema temporariamente sobrecarregado. Tente novamente em alguns minutos.';
+          throw new Error(msg);
+        }
+        
+        // Exponential backoff: 2s, 6s, 18s
+        const delay = Math.pow(3, retryCount) * 2000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retryCount++;
+        continue;
+      }
+
+      // For other errors, throw immediately
+      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to enqueue pipeline';
+      throw new Error(`enqueue-pipeline failed: ${resp.status} ${resp.statusText} - ${msg}`);
+      
+    } catch (error) {
+      if (retryCount === maxRetries || !(error instanceof Error && error.message.includes('429'))) {
+        throw error;
+      }
+      retryCount++;
+    }
   }
 
-  return data;
+  throw new Error('Max retries exceeded');
 }
 
 export async function getJobStatus(

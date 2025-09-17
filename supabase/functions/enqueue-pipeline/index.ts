@@ -32,6 +32,29 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'youtubeUrl required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
     }
 
+    // Per-user rate limiting (10 pipelines per hour)
+    const userId = auth.userId;
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { auth: { persistSession: false } }
+    );
+    
+    // Check user's recent pipeline requests
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { data: recentJobs, error: jobsError } = await supabase
+      .from('user_jobs')
+      .select('id')
+      .eq('user_id', userId)
+      .gte('created_at', oneHourAgo);
+    
+    if (!jobsError && recentJobs && recentJobs.length >= 10) {
+      return new Response(
+        JSON.stringify({ error: 'user_rate_limit_exceeded', message: 'Máximo de 10 projetos por hora atingido' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 429 }
+      );
+    }
+
     // Best-effort usage check via get-usage (do not block on failure)
     try {
       const supabase = createClient(

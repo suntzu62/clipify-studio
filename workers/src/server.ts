@@ -39,12 +39,18 @@ export async function start() {
   // Add root route
   app.get('/', async () => 'OK');
   
-  // Rate limit per API key or IP - more generous for SSE endpoints
+  // Rate limit per API key or IP - increased for pipeline workload
   await app.register((await import('@fastify/rate-limit')).default, {
-    max: 120, // Increased from 60 to handle SSE connections better
+    max: 300, // Increased from 120 to handle multiple users creating clips
     timeWindow: '1 minute',
     keyGenerator: (req: any) => (req.headers['x-api-key'] as string) || req.ip,
     skipOnError: true, // Don't rate limit on errors
+    // More generous rate limit for pipeline endpoint
+    preHandler: async (req: any, res: any) => {
+      if (req.url?.includes('/pipeline')) {
+        res.rateLimit = { max: 200, timeWindow: '1 minute' };
+      }
+    }
   });
   app.register(fastifySSE);
 
