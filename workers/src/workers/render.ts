@@ -100,20 +100,22 @@ export async function runRender(job: Job): Promise<any> {
       // 3) Build filtergraph (9:16 + subtitles)
       const vf = `${vfBase},subtitles=${tmpAss}:${style},fps=${fps}`;
 
-      // 4-5) Render
+      // 4-5) Render - OPTIMIZED FOR SPEED
       const args = [
         '-ss', String(start), '-t', String(dur),
         '-i', tmpSource,
         '-map', '0:v:0', '-map', '0:a:0',
         '-vf', vf,
         '-af', af,
-        '-c:v', 'libx264', '-preset', 'medium', '-profile:v', 'high', '-level', '4.1',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-profile:v', 'high', '-level', '4.1',
         '-pix_fmt', 'yuv420p',
-        '-b:v', process.env.RENDER_VIDEO_BITRATE || '8M',
-        '-maxrate', process.env.RENDER_VIDEO_MAXRATE || '10M',
-        '-bufsize', process.env.RENDER_VIDEO_BUFSIZE || '20M',
-        '-g', '60', '-keyint_min', '60',
-        '-c:a', 'aac', '-b:a', process.env.RENDER_AUDIO_BITRATE || '160k', '-ac', '2', '-ar', '48000',
+        '-b:v', process.env.RENDER_VIDEO_BITRATE || '6M',
+        '-maxrate', process.env.RENDER_VIDEO_MAXRATE || '8M', 
+        '-bufsize', process.env.RENDER_VIDEO_BUFSIZE || '12M',
+        '-g', '30', '-keyint_min', '30',
+        '-tune', 'fastdecode',
+        '-threads', '0', // Use all available threads
+        '-c:a', 'aac', '-b:a', process.env.RENDER_AUDIO_BITRATE || '128k', '-ac', '2', '-ar', '48000',
         '-movflags', '+faststart',
         outFile,
       ];

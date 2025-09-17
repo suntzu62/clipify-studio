@@ -94,25 +94,24 @@ export async function start() {
                   data: { rootId },
                   opts: { jobId: `${rootId}:rank`, ...jobOpts },
                   children: [
+                    // PARALLEL EXECUTION: RENDER and TEXTS run simultaneously after RANK
                     {
                       name: 'render',
                       queueName: QUEUES.RENDER,
                       data: { rootId },
                       opts: { jobId: `${rootId}:render`, ...jobOpts },
+                    },
+                    {
+                      name: 'texts',
+                      queueName: QUEUES.TEXTS,
+                      data: { rootId },
+                      opts: { jobId: `${rootId}:texts`, ...jobOpts },
                       children: [
                         {
-                          name: 'texts',
-                          queueName: QUEUES.TEXTS,
+                          name: 'export',
+                          queueName: QUEUES.EXPORT,
                           data: { rootId },
-                          opts: { jobId: `${rootId}:texts`, ...jobOpts },
-                          children: [
-                            {
-                              name: 'export',
-                              queueName: QUEUES.EXPORT,
-                              data: { rootId },
-                              opts: { jobId: `${rootId}:export`, ...jobOpts },
-                            },
-                          ],
+                          opts: { jobId: `${rootId}:export`, ...jobOpts },
                         },
                       ],
                     },
