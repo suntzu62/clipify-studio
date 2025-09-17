@@ -59,6 +59,27 @@ serve(async (req) => {
     }
     console.log('[job-stream] upstream status:', upstream.status);
 
+    // Handle rate limiting gracefully
+    if (upstream.status === 429 || upstream.status === 503) {
+      console.log('[job-stream] rate limited, sending retry directive');
+      
+      const headers = new Headers();
+      headers.set('Access-Control-Allow-Origin', '*');
+      headers.set('Content-Type', 'text/event-stream');
+      headers.set('Cache-Control', 'no-cache');
+      headers.set('Connection', 'keep-alive');
+
+      // Create a custom SSE response with retry directive
+      const retryAfter = 30000; // 30 seconds
+      const sseResponse = `retry: ${retryAfter}\n\nevent: info\ndata: ${JSON.stringify({ 
+        reason: "rate_limited", 
+        retryAfter,
+        message: "Rate limit exceeded, backing off"
+      })}\n\n`;
+
+      return new Response(sseResponse, { status: 200, headers });
+    }
+
     const headers = new Headers(upstream.headers);
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Content-Type', 'text/event-stream');

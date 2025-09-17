@@ -39,11 +39,12 @@ export async function start() {
   // Add root route
   app.get('/', async () => 'OK');
   
-  // Rate limit per API key or IP
+  // Rate limit per API key or IP - more generous for SSE endpoints
   await app.register((await import('@fastify/rate-limit')).default, {
-    max: 60,
+    max: 120, // Increased from 60 to handle SSE connections better
     timeWindow: '1 minute',
     keyGenerator: (req: any) => (req.headers['x-api-key'] as string) || req.ip,
+    skipOnError: true, // Don't rate limit on errors
   });
   app.register(fastifySSE);
 
@@ -164,7 +165,7 @@ export async function start() {
     res.send({ id: job.id, state, progress });
   });
 
-  // SSE stream of job events
+  // SSE stream of job events - with heartbeat
   app.get('/api/jobs/:id/stream', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
     const { id } = req.params as { id: string };
     res.raw.setHeader('Content-Type', 'text/event-stream');
@@ -172,6 +173,15 @@ export async function start() {
     res.raw.setHeader('Connection', 'keep-alive');
 
     res.sse({ event: 'connected', data: JSON.stringify({ ok: true, id }) });
+
+    // Send heartbeat every 15 seconds to keep connection alive
+    const heartbeat = setInterval(() => {
+      try {
+        res.sse({ event: 'ping', data: JSON.stringify({ timestamp: Date.now() }) });
+      } catch (err) {
+        clearInterval(heartbeat);
+      }
+    }, 15000);
 
     const events: QueueEvents[] = [];
     const send = (event: string, payload: any) => res.sse({ event, data: JSON.stringify(payload) });
@@ -200,6 +210,7 @@ export async function start() {
     }
 
     req.raw.on('close', async () => {
+      clearInterval(heartbeat);
       for (const e of events) await e.close();
     });
   });

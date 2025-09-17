@@ -28,12 +28,13 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     return status.status === 'completed' || status.status === 'failed';
   }, []);
 
-  // Calculate exponential backoff delay
+  // Calculate exponential backoff delay with jitter
   const getReconnectDelay = useCallback(() => {
-    const baseDelay = 3000; // 3 seconds
-    const maxDelay = 30000; // 30 seconds
+    const baseDelay = 10000; // 10 seconds (increased from 3)
+    const maxDelay = 60000; // 60 seconds (increased from 30)
     const exponentialDelay = baseDelay * Math.pow(2, Math.min(reconnectAttempts.current, 4));
-    return Math.min(exponentialDelay, maxDelay);
+    const jitter = Math.random() * 0.1 * exponentialDelay; // Add 10% jitter
+    return Math.min(exponentialDelay + jitter, maxDelay);
   }, []);
 
   // Clean up all connections
@@ -90,7 +91,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
 
     // Set up interval only if job is not terminal
     if (!isJobTerminal(lastJobStatus.current)) {
-      pollingIntervalRef.current = setInterval(poll, 8000); // Slower polling - 8 seconds
+      pollingIntervalRef.current = setInterval(poll, 15000); // Even slower polling - 15 seconds
     }
   }, [enabled, jobId, getToken, isJobTerminal]);
 
@@ -130,6 +131,20 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
         try {
           const data = JSON.parse(event.data);
           
+          // Handle rate limiting info events
+          if (event.type === 'info' && data.reason === 'rate_limited') {
+            console.log('[useJobStatus] Rate limited, backing off for', data.retryAfter);
+            setError('Rate limited - backing off');
+            eventSource.close();
+            
+            // Long cooldown for rate limiting
+            reconnectTimeoutRef.current = setTimeout(() => {
+              console.log('[useJobStatus] Rate limit cooldown finished, switching to polling');
+              startPolling();
+            }, data.retryAfter || 60000);
+            return;
+          }
+          
           if (data && (data.status || data.state || data.result)) {
             // Only update if data actually changed
             if (JSON.stringify(data) !== JSON.stringify(lastJobStatus.current)) {
@@ -151,6 +166,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
       eventSource.addEventListener('progress', (event) => handleMessage(event as MessageEvent));
       eventSource.addEventListener('completed', (event) => handleMessage(event as MessageEvent));
       eventSource.addEventListener('failed', (event) => handleMessage(event as MessageEvent));
+      eventSource.addEventListener('info', (event) => handleMessage(event as MessageEvent));
 
       eventSource.onerror = () => {
         setIsConnected(false);
@@ -169,10 +185,10 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
           console.log(`[useJobStatus] SSE retry #${reconnectAttempts.current} in ${delay}ms`);
           
           reconnectTimeoutRef.current = setTimeout(() => {
-            // After 30 seconds of SSE failure, switch to polling
+            // After 20 seconds of SSE failure, switch to polling
             const failureDuration = Date.now() - (sseFailedAt.current || 0);
-            if (failureDuration > 30000) {
-              console.log('[useJobStatus] SSE failed for 30s, switching to polling');
+            if (failureDuration > 20000) {
+              console.log('[useJobStatus] SSE failed for 20s, switching to polling');
               startPolling();
             } else {
               startSSE();
