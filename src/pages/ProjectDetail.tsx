@@ -6,8 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, Copy, ExternalLink, AlertCircle, Sparkles, TrendingUp } from 'lucide-react';
-import { useJobStream } from '@/hooks/useJobStream';
-import { usePolling } from '@/hooks/usePolling';
+import { useJobStatus } from '@/hooks/useJobStatus';
 import { useTimeline } from '@/hooks/useTimeline';
 import { useClipList } from '@/hooks/useClipList';
 import { ProgressHeader } from '@/components/progress/ProgressHeader';
@@ -29,19 +28,11 @@ export default function ProjectDetail() {
   const [job, setJob] = useState<Job | null>(null);
   const telemetryFired = useRef<'none' | 'completed' | 'failed'>('none');
   
-  // Try SSE first, fallback to polling on failure or as continuous backup
-  const { jobStatus: sseJobStatus, isConnected, error: sseError } = useJobStream(id || '');
-  const { jobStatus: pollingJobStatus, isPolling } = usePolling(
-    id || '', 
-    true, // Keep polling active to get enriched data with clips
-    getToken
-  );
-  
-  // Prioritize polling data over SSE unless SSE provides complete data
-  // This ensures we get the enriched data from job-status endpoint with clips
-  const hasClips = (data: any) => data?.result?.clips && data.result.clips.length > 0;
-  const jobStatus = (pollingJobStatus && hasClips(pollingJobStatus)) ? pollingJobStatus : 
-                    (sseJobStatus || pollingJobStatus);
+  // Use unified job status hook with intelligent SSE/polling fallback
+  const { jobStatus, isConnected, connectionType, error } = useJobStatus({
+    jobId: id || '',
+    enabled: !!id
+  });
   
   // Custom hooks for timeline and clips
   const { steps, activeStep, completedCount, totalSteps, overallProgress } = useTimeline(
@@ -200,7 +191,7 @@ export default function ProjectDetail() {
               <Badge variant={getStatusColor(job.status)} className="gap-1">
                 {getStatusText(job.status)}
               </Badge>
-              {isPolling && (
+              {(connectionType === 'polling' || !isConnected) && (
                 <Badge variant="outline" className="text-yellow-600 gap-1">
                   <TrendingUp className="w-3 h-3" />
                   Sincronizando...
@@ -247,10 +238,10 @@ export default function ProjectDetail() {
             </div>
             
             {/* Error Display */}
-            {friendlyError(job?.error || sseError) && (
+            {friendlyError(job?.error || error) && (
               <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-                <span className="text-sm text-destructive">{friendlyError(job?.error || sseError)}</span>
+                <span className="text-sm text-destructive">{friendlyError(job?.error || error)}</span>
               </div>
             )}
           </CardContent>

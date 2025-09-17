@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 
+// @deprecated Use useJobStatus instead for better performance and intelligent fallback
+// This hook is kept for backward compatibility but causes excessive network requests
+// when used alongside polling
+
 export interface JobStatus {
   id: string;
   status: 'queued' | 'active' | 'completed' | 'failed';

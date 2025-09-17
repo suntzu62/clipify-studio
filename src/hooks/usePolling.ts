@@ -2,6 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { getJobStatus } from '@/lib/jobs-api';
 import { JobStatus } from './useJobStream';
 
+// @deprecated Use useJobStatus instead for better performance and intelligent fallback
+// This hook is kept for backward compatibility but causes excessive network requests
+// when used alongside SSE
+
 export const usePolling = (
   jobId: string, 
   enabled: boolean,
