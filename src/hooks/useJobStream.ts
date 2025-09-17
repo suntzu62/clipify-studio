@@ -62,13 +62,10 @@ export const useJobStream = (jobId: string) => {
         eventSource.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            console.log('📡 SSE message received:', data);
             
             // Only update jobStatus if the event contains meaningful status or result data
             if (data && (data.status || data.state || data.result)) {
               setJobStatus(data);
-            } else {
-              console.log('📡 SSE event ignored (no status/result):', data);
             }
           } catch (err) {
             console.error('Failed to parse SSE message:', err);
@@ -77,20 +74,16 @@ export const useJobStream = (jobId: string) => {
 
         // Listen for specific named events
         eventSource.addEventListener('connected', (event) => {
-          console.log('📡 SSE connected event');
           setIsConnected(true);
         });
 
         eventSource.addEventListener('progress', (event) => {
           try {
             const data = JSON.parse((event as MessageEvent).data);
-            console.log('📡 SSE progress:', data);
             
             // Only update if it has meaningful status or result data
             if (data && (data.status || data.state || data.result)) {
               setJobStatus(data);
-            } else {
-              console.log('📡 SSE progress ignored (no status/result):', data);
             }
           } catch (err) {
             console.error('Failed to parse progress event:', err);
@@ -100,7 +93,6 @@ export const useJobStream = (jobId: string) => {
         eventSource.addEventListener('completed', (event) => {
           try {
             const data = JSON.parse((event as MessageEvent).data);
-            console.log('📡 SSE completed:', data);
             setJobStatus(data);
           } catch (err) {
             console.error('Failed to parse completed event:', err);
@@ -110,7 +102,6 @@ export const useJobStream = (jobId: string) => {
         eventSource.addEventListener('failed', (event) => {
           try {
             const data = JSON.parse((event as MessageEvent).data);
-            console.log('📡 SSE failed:', data);
             setJobStatus(data);
           } catch (err) {
             console.error('Failed to parse failed event:', err);

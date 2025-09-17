@@ -50,10 +50,6 @@ export default function ProjectDetail() {
   );
   // Get clips data - pass full jobStatus or job object
   const { clips, readyCount, setEstimatedClipCount } = useClipList(jobStatus || job);
-  
-  console.log('🎬 ProjectDetail - job:', job);
-  console.log('🎬 ProjectDetail - jobStatus:', jobStatus);
-  console.log('🎬 ProjectDetail - readyCount:', readyCount);
 
   useEffect(() => {
     if (!id || !user?.id) return;
@@ -78,19 +74,25 @@ export default function ProjectDetail() {
   useEffect(() => {
     // Update local job status when we get updates
     if (jobStatus && job && user?.id) {
-      const updatedJob = {
-        ...job,
-        status: jobStatus.status,
-        progress: overallProgress,
-        error: jobStatus.error
-      };
+      // Only update if status or progress actually changed
+      const hasStatusChanged = job.status !== jobStatus.status;
+      const hasProgressChanged = Math.abs((job.progress || 0) - overallProgress) > 1;
       
-      setJob(updatedJob);
-      updateJobStatus(user.id, job.id, {
-        status: jobStatus.status,
-        progress: overallProgress,
-        error: jobStatus.error
-      });
+      if (hasStatusChanged || hasProgressChanged) {
+        const updatedJob = {
+          ...job,
+          status: jobStatus.status,
+          progress: overallProgress,
+          error: jobStatus.error
+        };
+        
+        setJob(updatedJob);
+        updateJobStatus(user.id, job.id, {
+          status: jobStatus.status,
+          progress: overallProgress,
+          error: jobStatus.error
+        });
+      }
 
       // Telemetry on completion/failure
       try {

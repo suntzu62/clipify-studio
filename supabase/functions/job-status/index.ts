@@ -41,17 +41,14 @@ serve(async (req) => {
 
     const base = raw.trim().replace(/\/+$/, '').replace(/\/api$/, '');
     const primaryUrl = `${base}/api/jobs/${id}/status`;
-    console.log('[job-status] upstream primary:', primaryUrl);
     let resp = await fetch(primaryUrl, { headers: { 'x-api-key': apiKey } });
 
     if (resp.status === 404) {
       const altUrl = `${base}/jobs/${id}/status`;
-      console.log('[job-status] primary 404, trying alt:', altUrl);
       resp = await fetch(altUrl, { headers: { 'x-api-key': apiKey } });
     }
 
     const data = await resp.json().catch(() => ({}));
-    console.log('[job-status] upstream response:', data);
 
     // Enhance response with clip metadata from storage
     const enhancedData = await enrichWithClipData(id, data);
@@ -71,7 +68,6 @@ async function enrichWithClipData(jobId: string, originalData: any) {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     
     if (!supabaseUrl || !supabaseKey) {
-      console.log('[job-status] Supabase not configured, returning original data');
       return normalizeJobData(originalData);
     }
 
@@ -86,12 +82,8 @@ async function enrichWithClipData(jobId: string, originalData: any) {
     const { data: textFolders, error: textError } = await supabase.storage
       .from(bucket)  
       .list(`projects/${jobId}/texts`, { limit: 1000 });
-    
-    console.log('📁 Storage clips for jobId:', jobId, clipFiles?.length || 0, 'files');
-    console.log('📁 Storage text folders for jobId:', jobId, textFolders?.length || 0, 'folders');
 
     if (clipError || textError) {
-      console.error('❌ Error listing files:', clipError || textError);
       return normalizeJobData(originalData);
     }
 
@@ -219,7 +211,6 @@ async function enrichWithClipData(jobId: string, originalData: any) {
       }
     };
 
-    console.log('[job-status] Enhanced with clips:', clips.length, 'titles:', titles.length);
     return result;
   } catch (err) {
     console.error('[job-status] Error enriching data:', err);

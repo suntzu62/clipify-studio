@@ -17,8 +17,6 @@ export const useClipList = (jobResult?: any) => {
   const [estimatedClipCount, setEstimatedClipCount] = useState(8);
 
   useEffect(() => {
-    console.log('🎬 useClipList - jobResult:', jobResult);
-    
     // Extract result from jobResult (support both full job object and result-only)
     const result = jobResult?.result ?? jobResult ?? {};
     
@@ -38,7 +36,6 @@ export const useClipList = (jobResult?: any) => {
 
     // Check for ready clips first (from enhanced job-status response)
     if (result.clips && result.clips.length > 0) {
-      console.log('🎬 Using clips from result:', result.clips);
       setClips(result.clips);
       return;
     }
@@ -48,8 +45,6 @@ export const useClipList = (jobResult?: any) => {
     const titles = texts?.titles || [];
     const descriptions = texts?.descriptions || [];
     const hashtags = texts?.hashtags || [];
-
-    console.log('🎬 Extracted text data:', { titles, descriptions, hashtags });
 
     if (titles.length > 0) {
       const processedClips = titles.map((title: string, index: number) => ({
@@ -63,7 +58,6 @@ export const useClipList = (jobResult?: any) => {
         duration: 45, // Default duration
         status: 'ready' as const
       }));
-      console.log('🎬 Processed clips from texts:', processedClips);
       setClips(processedClips);
     } else {
       // Keep placeholder clips if no data yet
