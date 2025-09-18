@@ -1,5 +1,6 @@
 import { useAuth } from '@clerk/clerk-react';
 import { JobStatus } from './useJobStream';
+import { getJobStatus } from '@/lib/jobs-api';
 
 interface ConnectionState {
   eventSource: EventSource | null;
@@ -11,6 +12,8 @@ interface ConnectionState {
   abortController: AbortController | null;
   lastReconnectTime: number;
   consecutiveFailures: number;
+  isCleaningUp: boolean;
+  pollingTimeoutId: number | null;
 }
 
 class JobConnectionManager {
@@ -29,7 +32,9 @@ class JobConnectionManager {
         error: null,
         abortController: null,
         lastReconnectTime: 0,
-        consecutiveFailures: 0
+        consecutiveFailures: 0,
+        isCleaningUp: false,
+        pollingTimeoutId: null
       });
     }
     
@@ -51,7 +56,7 @@ class JobConnectionManager {
   
   async startConnection(jobId: string, getToken: () => Promise<string | null>) {
     const connection = this.connections.get(jobId);
-    if (!connection) return;
+    if (!connection || connection.isCleaningUp) return;
     
     // Check if we're already connected
     if (connection.eventSource && connection.isConnected) {
@@ -80,6 +85,7 @@ class JobConnectionManager {
     
     // Create abort controller for this connection
     connection.abortController = new AbortController();
+    const abortSignal = connection.abortController.signal;
     
     try {
       const token = await getToken();
@@ -89,7 +95,7 @@ class JobConnectionManager {
       }
       
       // Check if aborted during token fetch
-      if (connection.abortController.signal.aborted) {
+      if (abortSignal.aborted || connection.isCleaningUp) {
         return;
       }
       
@@ -101,7 +107,7 @@ class JobConnectionManager {
       connection.consecutiveFailures = 0;
       
       eventSource.onopen = () => {
-        if (connection.abortController?.signal.aborted) return;
+        if (abortSignal.aborted || connection.isCleaningUp) return;
         
         connection.isConnected = true;
         connection.error = null;
@@ -110,7 +116,7 @@ class JobConnectionManager {
       };
       
       const handleMessage = (event: MessageEvent) => {
-        if (connection.abortController?.signal.aborted) return;
+        if (abortSignal.aborted || connection.isCleaningUp) return;
         
         try {
           const data = JSON.parse(event.data);
@@ -123,7 +129,8 @@ class JobConnectionManager {
             
             // Fallback to polling with delay
             setTimeout(() => {
-              if (!connection.abortController?.signal.aborted) {
+              const conn = this.connections.get(jobId);
+              if (conn && !conn.isCleaningUp && !abortSignal.aborted) {
                 this.fallbackToPolling(jobId, getToken);
               }
             }, data.retryAfter || 60000);
@@ -154,11 +161,16 @@ class JobConnectionManager {
       eventSource.addEventListener('info', (e) => handleMessage(e as MessageEvent));
       
       eventSource.onerror = () => {
-        if (connection.abortController?.signal.aborted) return;
+        if (abortSignal.aborted || connection.isCleaningUp) return;
         
         connection.isConnected = false;
         connection.consecutiveFailures++;
-        eventSource.close();
+        
+        try {
+          eventSource.close();
+        } catch (e) {
+          // Ignore close errors
+        }
         
         this.notifyError(jobId, 'SSE connection failed');
         console.log(`[ConnectionManager] SSE error for job ${jobId}, attempt ${connection.consecutiveFailures}`);
@@ -171,7 +183,8 @@ class JobConnectionManager {
           // Exponential backoff retry
           const delay = Math.min(30000 * Math.pow(2, connection.consecutiveFailures - 1), 300000);
           setTimeout(() => {
-            if (!connection.abortController?.signal.aborted) {
+            const conn = this.connections.get(jobId);
+            if (conn && !conn.isCleaningUp && !abortSignal.aborted) {
               this.startConnection(jobId, getToken);
             }
           }, delay);
@@ -184,7 +197,8 @@ class JobConnectionManager {
       
       // Fallback to polling after setup failure
       setTimeout(() => {
-        if (!connection.abortController?.signal.aborted) {
+        const conn = this.connections.get(jobId);
+        if (conn && !conn.isCleaningUp && !abortSignal.aborted) {
           this.fallbackToPolling(jobId, getToken);
         }
       }, 1000);
@@ -193,32 +207,54 @@ class JobConnectionManager {
   
   private async fallbackToPolling(jobId: string, getToken: () => Promise<string | null>) {
     const connection = this.connections.get(jobId);
-    if (!connection) return;
+    if (!connection || connection.isCleaningUp) return;
+    
+    // Clear any existing polling
+    if (connection.pollingTimeoutId) {
+      clearTimeout(connection.pollingTimeoutId);
+      connection.pollingTimeoutId = null;
+    }
     
     connection.connectionType = 'polling';
     connection.isConnected = true;
     connection.error = null;
     this.notifyConnectionChange(jobId);
     
-    const { getJobStatus } = await import('@/lib/jobs-api');
-    
     const poll = async () => {
-      if (connection.abortController?.signal.aborted) return;
+      const conn = this.connections.get(jobId);
+      if (!conn || conn.isCleaningUp) return;
+      
+      const abortController = conn.abortController;
+      if (!abortController || abortController.signal.aborted) return;
       
       try {
         const status = await getJobStatus(jobId, getToken);
         
-        if (JSON.stringify(status) !== JSON.stringify(connection.currentStatus)) {
-          connection.currentStatus = status as JobStatus;
-          connection.subscribers.forEach(callback => callback(status as JobStatus));
+        // Check again after async operation
+        if (!conn || conn.isCleaningUp || abortController.signal.aborted) return;
+        
+        if (JSON.stringify(status) !== JSON.stringify(conn.currentStatus)) {
+          conn.currentStatus = status as JobStatus;
+          conn.subscribers.forEach(callback => {
+            try {
+              callback(status as JobStatus);
+            } catch (err) {
+              console.error('Error in subscriber callback:', err);
+            }
+          });
         }
         
-        if (!this.isJobTerminal(status as JobStatus) && !connection.abortController?.signal.aborted) {
-          setTimeout(poll, 15000); // Poll every 15 seconds
+        if (!this.isJobTerminal(status as JobStatus) && !conn.isCleaningUp && !abortController.signal.aborted) {
+          conn.pollingTimeoutId = window.setTimeout(poll, 15000); // Poll every 15 seconds
         }
       } catch (err: any) {
         console.error(`[ConnectionManager] Polling error for job ${jobId}:`, err);
         this.notifyError(jobId, err.message || 'Polling failed');
+        
+        // Retry polling after error if connection is still active
+        if (!conn.isCleaningUp && conn.abortController && !conn.abortController.signal.aborted) {
+          conn.pollingTimeoutId = window.setTimeout(poll, 30000); // Wait longer after error
+        }
       }
     };
     
@@ -229,21 +265,44 @@ class JobConnectionManager {
     const connection = this.connections.get(jobId);
     if (!connection) return;
     
+    // Mark as cleaning up to prevent race conditions
+    connection.isCleaningUp = true;
+    
+    // Clear polling timeout
+    if (connection.pollingTimeoutId) {
+      clearTimeout(connection.pollingTimeoutId);
+      connection.pollingTimeoutId = null;
+    }
+    
+    // Close EventSource
     if (connection.eventSource) {
-      connection.eventSource.close();
+      try {
+        connection.eventSource.close();
+      } catch (e) {
+        // Ignore close errors
+      }
       connection.eventSource = null;
     }
     
+    // Abort any ongoing operations
     if (connection.abortController) {
-      connection.abortController.abort();
+      try {
+        connection.abortController.abort();
+      } catch (e) {
+        // Ignore abort errors
+      }
       connection.abortController = null;
     }
     
     connection.isConnected = false;
     connection.connectionType = 'none';
+    connection.error = null;
     
     if (removeConnection) {
       this.connections.delete(jobId);
+    } else {
+      // Reset cleanup flag if keeping connection
+      connection.isCleaningUp = false;
     }
   }
   
