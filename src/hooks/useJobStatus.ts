@@ -25,7 +25,9 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
   useEffect(() => {
     if (!enabled || !jobId) return;
 
+    console.log(`[useJobStatus] Subscribing to job ${jobId}`);
     const unsubscribe = subscribe((status: JobStatus) => {
+      console.log(`[useJobStatus] Status update for job ${jobId}:`, status);
       setJobStatus(status);
     });
 
@@ -44,9 +46,10 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
       startConnection();
     }
 
-    const interval = setInterval(updateConnectionInfo, 1000);
+    const interval = setInterval(updateConnectionInfo, 2000); // Reduced from 1s to 2s
 
     return () => {
+      console.log(`[useJobStatus] Unsubscribing from job ${jobId}`);
       unsubscribe();
       clearInterval(interval);
     };
