@@ -21,6 +21,12 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
   const reconnectAttempts = useRef(0);
   const lastJobStatus = useRef<JobStatus | null>(null);
   const sseFailedAt = useRef<number | null>(null);
+  
+  // Circuit breaker state
+  const consecutiveFailures = useRef(0);
+  const circuitBreakerOpenUntil = useRef<number>(0);
+  const CONNECTION_FAILURE_THRESHOLD = 3;
+  const CIRCUIT_BREAKER_TIMEOUT = 300000; // 5 minutes
 
   // Check if job is terminal (completed or failed)
   const isJobTerminal = useCallback((status?: JobStatus) => {
@@ -28,12 +34,17 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     return status.status === 'completed' || status.status === 'failed';
   }, []);
 
-  // Calculate exponential backoff delay with jitter
+  // Circuit breaker check
+  const isCircuitBreakerOpen = useCallback(() => {
+    return Date.now() < circuitBreakerOpenUntil.current;
+  }, []);
+
+  // Calculate exponential backoff delay with jitter (more aggressive)
   const getReconnectDelay = useCallback(() => {
-    const baseDelay = 10000; // 10 seconds (increased from 3)
-    const maxDelay = 60000; // 60 seconds (increased from 30)
-    const exponentialDelay = baseDelay * Math.pow(2, Math.min(reconnectAttempts.current, 4));
-    const jitter = Math.random() * 0.1 * exponentialDelay; // Add 10% jitter
+    const baseDelay = 30000; // 30 seconds (much more conservative)
+    const maxDelay = 300000; // 5 minutes (much longer max)
+    const exponentialDelay = baseDelay * Math.pow(2, Math.min(reconnectAttempts.current, 6));
+    const jitter = Math.random() * 0.2 * exponentialDelay; // Add 20% jitter
     return Math.min(exponentialDelay + jitter, maxDelay);
   }, []);
 
@@ -99,6 +110,13 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
   const startSSE = useCallback(async () => {
     if (!enabled || !jobId || isJobTerminal(lastJobStatus.current)) return;
 
+    // Circuit breaker: Don't try SSE if we've failed too many times recently
+    if (isCircuitBreakerOpen()) {
+      console.log('[useJobStatus] Circuit breaker open, using polling only');
+      startPolling();
+      return;
+    }
+
     try {
       const token = await getToken();
       if (!token) {
@@ -117,7 +135,11 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
       eventSource.onopen = () => {
         setIsConnected(true);
         setError(null);
-        console.log('[useJobStatus] SSE connected');
+        console.log('[useJobStatus] SSE connected successfully');
+        
+        // Reset circuit breaker on successful connection
+        consecutiveFailures.current = 0;
+        circuitBreakerOpenUntil.current = 0;
         
         // Stop polling when SSE works
         if (pollingIntervalRef.current) {
@@ -173,8 +195,18 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
         setError('SSE connection failed');
         eventSource.close();
         
+        consecutiveFailures.current++;
+        
         if (!sseFailedAt.current) {
           sseFailedAt.current = Date.now();
+        }
+        
+        // Circuit breaker: Open circuit after consecutive failures
+        if (consecutiveFailures.current >= CONNECTION_FAILURE_THRESHOLD) {
+          console.log(`[useJobStatus] Circuit breaker opened after ${consecutiveFailures.current} failures`);
+          circuitBreakerOpenUntil.current = Date.now() + CIRCUIT_BREAKER_TIMEOUT;
+          startPolling();
+          return;
         }
         
         // Only retry if job is not terminal
@@ -182,13 +214,13 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
           reconnectAttempts.current++;
           const delay = getReconnectDelay();
           
-          console.log(`[useJobStatus] SSE retry #${reconnectAttempts.current} in ${delay}ms`);
+          console.log(`[useJobStatus] SSE failure #${consecutiveFailures.current}, retry #${reconnectAttempts.current} in ${delay}ms`);
           
           reconnectTimeoutRef.current = setTimeout(() => {
-            // After 20 seconds of SSE failure, switch to polling
+            // After 30 seconds of SSE failure, switch to polling
             const failureDuration = Date.now() - (sseFailedAt.current || 0);
-            if (failureDuration > 20000) {
-              console.log('[useJobStatus] SSE failed for 20s, switching to polling');
+            if (failureDuration > 30000) {
+              console.log('[useJobStatus] SSE failed for 30s, switching to polling');
               startPolling();
             } else {
               startSSE();
@@ -245,6 +277,8 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     setError(null);
     reconnectAttempts.current = 0;
     sseFailedAt.current = null;
+    consecutiveFailures.current = 0;
+    circuitBreakerOpenUntil.current = 0;
     
     setTimeout(() => {
       if (!isJobTerminal(lastJobStatus.current)) {
