@@ -57,11 +57,6 @@ serve(async (req) => {
 
     // Best-effort usage check via get-usage (do not block on failure)
     try {
-      const supabase = createClient(
-        Deno.env.get('SUPABASE_URL') ?? '',
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-        { auth: { persistSession: false } }
-      );
       const authHeader = req.headers.get('authorization') || undefined;
       const { data: usage } = await supabase.functions.invoke('get-usage', {
         method: 'GET',
@@ -89,8 +84,6 @@ serve(async (req) => {
     const base = raw.trim().replace(/\/+$/, '').replace(/\/api$/, '');
     const primaryUrl = `${base}/api/jobs/pipeline`;
     console.log('[enqueue-pipeline] upstream primary:', primaryUrl);
-
-    const userId = auth.userId;
     let resp = await fetch(primaryUrl, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
