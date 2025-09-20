@@ -13,6 +13,7 @@ import { ProgressHeader } from '@/components/progress/ProgressHeader';
 import { TimelineStep } from '@/components/timeline/TimelineStep';
 import { ClipCard } from '@/components/clips/ClipCard';
 import { SocialProof } from '@/components/social/SocialProof';
+import { VideoDebugPanel } from '@/components/debug/VideoDebugPanel';
 import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { Job } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
@@ -40,7 +41,7 @@ export default function ProjectDetail() {
     jobStatus?.status
   );
   // Get clips data - pass full jobStatus or job object
-  const { clips, readyCount, setEstimatedClipCount } = useClipList(jobStatus || job);
+  const { clips, readyCount, debugInfo, setEstimatedClipCount } = useClipList(jobStatus || job);
 
   useEffect(() => {
     if (!id || !user?.id) return;
@@ -249,7 +250,21 @@ export default function ProjectDetail() {
 
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Main Content */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-6">
+            {/* Debug Panel - Only in development */}
+            {process.env.NODE_ENV === 'development' && (
+              <VideoDebugPanel 
+                jobStatus={jobStatus}
+                clipDebugInfo={debugInfo}
+                connectionInfo={{
+                  isConnected,
+                  connectionType,
+                  error
+                }}
+                onRefresh={() => window.location.reload()}
+              />
+            )}
+            
             <Tabs defaultValue="progress" className="space-y-6">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="progress" className="gap-2">
