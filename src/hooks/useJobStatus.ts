@@ -21,13 +21,16 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     return status.status === 'completed' || status.status === 'failed';
   }, []);
 
-  // Subscribe to connection manager updates
+  // Subscribe to connection manager updates - FIXED: removed jobStatus from deps to prevent infinite loop
   useEffect(() => {
     if (!enabled || !jobId) return;
 
     console.log(`[useJobStatus] Subscribing to job ${jobId}`);
+    let currentJobStatus: JobStatus | null = null;
+    
     const unsubscribe = subscribe((status: JobStatus) => {
       console.log(`[useJobStatus] Status update for job ${jobId}:`, status);
+      currentJobStatus = status;
       setJobStatus(status);
     });
 
@@ -41,19 +44,23 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
 
     updateConnectionInfo();
 
-    // Don't start connection if job is already terminal
-    if (!isJobTerminal(jobStatus)) {
+    // Only start connection once on mount, not on every jobStatus change
+    const shouldConnect = () => {
+      return !isJobTerminal(currentJobStatus);
+    };
+
+    if (shouldConnect()) {
       startConnection();
     }
 
-    const interval = setInterval(updateConnectionInfo, 2000); // Reduced from 1s to 2s
+    const interval = setInterval(updateConnectionInfo, 3000); // Increased to 3s to reduce overhead
 
     return () => {
       console.log(`[useJobStatus] Unsubscribing from job ${jobId}`);
       unsubscribe();
       clearInterval(interval);
     };
-  }, [enabled, jobId, subscribe, startConnection, getConnectionInfo, isJobTerminal, jobStatus]);
+  }, [enabled, jobId]); // CRITICAL FIX: removed subscribe, startConnection, getConnectionInfo, isJobTerminal, jobStatus from deps
 
   // Manual reconnect function
   const reconnect = useCallback(() => {

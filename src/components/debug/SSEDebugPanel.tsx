@@ -103,29 +103,39 @@ export const SSEDebugPanel = ({ jobId }: SSEDebugPanelProps) => {
             Object.entries(allConnections).map(([jobId, connection]) => (
               <Card key={jobId}>
                 <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <code className="text-sm bg-muted px-2 py-1 rounded">{jobId}</code>
-                      <Badge variant={formatConnectionType(connection.connectionType)}>
-                        {connection.connectionType.toUpperCase()}
-                      </Badge>
-                      {connection.isConnected && (
-                        <Badge variant="default" className="bg-green-600">Connected</Badge>
-                      )}
-                      {connection.circuitBreakerActive && (
-                        <Badge variant="destructive">Circuit Breaker</Badge>
-                      )}
-                      {connection.isCleaningUp && (
-                        <Badge variant="outline">Cleaning Up</Badge>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <code className="text-sm bg-muted px-2 py-1 rounded">{jobId}</code>
+                        <Badge variant={formatConnectionType(connection.connectionType)}>
+                          {connection.connectionType.toUpperCase()}
+                        </Badge>
+                        {connection.isConnected && (
+                          <Badge variant="default" className="bg-green-600">Connected</Badge>
+                        )}
+                        {connection.isConnecting && (
+                          <Badge variant="secondary" className="bg-yellow-600 text-white">Connecting...</Badge>
+                        )}
+                        {connection.circuitBreakerActive && (
+                          <Badge variant="destructive">Circuit Breaker</Badge>
+                        )}
+                        {connection.isCleaningUp && (
+                          <Badge variant="outline">Cleaning Up</Badge>
+                        )}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Refs: {connection.referenceCount} | Failures: {connection.consecutiveFailures} | Attempts: {connection.connectionAttempts}
+                      </div>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Last Heartbeat: {connection.lastHeartbeat} | EventSource: {connection.hasEventSource ? '✓' : '✗'}
+                      {connection.connectionHistory && connection.connectionHistory.length > 0 && (
+                        <div className="mt-1">
+                          History: {connection.connectionHistory.slice(-3).map((h, i) => (
+                            <span key={i} className={`inline-block w-2 h-2 rounded-full mr-1 ${h.success ? 'bg-green-500' : 'bg-red-500'}`} title={`${h.type} at ${new Date(h.timestamp).toLocaleTimeString()}`}></span>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      Refs: {connection.referenceCount} | Failures: {connection.consecutiveFailures} | Attempts: {connection.connectionAttempts}
-                    </div>
-                  </div>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    Last Heartbeat: {connection.lastHeartbeat} | EventSource: {connection.hasEventSource ? '✓' : '✗'}
-                  </div>
                 </CardContent>
               </Card>
             ))

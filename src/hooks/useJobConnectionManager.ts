@@ -18,6 +18,8 @@ interface ConnectionState {
   lastHeartbeat: number;
   circuitBreakerUntil: number;
   connectionAttempts: number;
+  isConnecting: boolean; // NEW: prevent simultaneous connection attempts
+  connectionHistory: Array<{ timestamp: number; type: string; success: boolean }>; // NEW: track connection history
 }
 
 interface ConnectionMetrics {
@@ -30,13 +32,13 @@ interface ConnectionMetrics {
 
 class JobConnectionManager {
   private connections = new Map<string, ConnectionState>();
-  private readonly DEBOUNCE_DELAY = 3000; // 3 seconds minimum between reconnects  
+  private readonly DEBOUNCE_DELAY = 5000; // INCREASED: 5 seconds minimum between reconnects  
   private readonly MAX_CONNECTIONS_GLOBAL = 1; // Strict: only 1 SSE connection total
   private readonly CIRCUIT_BREAKER_FAILURES = 2; // Aggressive: 2 failures trigger circuit breaker
-  private readonly CIRCUIT_BREAKER_COOLDOWN = 30000; // 30 seconds cooldown
-  private readonly HEARTBEAT_INTERVAL = 15000; // 15 seconds heartbeat check
-  private readonly ZOMBIE_TIMEOUT = 60000; // 60 seconds without heartbeat = zombie
-  private readonly MAX_CONNECTION_ATTEMPTS = 3; // Max attempts before permanent fallback
+  private readonly CIRCUIT_BREAKER_COOLDOWN = 60000; // INCREASED: 60 seconds cooldown
+  private readonly HEARTBEAT_INTERVAL = 30000; // INCREASED: 30 seconds heartbeat check
+  private readonly ZOMBIE_TIMEOUT = 90000; // INCREASED: 90 seconds without heartbeat = zombie
+  private readonly MAX_CONNECTION_ATTEMPTS = 2; // DECREASED: Max 2 attempts before permanent fallback
   private metrics: ConnectionMetrics = {
     totalConnections: 0,
     activeSSEConnections: 0,
@@ -62,7 +64,9 @@ class JobConnectionManager {
         referenceCount: 0,
         lastHeartbeat: Date.now(),
         circuitBreakerUntil: 0,
-        connectionAttempts: 0
+        connectionAttempts: 0,
+        isConnecting: false, // NEW: prevent simultaneous connections
+        connectionHistory: [] // NEW: track connection attempts
       });
       this.metrics.totalConnections++;
     }
@@ -94,6 +98,12 @@ class JobConnectionManager {
     const connection = this.connections.get(jobId);
     if (!connection || connection.isCleaningUp) return;
     
+    // CRITICAL FIX: Prevent simultaneous connection attempts
+    if (connection.isConnecting) {
+      console.log(`[ConnectionManager] Already connecting to job ${jobId}, skipping`);
+      return;
+    }
+    
     // Check circuit breaker
     const now = Date.now();
     if (connection.circuitBreakerUntil > now) {
@@ -109,15 +119,16 @@ class JobConnectionManager {
       return;
     }
     
-    // Debounce rapid reconnections
-    if (now - connection.lastReconnectTime < this.DEBOUNCE_DELAY) {
-      console.log(`[ConnectionManager] Debouncing reconnection for job ${jobId}`);
+    // ENHANCED: More aggressive debouncing
+    const timeSinceLastReconnect = now - connection.lastReconnectTime;
+    if (timeSinceLastReconnect < this.DEBOUNCE_DELAY) {
+      console.log(`[ConnectionManager] Debouncing reconnection for job ${jobId} (${timeSinceLastReconnect}ms < ${this.DEBOUNCE_DELAY}ms)`);
       return;
     }
     
     // Check if we've exceeded max connection attempts
     if (connection.connectionAttempts >= this.MAX_CONNECTION_ATTEMPTS) {
-      console.log(`[ConnectionManager] Max connection attempts reached for job ${jobId}, using polling only`);
+      console.log(`[ConnectionManager] Max connection attempts reached for job ${jobId} (${connection.connectionAttempts}/${this.MAX_CONNECTION_ATTEMPTS}), using polling only`);
       this.fallbackToPolling(jobId, getToken);
       return;
     }
@@ -127,13 +138,28 @@ class JobConnectionManager {
       .filter(c => c.isConnected && c.connectionType === 'sse').length;
     
     if (activeSSEConnections >= this.MAX_CONNECTIONS_GLOBAL) {
-      console.log(`[ConnectionManager] Global SSE limit reached (${activeSSEConnections}), using polling for job ${jobId}`);
+      console.log(`[ConnectionManager] Global SSE limit reached (${activeSSEConnections}/${this.MAX_CONNECTIONS_GLOBAL}), using polling for job ${jobId}`);
       this.fallbackToPolling(jobId, getToken);
       return;
     }
     
+    // CRITICAL: Set connecting flag to prevent race conditions
+    connection.isConnecting = true;
     connection.lastReconnectTime = now;
     connection.connectionAttempts++;
+    
+    // Log connection attempt
+    connection.connectionHistory.push({
+      timestamp: now,
+      type: 'sse_attempt',
+      success: false // Will be updated on success
+    });
+    
+    // Keep only last 10 history entries
+    if (connection.connectionHistory.length > 10) {
+      connection.connectionHistory = connection.connectionHistory.slice(-10);
+    }
+    
     this.cleanup(jobId, false); // Clean existing connection but keep subscribers
     
     // Create abort controller for this connection
@@ -168,9 +194,17 @@ class JobConnectionManager {
         if (abortSignal.aborted || connection.isCleaningUp) return;
         
         connection.isConnected = true;
+        connection.isConnecting = false; // CRITICAL: Clear connecting flag on success
         connection.error = null;
         connection.consecutiveFailures = 0;
         connection.lastHeartbeat = Date.now();
+        
+        // Update connection history
+        const lastEntry = connection.connectionHistory[connection.connectionHistory.length - 1];
+        if (lastEntry && lastEntry.type === 'sse_attempt') {
+          lastEntry.success = true;
+        }
+        
         this.notifyConnectionChange(jobId);
         console.log(`[ConnectionManager] SSE connected for job ${jobId}`);
       };
@@ -234,6 +268,7 @@ class JobConnectionManager {
         if (abortSignal.aborted || connection.isCleaningUp) return;
         
         connection.isConnected = false;
+        connection.isConnecting = false; // CRITICAL: Clear connecting flag on error
         connection.consecutiveFailures++;
         this.metrics.activeSSEConnections = Math.max(0, this.metrics.activeSSEConnections - 1);
         
@@ -246,19 +281,21 @@ class JobConnectionManager {
         this.notifyError(jobId, 'SSE connection failed');
         console.log(`[ConnectionManager] SSE error for job ${jobId}, failure ${connection.consecutiveFailures}/${this.CIRCUIT_BREAKER_FAILURES}`);
         
-        // Circuit breaker: after 2 failures, activate circuit breaker
+        // Circuit breaker: after 2 failures, activate circuit breaker with longer cooldown
         if (connection.consecutiveFailures >= this.CIRCUIT_BREAKER_FAILURES) {
           connection.circuitBreakerUntil = Date.now() + this.CIRCUIT_BREAKER_COOLDOWN;
           this.metrics.circuitBreakerTriggered++;
-          console.log(`[ConnectionManager] Circuit breaker activated for job ${jobId} until ${new Date(connection.circuitBreakerUntil).toISOString()}`);
+          console.log(`[ConnectionManager] Circuit breaker activated for job ${jobId} for ${this.CIRCUIT_BREAKER_COOLDOWN}ms`);
           this.fallbackToPolling(jobId, getToken);
         } else if (!this.isJobTerminal(connection.currentStatus)) {
-          // Exponential backoff retry
-          const delay = Math.min(10000 * Math.pow(2, connection.consecutiveFailures - 1), 60000);
-          console.log(`[ConnectionManager] Retrying SSE connection for job ${jobId} in ${delay}ms`);
+          // ENHANCED: More aggressive exponential backoff
+          const baseDelay = 15000; // Start with 15 seconds
+          const delay = Math.min(baseDelay * Math.pow(3, connection.consecutiveFailures - 1), 120000); // Max 2 minutes
+          console.log(`[ConnectionManager] Retrying SSE connection for job ${jobId} in ${delay}ms (attempt ${connection.connectionAttempts + 1})`);
+          
           setTimeout(() => {
             const conn = this.connections.get(jobId);
-            if (conn && !conn.isCleaningUp && !abortSignal.aborted) {
+            if (conn && !conn.isCleaningUp && !abortSignal.aborted && !conn.isConnecting) {
               this.startConnection(jobId, getToken);
             }
           }, delay);
@@ -267,15 +304,16 @@ class JobConnectionManager {
       
     } catch (err) {
       console.error(`[ConnectionManager] Failed to start connection for job ${jobId}:`, err);
+      connection.isConnecting = false; // CRITICAL: Clear connecting flag on setup failure
       this.notifyError(jobId, 'Failed to start connection');
       
       // Fallback to polling after setup failure
       setTimeout(() => {
         const conn = this.connections.get(jobId);
-        if (conn && !conn.isCleaningUp && !abortSignal.aborted) {
+        if (conn && !conn.isCleaningUp && !abortSignal.aborted && !conn.isConnecting) {
           this.fallbackToPolling(jobId, getToken);
         }
-      }, 2000);
+      }, 5000); // Increased delay after failure
     }
   }
   
@@ -427,6 +465,7 @@ class JobConnectionManager {
     }
     
     connection.isConnected = false;
+    connection.isConnecting = false; // CRITICAL: Clear connecting flag on cleanup
     connection.connectionType = 'none';
     connection.error = null;
     
