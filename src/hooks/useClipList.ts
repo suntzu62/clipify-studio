@@ -57,7 +57,15 @@ export const useClipList = (jobResult?: any) => {
 
     // Strategy 1: Check for ready clips first (from enhanced job-status response)
     if (result.clips && Array.isArray(result.clips) && result.clips.length > 0) {
-      log.info('[useClipList] Found clips in result.clips', { clipCount: result.clips.length });
+      log.info('[useClipList] ✅ Found clips in result.clips', { 
+        clipCount: result.clips.length,
+        sampleClip: result.clips[0] ? {
+          id: result.clips[0].id,
+          title: result.clips[0].title,
+          hasPreviewUrl: !!result.clips[0].previewUrl,
+          hasDownloadUrl: !!result.clips[0].downloadUrl
+        } : null
+      });
       const validClips = result.clips.map((clip: any, index: number) => ({
         id: clip.id || `clip-${index + 1}`,
         title: clip.title || `Clipe ${index + 1}`,
@@ -71,6 +79,7 @@ export const useClipList = (jobResult?: any) => {
       }));
       setDebugInfo(prev => ({ ...prev, processed: true, strategy: 'clips_array', foundClips: validClips.length }));
       setClips(validClips);
+      log.info('[useClipList] ✅ Successfully set clips from result.clips', { count: validClips.length });
       return;
     }
 

@@ -313,11 +313,11 @@ export default function ProjectDetail() {
                 </TabsTrigger>
                 <TabsTrigger 
                   value="results" 
-                  disabled={job?.status === 'queued' && readyCount === 0 && clips.length === 0}
+                  disabled={job?.status === 'queued' && clips.length === 0}
                   className="gap-2"
                 >
                   <Sparkles className="w-4 h-4" />
-                  Resultados {readyCount > 0 ? `(${readyCount})` : ''}
+                  Resultados {readyCount > 0 ? `(${readyCount})` : clips.length > 0 ? `(${clips.length})` : ''}
                 </TabsTrigger>
               </TabsList>
               

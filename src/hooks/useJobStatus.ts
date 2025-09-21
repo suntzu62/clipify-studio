@@ -72,39 +72,59 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     }
   }, [startConnection, isJobTerminal, jobStatus]);
 
-  // Fetch enriched job status when job completes and no clips are available
+  // Periodic enrichment polling - fetch clips every 20 seconds while job is active
   useEffect(() => {
-    const shouldFetchEnriched = 
-      jobStatus?.status === 'completed' && 
-      !enrichedDataFetched && 
-      (!jobStatus?.result?.clips || jobStatus.result.clips.length === 0) &&
-      enabled && 
-      jobId;
+    if (!enabled || !jobId || isJobTerminal(jobStatus)) return;
 
-    if (shouldFetchEnriched) {
-      console.log('[useJobStatus] Fetching enriched job status for completed job');
-      setEnrichedDataFetched(true);
-      
-      getJobStatus(jobId)
-        .then(enrichedJob => {
-          console.log('[useJobStatus] Enriched job status fetched:', enrichedJob);
+    console.log('[useJobStatus] Starting periodic enrichment polling');
+    
+    const fetchEnrichedData = async () => {
+      try {
+        console.log('[useJobStatus] Fetching enriched job status via polling');
+        const enrichedJob = await getJobStatus(jobId);
+        console.log('[useJobStatus] Enriched job status fetched:', enrichedJob);
+        
+        // Merge enriched data with current status, prioritizing enriched clips
+        setJobStatus(prevStatus => {
+          const hasClips = enrichedJob.result?.clips && enrichedJob.result.clips.length > 0;
+          console.log('[useJobStatus] Merging enriched data, hasClips:', hasClips);
           
-          // Merge enriched data with current status
-          setJobStatus(prevStatus => ({
+          return {
             ...prevStatus,
             ...enrichedJob,
             result: {
               ...prevStatus?.result,
               ...enrichedJob.result,
-              clips: enrichedJob.result?.clips || []
+              clips: enrichedJob.result?.clips || prevStatus?.result?.clips || []
             }
-          } as JobStatus));
-        })
-        .catch(error => {
-          console.error('[useJobStatus] Failed to fetch enriched job status:', error);
+          } as JobStatus;
         });
-    }
-  }, [jobStatus?.status, enrichedDataFetched, enabled, jobId]);
+
+        // Stop polling once we have clips
+        if (enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) {
+          console.log('[useJobStatus] Clips found, stopping enrichment polling');
+          setEnrichedDataFetched(true);
+        }
+      } catch (error) {
+        console.error('[useJobStatus] Failed to fetch enriched job status:', error);
+      }
+    };
+
+    // Initial fetch
+    fetchEnrichedData();
+
+    // Set up polling interval every 20 seconds
+    const pollInterval = setInterval(() => {
+      if (!isJobTerminal(jobStatus) && !enrichedDataFetched) {
+        fetchEnrichedData();
+      }
+    }, 20000);
+
+    return () => {
+      console.log('[useJobStatus] Cleaning up enrichment polling');
+      clearInterval(pollInterval);
+    };
+  }, [enabled, jobId, jobStatus?.status, enrichedDataFetched, isJobTerminal]);
 
   return {
     jobStatus,
