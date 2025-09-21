@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 import { useJobConnectionManager } from './useJobConnectionManager';
 import { JobStatus } from './useJobStream';
 import { getJobStatus } from '@/lib/jobs-api';
@@ -9,11 +10,27 @@ interface UseJobStatusOptions {
 }
 
 export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => {
+  const { getToken } = useAuth();
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionType, setConnectionType] = useState<'sse' | 'polling' | 'none'>('none');
   const [error, setError] = useState<string | null>(null);
   const [enrichedDataFetched, setEnrichedDataFetched] = useState(false);
+  
+  const getSupabaseToken = useCallback(async (opts?: any) => {
+    if (!getToken) return null;
+
+    const options = { ...(opts || {}) };
+    if (!options.template) {
+      options.template = 'supabase';
+    }
+
+    try {
+      return await getToken(options);
+    } catch {
+      return null;
+    }
+  }, [getToken]);
   
   const { subscribe, startConnection, getConnectionInfo } = useJobConnectionManager(jobId);
 
@@ -81,7 +98,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     const fetchEnrichedData = async () => {
       try {
         console.log('[useJobStatus] Fetching enriched job status via polling');
-        const enrichedJob = await getJobStatus(jobId);
+        const enrichedJob = await getJobStatus(jobId, getSupabaseToken);
         console.log('[useJobStatus] Enriched job status fetched:', enrichedJob);
         
         // Merge enriched data with current status, prioritizing enriched clips
@@ -124,7 +141,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
       console.log('[useJobStatus] Cleaning up enrichment polling');
       clearInterval(pollInterval);
     };
-  }, [enabled, jobId, jobStatus?.status, enrichedDataFetched, isJobTerminal]);
+  }, [enabled, jobId, jobStatus?.status, enrichedDataFetched, isJobTerminal, getSupabaseToken]);
 
   return {
     jobStatus,
