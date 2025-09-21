@@ -338,7 +338,7 @@ export default function ProjectDetail() {
                       </CardContent>
                     </Card>
 
-                    {/* Clips Grid */}
+                    {/* Enhanced Clips Grid with Editor Integration */}
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       {clips.map((clip, index) => (
                         <ClipCard key={clip.id} clip={clip} index={index} />

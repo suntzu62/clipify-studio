@@ -11,6 +11,7 @@ export interface Clip {
   thumbnailUrl?: string;
   duration: number;
   status: 'processing' | 'ready' | 'failed';
+  transcript?: Array<{ start: number; end: number; text: string }>;
 }
 
 export const useClipList = (jobResult?: any) => {
