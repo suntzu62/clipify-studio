@@ -14,10 +14,12 @@ import { TimelineStep } from '@/components/timeline/TimelineStep';
 import { ClipCard } from '@/components/clips/ClipCard';
 import { SocialProof } from '@/components/social/SocialProof';
 import { VideoDebugPanel } from '@/components/debug/VideoDebugPanel';
+import { EnhancedJobProgress } from '@/components/EnhancedJobProgress';
 import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { Job } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
 import { enqueueExport } from '@/lib/exports';
+import { createProjectTitle } from '@/lib/youtube-metadata';
 import posthog from 'posthog-js';
 
 export default function ProjectDetail() {
@@ -149,8 +151,25 @@ export default function ProjectDetail() {
     if (m.includes('401') || m.includes('unauthorized')) {
       return 'Problema de autenticação. Recarregue a página! 🔐';
     }
+    if (m.toLowerCase().includes('youtube') || m.toLowerCase().includes('blocked')) {
+      return 'YouTube temporariamente indisponível. Tente fazer upload do arquivo! 📹';
+    }
+    if (m.toLowerCase().includes('timeout') || m.toLowerCase().includes('network')) {
+      return 'Conexão instável. Verificando status automaticamente... 🔄';
+    }
     return 'Ops! Algo deu errado, mas vamos resolver rapidinho 💪';
   }
+
+  const getProjectDisplayTitle = () => {
+    // Use stored metadata title if available
+    if (job.result?.metadata?.title) {
+      return job.result.metadata.title;
+    }
+    
+    // Generate title from URL
+    const title = createProjectTitle(job.youtubeUrl);
+    return title !== 'Novo Projeto' ? title : `Projeto #${job.id.slice(0, 8)}`;
+  };
 
   const getEstimatedTime = () => {
     if (!job || !jobStatus) return '3-5 min';
@@ -224,12 +243,17 @@ export default function ProjectDetail() {
               <div className="flex-1">
                 <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-primary" />
-                  Projeto #{job.id.slice(0, 8)}
+                  {getProjectDisplayTitle()}
                 </h2>
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <ExternalLink className="w-4 h-4" />
                   <span className="text-sm">{formatUrl(job.youtubeUrl)}</span>
                 </div>
+                {job.result?.metadata?.channel && (
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    por {job.result.metadata.channel}
+                  </div>
+                )}
               </div>
               
               <Button variant="outline" onClick={handleCopyJobId} className="gap-2 hover:bg-primary/10">
@@ -282,25 +306,35 @@ export default function ProjectDetail() {
               </TabsList>
               
               <TabsContent value="progress" className="space-y-6">
-                {/* Visual Timeline */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <TrendingUp className="w-5 h-5 text-primary" />
-                      Pipeline de Criação
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    {steps.map((step, index) => (
-                      <TimelineStep 
-                        key={step.id} 
-                        step={step} 
-                        index={index} 
-                        total={steps.length} 
-                      />
-                    ))}
-                  </CardContent>
-                </Card>
+                {/* Enhanced Progress Tracking */}
+                <EnhancedJobProgress
+                  currentStep={jobStatus?.currentStep}
+                  jobStatus={job.status as any}
+                  progress={overallProgress}
+                  error={friendlyError(job?.error || error)}
+                />
+
+                {/* Fallback: Original Timeline for debugging */}
+                {process.env.NODE_ENV === 'development' && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <TrendingUp className="w-5 h-5 text-primary" />
+                        Timeline Original (Debug)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {steps.map((step, index) => (
+                        <TimelineStep 
+                          key={step.id} 
+                          step={step} 
+                          index={index} 
+                          total={steps.length} 
+                        />
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Current Status Card */}
                 {job.status === 'active' && activeStep && (

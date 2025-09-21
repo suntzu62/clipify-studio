@@ -30,6 +30,12 @@ export interface Job {
     downloadUrl?: string;
     thumbnailUrl?: string;
     scenes?: any[];
+    metadata?: {
+      title?: string;
+      thumbnail?: string;
+      channel?: string;
+      duration?: string;
+    };
   };
 }
 
