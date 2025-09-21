@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useJobConnectionManager } from './useJobConnectionManager';
 import { JobStatus } from './useJobStream';
+import { getJobStatus } from '@/lib/jobs-api';
 
 interface UseJobStatusOptions {
   jobId: string;
@@ -12,6 +13,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
   const [isConnected, setIsConnected] = useState(false);
   const [connectionType, setConnectionType] = useState<'sse' | 'polling' | 'none'>('none');
   const [error, setError] = useState<string | null>(null);
+  const [enrichedDataFetched, setEnrichedDataFetched] = useState(false);
   
   const { subscribe, startConnection, getConnectionInfo } = useJobConnectionManager(jobId);
 
@@ -69,6 +71,40 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
       startConnection();
     }
   }, [startConnection, isJobTerminal, jobStatus]);
+
+  // Fetch enriched job status when job completes and no clips are available
+  useEffect(() => {
+    const shouldFetchEnriched = 
+      jobStatus?.status === 'completed' && 
+      !enrichedDataFetched && 
+      (!jobStatus?.result?.clips || jobStatus.result.clips.length === 0) &&
+      enabled && 
+      jobId;
+
+    if (shouldFetchEnriched) {
+      console.log('[useJobStatus] Fetching enriched job status for completed job');
+      setEnrichedDataFetched(true);
+      
+      getJobStatus(jobId)
+        .then(enrichedJob => {
+          console.log('[useJobStatus] Enriched job status fetched:', enrichedJob);
+          
+          // Merge enriched data with current status
+          setJobStatus(prevStatus => ({
+            ...prevStatus,
+            ...enrichedJob,
+            result: {
+              ...prevStatus?.result,
+              ...enrichedJob.result,
+              clips: enrichedJob.result?.clips || []
+            }
+          } as JobStatus));
+        })
+        .catch(error => {
+          console.error('[useJobStatus] Failed to fetch enriched job status:', error);
+        });
+    }
+  }, [jobStatus?.status, enrichedDataFetched, enabled, jobId]);
 
   return {
     jobStatus,

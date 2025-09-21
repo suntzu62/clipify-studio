@@ -95,9 +95,9 @@ export const useClipList = (jobResult?: any) => {
 
     // Strategy 3: Fallback to extracting from texts (legacy support)
     const texts = result.texts || jobResult.texts || {};
-    const titles = texts?.titles || [];
-    const descriptions = texts?.descriptions || [];
-    const hashtags = texts?.hashtags || [];
+    const titles = Array.isArray(texts?.titles) ? texts.titles : [];
+    const descriptions = Array.isArray(texts?.descriptions) ? texts.descriptions : [];
+    const hashtags = Array.isArray(texts?.hashtags) ? texts.hashtags : [];
 
     log.info('[useClipList] Checking texts fallback', { 
       hasTexts: !!texts,
@@ -106,7 +106,7 @@ export const useClipList = (jobResult?: any) => {
       hashtagsCount: hashtags.length
     });
 
-    if (titles.length > 0) {
+    if (titles.length > 0 && jobResult?.status === 'completed') {
       log.info('[useClipList] Creating clips from texts', { titleCount: titles.length });
       const processedClips = titles.map((title: string, index: number) => ({
         id: `clip-${index + 1}`,
@@ -132,21 +132,23 @@ export const useClipList = (jobResult?: any) => {
       return;
     }
 
-    // Strategy 5: Default to placeholder clips for processing jobs
-    log.info('[useClipList] Creating placeholder clips for processing job', { 
-      status: jobResult?.status,
-      estimatedClipCount 
-    });
-    const placeholderClips = Array.from({ length: estimatedClipCount }, (_, index) => ({
-      id: `clip-${index + 1}`,
-      title: `Clipe ${index + 1}`,
-      description: 'Processando...',
-      hashtags: [],
-      duration: 0,
-      status: 'processing' as const
-    }));
-    setDebugInfo(prev => ({ ...prev, processed: true, strategy: 'placeholders', foundClips: placeholderClips.length }));
-    setClips(placeholderClips);
+    // Strategy 5: Default to placeholder clips for processing jobs only
+    if (jobResult?.status !== 'completed') {
+      log.info('[useClipList] Creating placeholder clips for processing job', { 
+        status: jobResult?.status,
+        estimatedClipCount 
+      });
+      const placeholderClips = Array.from({ length: estimatedClipCount }, (_, index) => ({
+        id: `clip-${index + 1}`,
+        title: `Clipe ${index + 1}`,
+        description: 'Processando...',
+        hashtags: [],
+        duration: 0,
+        status: 'processing' as const
+      }));
+      setDebugInfo(prev => ({ ...prev, processed: true, strategy: 'placeholders', foundClips: placeholderClips.length }));
+      setClips(placeholderClips);
+    }
   }, [jobResult, estimatedClipCount]);
 
   const readyClips = clips.filter(c => c.status === 'ready');

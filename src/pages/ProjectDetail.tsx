@@ -46,6 +46,14 @@ export default function ProjectDetail() {
   // Get clips data - pass full jobStatus or job object
   const { clips, readyCount, debugInfo, setEstimatedClipCount } = useClipList(jobStatus || job);
 
+  // Update estimated clip count from texts when available
+  useEffect(() => {
+    const texts = jobStatus?.result?.texts || job?.result?.texts;
+    if (texts?.titles && Array.isArray(texts.titles) && texts.titles.length > 0) {
+      setEstimatedClipCount(texts.titles.length);
+    }
+  }, [jobStatus, job, setEstimatedClipCount]);
+
   useEffect(() => {
     if (!id || !user?.id) return;
     
@@ -305,7 +313,7 @@ export default function ProjectDetail() {
                 </TabsTrigger>
                 <TabsTrigger 
                   value="results" 
-                  disabled={job?.status === 'queued'}
+                  disabled={job?.status === 'queued' && readyCount === 0 && clips.length === 0}
                   className="gap-2"
                 >
                   <Sparkles className="w-4 h-4" />
