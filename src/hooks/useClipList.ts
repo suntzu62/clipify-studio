@@ -26,7 +26,8 @@ export const useClipList = (jobResult?: any) => {
       jobResultKeys: jobResult ? Object.keys(jobResult) : [],
       jobResultType: typeof jobResult,
       jobStatus: jobResult?.status,
-      resultKeys: jobResult?.result ? Object.keys(jobResult.result) : []
+      resultKeys: jobResult?.result ? Object.keys(jobResult.result) : [],
+      rawJobResult: JSON.stringify(jobResult, null, 2)
     });
 
     // Store debug info

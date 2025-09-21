@@ -86,6 +86,8 @@ serve(async (req) => {
 async function enrichWithClipData(jobId: string, originalData: any) {
   try {
     console.log('[enrichWithClipData] Starting enrichment for job:', jobId);
+    console.log('[enrichWithClipData] Original data status:', originalData?.status || originalData?.state);
+    console.log('[enrichWithClipData] Original data keys:', Object.keys(originalData || {}));
     
     // Create admin Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -97,9 +99,11 @@ async function enrichWithClipData(jobId: string, originalData: any) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const bucket = 'raw'; // Use the correct bucket name
+    const bucket = 'raw';
     
-    console.log('[enrichWithClipData] Listing files from bucket:', bucket);
+    console.log('[enrichWithClipData] Using bucket:', bucket);
+    console.log('[enrichWithClipData] Looking for clips at path: projects/' + jobId + '/clips');
+    console.log('[enrichWithClipData] Looking for texts at path: projects/' + jobId + '/texts');
     
     // List files in clips and texts folders
     const { data: clipFiles, error: clipError } = await supabase.storage
@@ -112,12 +116,27 @@ async function enrichWithClipData(jobId: string, originalData: any) {
 
     console.log('[enrichWithClipData] Clip files result:', { 
       clipFiles: clipFiles?.length || 0, 
-      clipError: clipError?.message 
+      clipError: clipError?.message,
+      clipFileNames: clipFiles?.map(f => f.name) || []
     });
     console.log('[enrichWithClipData] Text folders result:', { 
       textFolders: textFolders?.length || 0, 
-      textError: textError?.message 
+      textError: textError?.message,
+      folderNames: textFolders?.map(f => f.name) || []
     });
+    
+    // Enhanced logging for debugging
+    if (clipFiles && clipFiles.length > 0) {
+      console.log('[enrichWithClipData] Found clip files:', clipFiles.map(f => ({
+        name: f.name,
+        size: f.metadata?.size,
+        lastModified: f.updated_at
+      })));
+    }
+    
+    if (textFolders && textFolders.length > 0) {
+      console.log('[enrichWithClipData] Found text folders:', textFolders.map(f => f.name));
+    }
 
     if (clipError && textError) {
       console.error('[enrichWithClipData] Both storage queries failed:', { clipError, textError });
@@ -239,8 +258,17 @@ async function enrichWithClipData(jobId: string, originalData: any) {
       titles: titles.length,
       descriptions: descriptions.length,
       hashtags: hashtags.length,
-      clips: clips.length
+      clips: clips.length,
+      fileGroups: fileGroups.size
     });
+    
+    console.log('[enrichWithClipData] Generated clips preview:', clips.map(c => ({
+      id: c.id,
+      title: c.title,
+      hasPreviewUrl: !!c.previewUrl,
+      hasDownloadUrl: !!c.downloadUrl,
+      hasThumbnail: !!c.thumbnailUrl
+    })));
 
     const result = {
       ...normalizeJobData(originalData),

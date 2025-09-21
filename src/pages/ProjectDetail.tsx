@@ -14,6 +14,7 @@ import { TimelineStep } from '@/components/timeline/TimelineStep';
 import { ClipCard } from '@/components/clips/ClipCard';
 import { SocialProof } from '@/components/social/SocialProof';
 import { VideoDebugPanel } from '@/components/debug/VideoDebugPanel';
+import { ClipDebugPanel } from '@/components/debug/ClipDebugPanel';
 import { EnhancedJobProgress } from '@/components/EnhancedJobProgress';
 import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { Job } from '@/lib/jobs-api';
@@ -110,6 +111,13 @@ export default function ProjectDetail() {
         title: "ID copiado! ✨",
         description: "ID do projeto copiado para a área de transferência"
       });
+    }
+  };
+
+  const handleRefreshClips = () => {
+    if (id) {
+      // Force a refresh by reloading the page
+      window.location.reload();
     }
   };
 
@@ -358,6 +366,15 @@ export default function ProjectDetail() {
               </TabsContent>
               
               <TabsContent value="results" className="space-y-6">
+                {/* Debug Panel in Development */}
+                {process.env.NODE_ENV === 'development' && (
+                  <ClipDebugPanel 
+                    jobResult={jobStatus || job}
+                    clipDebugInfo={debugInfo}
+                    onRefresh={handleRefreshClips}
+                  />
+                )}
+                
                 {readyCount > 0 ? (
                   <>
                     {/* Results Header */}
@@ -415,9 +432,16 @@ export default function ProjectDetail() {
                           </div>
                           <div>
                             <h3 className="text-lg font-semibold mb-2">Nenhum clipe disponível</h3>
-                            <p className="text-muted-foreground">
+                            <p className="text-muted-foreground mb-4">
                               Não foi possível gerar clipes a partir deste vídeo. Tente com um vídeo mais longo ou com conteúdo diferente.
                             </p>
+                            <Button 
+                              variant="outline" 
+                              onClick={handleRefreshClips}
+                              className="mt-2"
+                            >
+                              Tentar buscar novamente
+                            </Button>
                           </div>
                         </div>
                       </Card>
