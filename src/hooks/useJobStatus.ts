@@ -16,6 +16,8 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
   const [connectionType, setConnectionType] = useState<'sse' | 'polling' | 'none'>('none');
   const [error, setError] = useState<string | null>(null);
   const [enrichedDataFetched, setEnrichedDataFetched] = useState(false);
+  const [stallStartAt, setStallStartAt] = useState<number | null>(null);
+  const [stalled, setStalled] = useState(false);
   
   const getSupabaseToken = useCallback(async (opts?: any) => {
     if (!getToken) return null;
@@ -121,6 +123,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
         if (enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) {
           console.log('[useJobStatus] Clips found, stopping enrichment polling');
           setEnrichedDataFetched(true);
+          setStalled(false);
         }
       } catch (error) {
         console.error('[useJobStatus] Failed to fetch enriched job status:', error);
@@ -143,12 +146,70 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     };
   }, [enabled, jobId, jobStatus?.status, enrichedDataFetched, isJobTerminal, getSupabaseToken]);
 
+  // Detect stalled processing (no clips and non-terminal for >10 minutes)
+  useEffect(() => {
+    if (!enabled || !jobId) return;
+
+    if (isJobTerminal(jobStatus)) {
+      setStalled(false);
+      setStallStartAt(null);
+      return;
+    }
+
+    const hasClips = Boolean(jobStatus?.result?.clips && jobStatus.result.clips.length > 0);
+    if (hasClips || enrichedDataFetched) {
+      setStalled(false);
+      setStallStartAt(null);
+      return;
+    }
+
+    if (jobStatus && stallStartAt === null) {
+      setStallStartAt(Date.now());
+    }
+
+    let timeout: any;
+    if (stallStartAt !== null) {
+      const elapsed = Date.now() - stallStartAt;
+      const remaining = Math.max(0, 10 * 60 * 1000 - elapsed); // 10 minutes window
+      timeout = setTimeout(() => setStalled(true), remaining);
+    }
+
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [enabled, jobId, jobStatus?.status, jobStatus?.result?.clips?.length, enrichedDataFetched, stallStartAt, isJobTerminal]);
+
+  // Manual refresh to fetch enriched data immediately
+  const refreshNow = useCallback(async () => {
+    try {
+      const enrichedJob = await getJobStatus(jobId, getSupabaseToken);
+      setJobStatus(prevStatus => ({
+        ...prevStatus,
+        ...enrichedJob,
+        result: {
+          ...prevStatus?.result,
+          ...enrichedJob.result,
+          clips: enrichedJob.result?.clips || prevStatus?.result?.clips || []
+        }
+      } as JobStatus));
+
+      if (enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) {
+        setEnrichedDataFetched(true);
+        setStalled(false);
+      }
+    } catch (e) {
+      console.error('[useJobStatus] refreshNow failed:', e);
+    }
+  }, [jobId, getSupabaseToken]);
+
   return {
     jobStatus,
     isConnected,
     connectionType,
     error,
     reconnect,
+    refreshNow,
+    stalled,
     isTerminal: isJobTerminal(jobStatus)
   };
 };

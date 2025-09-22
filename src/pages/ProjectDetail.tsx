@@ -32,7 +32,7 @@ export default function ProjectDetail() {
   const telemetryFired = useRef<'none' | 'completed' | 'failed'>('none');
   
   // Use unified job status hook with intelligent SSE/polling fallback
-  const { jobStatus, isConnected, connectionType, error } = useJobStatus({
+  const { jobStatus, isConnected, connectionType, error, reconnect, refreshNow, stalled } = useJobStatus({
     jobId: id || '',
     enabled: !!id
   });
@@ -286,6 +286,25 @@ export default function ProjectDetail() {
             )}
           </CardContent>
         </Card>
+
+        {/* Stalled processing callout */}
+        {stalled && (
+          <Card className="mb-6 border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20">
+            <CardContent className="p-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-yellow-600" />
+                <div>
+                  <div className="font-medium">Processamento parece travado</div>
+                  <div className="text-sm text-muted-foreground">Sem progresso há alguns minutos. Tente reconectar ou atualizar agora.</div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={reconnect}>Reconectar</Button>
+                <Button onClick={refreshNow}>Atualizar agora</Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Main Content */}
