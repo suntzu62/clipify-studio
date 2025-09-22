@@ -287,20 +287,56 @@ export default function ProjectDetail() {
           </CardContent>
         </Card>
 
-        {/* Stalled processing callout */}
-        {stalled && (
+        {/* Enhanced diagnostics for stalled or problematic processing */}
+        {(stalled || jobStatus?.pipelineStatus?.isStalled || !jobStatus?.workerHealth?.isHealthy) && (
           <Card className="mb-6 border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20">
-            <CardContent className="p-4 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3 mb-3">
                 <AlertCircle className="w-5 h-5 text-yellow-600" />
-                <div>
-                  <div className="font-medium">Processamento parece travado</div>
-                  <div className="text-sm text-muted-foreground">Sem progresso há alguns minutos. Tente reconectar ou atualizar agora.</div>
+                <div className="font-medium">
+                  {!jobStatus?.workerHealth?.isHealthy ? 'Processamento indisponível' : 'Processamento travado'}
                 </div>
               </div>
-              <div className="flex gap-2">
+              
+              <div className="text-sm text-muted-foreground space-y-2 mb-4">
+                {!jobStatus?.workerHealth?.isHealthy ? (
+                  <div>O serviço de processamento não está respondendo. Verifique se o backend está funcionando.</div>
+                ) : (
+                  <>
+                    <div>Sem progresso há alguns minutos no estágio: <strong>{jobStatus?.pipelineStatus?.stage || 'desconhecido'}</strong></div>
+                    {jobStatus?.pipelineStatus?.stageDetails && (
+                      <div className="grid grid-cols-2 gap-2 mt-2 p-2 bg-white/50 rounded text-xs">
+                        <div>✓ Download: {jobStatus.pipelineStatus.stageDetails.hasSource ? 'Sim' : 'Não'}</div>
+                        <div>✓ Transcrição: {jobStatus.pipelineStatus.stageDetails.hasTranscript ? 'Sim' : 'Não'}</div>
+                        <div>✓ Análise: {jobStatus.pipelineStatus.stageDetails.hasScenes ? 'Sim' : 'Não'}</div>
+                        <div>✓ Seleção: {jobStatus.pipelineStatus.stageDetails.hasRank ? 'Sim' : 'Não'}</div>
+                        <div>✓ Render: {jobStatus.pipelineStatus.stageDetails.hasRender ? 'Sim' : 'Não'}</div>
+                        <div>✓ Textos: {jobStatus.pipelineStatus.stageDetails.hasTexts ? 'Sim' : 'Não'}</div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              
+              <div className="flex flex-wrap gap-2">
                 <Button variant="outline" onClick={reconnect}>Reconectar</Button>
                 <Button onClick={refreshNow}>Atualizar agora</Button>
+                {jobStatus?.id && (
+                  <Button 
+                    variant="outline" 
+                    onClick={() => navigator.clipboard.writeText(jobStatus.id)}
+                    className="text-xs"
+                  >
+                    Copiar ID do job
+                  </Button>
+                )}
+                <Button 
+                  variant="outline" 
+                  onClick={() => window.open('https://docs.lovable.dev/tips-tricks/troubleshooting', '_blank')}
+                  className="text-xs"
+                >
+                  Ajuda
+                </Button>
               </div>
             </CardContent>
           </Card>

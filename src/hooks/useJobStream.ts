@@ -7,7 +7,7 @@ import { useAuth } from '@clerk/clerk-react';
 
 export interface JobStatus {
   id: string;
-  status: 'queued' | 'active' | 'completed' | 'failed';
+  status: 'queued' | 'active' | 'completed' | 'failed' | 'waiting-children';
   progress: number;
   currentStep?: string;
   error?: string;
@@ -30,6 +30,33 @@ export interface JobStatus {
       status: 'processing' | 'ready' | 'failed';
     }>;
     blogDraftUrl?: string;
+  };
+  pipelineStatus?: {
+    originalStatus: string;
+    derivedStatus: string;
+    stage: string;
+    stageDetails: {
+      hasSource: boolean;
+      hasTranscript: boolean;
+      hasScenes: boolean;
+      hasRank: boolean;
+      hasRender: boolean;
+      hasTexts: boolean;
+      clipCount: number;
+    };
+    isStalled: boolean;
+    isCompleted: boolean;
+    isFailed: boolean;
+    clipCount: number;
+    hasTexts: boolean;
+  };
+  workerHealth?: {
+    isHealthy: boolean;
+    healthData?: any;
+    detailedStatus?: any;
+    error?: string;
+    workerBaseUrl?: string;
+    timestamp: string;
   };
 }
 

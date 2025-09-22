@@ -65,13 +65,21 @@ serve(async (req) => {
     console.log('[job-status] Workers API data keys:', Object.keys(data));
     console.log('[job-status] Job status from workers:', data.status || data.state);
 
-    // Enhance response with clip metadata from storage
+    // Enhance response with clip metadata from storage and worker health
     const enhancedData = await enrichWithClipData(id, data);
+    const pipelineStatus = analyzePipelineStatus(enhancedData, base, apiKey);
     
     console.log('[job-status] Enhanced data keys:', Object.keys(enhancedData));
     console.log('[job-status] Enhanced clips count:', enhancedData.result?.clips?.length || 0);
+    console.log('[job-status] Pipeline status:', pipelineStatus.derivedStatus);
     
-    return new Response(JSON.stringify(enhancedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: resp.status });
+    const finalData = {
+      ...enhancedData,
+      pipelineStatus,
+      workerHealth: await checkWorkerHealth(base, apiKey)
+    };
+    
+    return new Response(JSON.stringify(finalData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: resp.status });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[job-status] Unhandled error:', message, err);
@@ -318,4 +326,146 @@ function normalizeJobData(data: any) {
     error: data.error,
     result: data.result || {}
   };
+}
+
+function analyzePipelineStatus(jobData: any, workerBaseUrl: string, apiKey: string) {
+  const status = jobData.status || 'unknown';
+  const clipCount = jobData.result?.clips?.length || 0;
+  const hasTexts = Boolean(jobData.result?.texts?.titles?.length || jobData.result?.texts?.descriptions?.length);
+  
+  // Determine pipeline stage based on job status and available data
+  let derivedStatus = status;
+  let stage = 'queued';
+  let stageDetails: any = {};
+  
+  if (status === 'waiting-children' || status === 'active') {
+    // Analyze what stages have completed based on available data
+    const hasSource = Boolean(jobData.result?.metadata || jobData.result?.duration);
+    const hasTranscript = Boolean(jobData.result?.transcript || jobData.result?.segments);
+    const hasScenes = Boolean(jobData.result?.scenes || jobData.result?.candidates);
+    const hasRank = Boolean(jobData.result?.ranked || clipCount > 0);
+    const hasRender = clipCount > 0;
+    
+    stageDetails = {
+      hasSource,
+      hasTranscript, 
+      hasScenes,
+      hasRank,
+      hasRender,
+      hasTexts,
+      clipCount
+    };
+    
+    // Determine current stage
+    if (!hasSource) {
+      stage = 'ingest';
+      derivedStatus = 'downloading';
+    } else if (!hasTranscript) {
+      stage = 'transcribe';
+      derivedStatus = 'transcribing';
+    } else if (!hasScenes) {
+      stage = 'scenes';
+      derivedStatus = 'analyzing';
+    } else if (!hasRank) {
+      stage = 'rank';
+      derivedStatus = 'ranking';
+    } else if (!hasRender) {
+      stage = 'render';
+      derivedStatus = 'rendering';
+    } else if (!hasTexts) {
+      stage = 'texts';
+      derivedStatus = 'generating_texts';
+    } else {
+      stage = 'completed';
+      derivedStatus = 'completed';
+    }
+    
+    // Detect stalled processing (stuck in waiting-children for too long without progress)
+    const now = Date.now();
+    const createdAt = jobData.createdAt || jobData.timestamp;
+    if (createdAt) {
+      const ageMinutes = (now - new Date(createdAt).getTime()) / (1000 * 60);
+      if (ageMinutes > 10 && !hasSource && stage === 'ingest') {
+        derivedStatus = 'stalled_ingest';
+      } else if (ageMinutes > 15 && hasSource && !hasTranscript && stage === 'transcribe') {
+        derivedStatus = 'stalled_transcribe';
+      } else if (ageMinutes > 5 && hasTranscript && (!hasScenes || !hasRank || !hasRender) && stage !== 'completed') {
+        derivedStatus = 'stalled_processing';
+      }
+    }
+  } else if (status === 'completed') {
+    stage = 'completed';
+    derivedStatus = 'completed';
+  } else if (status === 'failed') {
+    stage = 'failed';
+    derivedStatus = 'failed';
+  }
+  
+  return {
+    originalStatus: status,
+    derivedStatus,
+    stage,
+    stageDetails,
+    isStalled: derivedStatus.startsWith('stalled_'),
+    isCompleted: derivedStatus === 'completed',
+    isFailed: derivedStatus === 'failed',
+    clipCount,
+    hasTexts
+  };
+}
+
+async function checkWorkerHealth(workerBaseUrl: string, apiKey: string) {
+  try {
+    console.log('[checkWorkerHealth] Checking worker health at:', workerBaseUrl);
+    
+    // Check basic health endpoint
+    const healthUrl = `${workerBaseUrl}/health`;
+    const healthResp = await fetch(healthUrl, { 
+      headers: { 'x-api-key': apiKey },
+      signal: AbortSignal.timeout(5000) // 5 second timeout
+    });
+    
+    const isHealthy = healthResp.ok;
+    let healthData: any = {};
+    
+    if (isHealthy) {
+      try {
+        healthData = await healthResp.json();
+      } catch (e) {
+        healthData = { status: 'ok', message: 'Health endpoint responded but no JSON data' };
+      }
+    }
+    
+    // Try to get more detailed status if available
+    let detailedStatus: any = null;
+    try {
+      const detailedUrl = `${workerBaseUrl}/health/details`;
+      const detailedResp = await fetch(detailedUrl, { 
+        headers: { 'x-api-key': apiKey },
+        signal: AbortSignal.timeout(3000) // 3 second timeout
+      });
+      
+      if (detailedResp.ok) {
+        detailedStatus = await detailedResp.json();
+      }
+    } catch (e) {
+      console.log('[checkWorkerHealth] Detailed health endpoint not available');
+    }
+    
+    return {
+      isHealthy,
+      healthData,
+      detailedStatus,
+      workerBaseUrl,
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    console.error('[checkWorkerHealth] Worker health check failed:', error);
+    return {
+      isHealthy: false,
+      error: error instanceof Error ? error.message : String(error),
+      workerBaseUrl,
+      timestamp: new Date().toISOString()
+    };
+  }
 }
