@@ -2,24 +2,15 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifySSE from 'fastify-sse-v2';
 import rateLimit from '@fastify/rate-limit';
-import { Queue, QueueEvents, type JobsOptions } from 'bullmq';
+import { type JobsOptions } from 'bullmq';
 import { createHash } from 'crypto';
 import pino from 'pino';
 import { randomUUID as crypto } from 'crypto';
 import { connection } from './redis';
 import { QUEUES } from './queues';
+import { ALL_QUEUES, getQueue, getQueueEvents, getQueueKey, type QueueName } from './lib/bullmq';
 
 const log = pino({ name: 'api' });
-
-type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
-
-const queueMap = Object.fromEntries(
-  Object.values(QUEUES).map((name) => [name, new Queue(name, { connection })])
-) as Record<QueueName, Queue>;
-
-function queueKey(name: QueueName) {
-  return queueMap[name].toKey('');
-}
 
 async function ensureJob(
   queueName: QueueName,
@@ -28,7 +19,7 @@ async function ensureJob(
   data: Record<string, any>,
   extraOpts: JobsOptions = {}
 ) {
-  const queue = queueMap[queueName];
+  const queue = getQueue(queueName);
   const existing = await queue.getJob(jobId);
   if (existing) {
     return existing;
@@ -134,7 +125,7 @@ export async function start() {
       'transcribe',
       `${rootId}:transcribe`,
       { rootId, meta },
-      { parent: { id: ingestJob.id!, queue: queueKey(QUEUES.INGEST) } }
+      { parent: { id: ingestJob.id!, queue: getQueueKey(QUEUES.INGEST) } }
     );
 
     const scenesJob = await ensureJob(
@@ -142,7 +133,7 @@ export async function start() {
       'scenes',
       `${rootId}:scenes`,
       { rootId, meta },
-      { parent: { id: transcribeJob.id!, queue: queueKey(QUEUES.TRANSCRIBE) } }
+      { parent: { id: transcribeJob.id!, queue: getQueueKey(QUEUES.TRANSCRIBE) } }
     );
 
     const rankJob = await ensureJob(
@@ -150,7 +141,7 @@ export async function start() {
       'rank',
       `${rootId}:rank`,
       { rootId, meta },
-      { parent: { id: scenesJob.id!, queue: queueKey(QUEUES.SCENES) } }
+      { parent: { id: scenesJob.id!, queue: getQueueKey(QUEUES.SCENES) } }
     );
 
     const renderJob = await ensureJob(
@@ -158,7 +149,7 @@ export async function start() {
       'render',
       `${rootId}:render`,
       { rootId, meta },
-      { parent: { id: rankJob.id!, queue: queueKey(QUEUES.RANK) } }
+      { parent: { id: rankJob.id!, queue: getQueueKey(QUEUES.RANK) } }
     );
 
     const textsJob = await ensureJob(
@@ -166,7 +157,7 @@ export async function start() {
       'texts',
       `${rootId}:texts`,
       { rootId, meta },
-      { parent: { id: renderJob.id!, queue: queueKey(QUEUES.RENDER) } }
+      { parent: { id: renderJob.id!, queue: getQueueKey(QUEUES.RENDER) } }
     );
 
     await ensureJob(
@@ -174,7 +165,7 @@ export async function start() {
       'export',
       `${rootId}:export`,
       { rootId, meta },
-      { parent: { id: textsJob.id!, queue: queueKey(QUEUES.TEXTS) } }
+      { parent: { id: textsJob.id!, queue: getQueueKey(QUEUES.TEXTS) } }
     );
 
     res.send({ jobId: ingestJob.id });
@@ -188,7 +179,7 @@ export async function start() {
       res.code(400).send({ error: 'rootId_and_clipId_required' });
       return;
     }
-    const exportQueue = queueMap[QUEUES.EXPORT];
+    const exportQueue = getQueue(QUEUES.EXPORT);
     const job = await exportQueue.add(
       'export',
       { rootId, clipId, meta: body.meta || {} },
@@ -206,7 +197,7 @@ export async function start() {
   // Status of a job (root in INGEST)
   app.get('/api/jobs/:id/status', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
     const { id } = req.params as { id: string };
-    const queue = queueMap[QUEUES.INGEST];
+    const queue = getQueue(QUEUES.INGEST);
     const job = await queue.getJob(id);
     if (!job) {
       res.code(404).send({ error: 'not_found' });
@@ -235,35 +226,54 @@ export async function start() {
       }
     }, 15000);
 
-    const events: QueueEvents[] = [];
     const send = (event: string, payload: any) => res.sse({ event, data: JSON.stringify(payload) });
 
-    for (const q of Object.values(QUEUES)) {
-      const qe = new QueueEvents(q, { connection });
-      await qe.waitUntilReady();
+    const listeners: Array<{
+      queue: QueueName;
+      remove: () => void;
+    }> = [];
 
-      qe.on('progress', ({ jobId, data }) => {
+    for (const queueName of ALL_QUEUES) {
+      const qe = await getQueueEvents(queueName);
+      const progress = ({ jobId, data }: { jobId: string; data: any }) => {
         if (jobId === id || jobId.startsWith(id + ':')) {
-          send('progress', { queue: q, jobId, progress: data });
+          send('progress', { queue: queueName, jobId, progress: data });
         }
-      });
-      qe.on('completed', ({ jobId, returnvalue }) => {
+      };
+      const completed = ({ jobId, returnvalue }: { jobId: string; returnvalue: any }) => {
         if (jobId === id || jobId.startsWith(id + ':')) {
-          send('completed', { queue: q, jobId, returnvalue });
+          send('completed', { queue: queueName, jobId, returnvalue });
         }
-      });
-      qe.on('failed', ({ jobId, failedReason }) => {
+      };
+      const failed = ({ jobId, failedReason }: { jobId: string; failedReason: string }) => {
         if (jobId === id || jobId.startsWith(id + ':')) {
-          send('failed', { queue: q, jobId, failedReason });
+          send('failed', { queue: queueName, jobId, failedReason });
         }
-      });
+      };
 
-      events.push(qe);
+      qe.on('progress', progress);
+      qe.on('completed', completed);
+      qe.on('failed', failed);
+
+      listeners.push({
+        queue: queueName,
+        remove: () => {
+          qe.off('progress', progress);
+          qe.off('completed', completed);
+          qe.off('failed', failed);
+        },
+      });
     }
 
-    req.raw.on('close', async () => {
+    req.raw.on('close', () => {
       clearInterval(heartbeat);
-      for (const e of events) await e.close();
+      for (const listener of listeners) {
+        try {
+          listener.remove();
+        } catch (err) {
+          log.warn({ queue: listener.queue, err }, 'Failed to remove queue listener');
+        }
+      }
     });
   });
 
