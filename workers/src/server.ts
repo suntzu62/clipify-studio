@@ -206,7 +206,7 @@ export async function start() {
   // Status of a job (root in INGEST)
   app.get('/api/jobs/:id/status', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
     const { id } = req.params as { id: string };
-    const queue = new Queue(QUEUES.INGEST, { connection });
+    const queue = queueMap[QUEUES.INGEST];
     const job = await queue.getJob(id);
     if (!job) {
       res.code(404).send({ error: 'not_found' });
