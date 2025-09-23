@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifySSE from 'fastify-sse-v2';
+import rateLimit from '@fastify/rate-limit';
 import { FlowProducer, Queue, QueueEvents } from 'bullmq';
 import { createHash } from 'crypto';
 import pino from 'pino';
@@ -40,24 +41,27 @@ export async function start() {
   app.get('/', async () => 'OK');
   
   // Rate limit per API key or IP - increased for pipeline workload
-  await app.register((await import('@fastify/rate-limit')).default, {
+  await app.register(rateLimit, {
     max: 300, // Increased from 120 to handle multiple users creating clips
     timeWindow: '1 minute',
     keyGenerator: (req: any) => (req.headers['x-api-key'] as string) || req.ip,
     skipOnError: true, // Don't rate limit on errors
-    // More generous rate limit for pipeline endpoint
-    preHandler: async (req: any, res: any) => {
-      if (req.url?.includes('/pipeline')) {
-        res.rateLimit = { max: 200, timeWindow: '1 minute' };
-      }
-    }
+    global: true,
   });
   app.register(fastifySSE);
 
   app.get('/health', async () => ({ ok: true }));
 
   // Create pipeline
-  app.post('/api/jobs/pipeline', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
+  app.post('/api/jobs/pipeline', {
+    preHandler: apiKeyGuard,
+    config: {
+      rateLimit: {
+        max: 200,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (req: any, res: any) => {
     const body = (req.body || {}) as { youtubeUrl?: string; meta?: Record<string, any> };
     const youtubeUrl = body.youtubeUrl;
     if (!youtubeUrl) {
