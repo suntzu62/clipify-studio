@@ -10,6 +10,7 @@ import { runTexts } from './texts';
 import { runExport } from './export';
 import pino from 'pino';
 import { track } from '../lib/analytics';
+import { emitWorkerEvent } from '../lib/worker-events';
 
 const log = pino({ name: 'worker' });
 
@@ -80,28 +81,49 @@ export const makeWorker = (queueName: string) =>
     },
     { connection, concurrency: getConcurrency(queueName), limiter: getLimiter(queueName) }
   )
-    .on('progress', (job, progress) =>
-      log.info({ queue: queueName, jobId: job.id, rootId: (job.data as any)?.rootId, stage: queueName, attempt: job.attemptsMade, progress }, 'progress')
-    )
+    .on('progress', (job, progress) => {
+      const rootId = (job.data as any)?.rootId;
+      log.info({ queue: queueName, jobId: job.id, rootId, stage: queueName, attempt: job.attemptsMade, progress }, 'progress');
+      emitWorkerEvent('progress', {
+        queue: queueName,
+        jobId: job.id || '',
+        rootId,
+        progress,
+      });
+    })
     .on('completed', (job, ret) => {
-      log.info({ queue: queueName, jobId: job.id, rootId: (job.data as any)?.rootId, stage: queueName, attempt: job.attemptsMade, ret }, 'completed');
+      const rootId = (job.data as any)?.rootId;
+      log.info({ queue: queueName, jobId: job.id, rootId, stage: queueName, attempt: job.attemptsMade, ret }, 'completed');
       // Analytics (optional)
       track((job.data as any)?.meta?.userId || 'system', 'job.completed', {
         queue: queueName,
         jobId: job.id,
-        rootId: (job.data as any)?.rootId,
+        rootId,
         attempt: job.attemptsMade,
+      });
+      emitWorkerEvent('completed', {
+        queue: queueName,
+        jobId: job.id || '',
+        rootId,
+        returnvalue: ret,
       });
     })
     .on('failed', (job, err) => {
-      log.error({ queue: queueName, jobId: job?.id, rootId: (job?.data as any)?.rootId, stage: queueName, attempt: job?.attemptsMade, err: err?.message || String(err) }, 'failed');
+      const rootId = (job?.data as any)?.rootId;
+      log.error({ queue: queueName, jobId: job?.id, rootId, stage: queueName, attempt: job?.attemptsMade, err: err?.message || String(err) }, 'failed');
       // Analytics (optional)
       track((job?.data as any)?.meta?.userId || 'system', 'job.failed', {
         queue: queueName,
         jobId: job?.id,
-        rootId: (job?.data as any)?.rootId,
+        rootId,
         attempt: job?.attemptsMade,
         error: err?.message || String(err),
+      });
+      emitWorkerEvent('failed', {
+        queue: queueName,
+        jobId: job?.id || '',
+        rootId,
+        failedReason: err?.message || String(err),
       });
     });
 

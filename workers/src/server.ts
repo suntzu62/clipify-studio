@@ -8,7 +8,8 @@ import pino from 'pino';
 import { randomUUID as crypto } from 'crypto';
 import { connection } from './redis';
 import { QUEUES } from './queues';
-import { ALL_QUEUES, getQueue, getQueueEvents, getQueueKey, type QueueName } from './lib/bullmq';
+import { getQueue, getQueueKey, type QueueName } from './lib/bullmq';
+import { workerEvents } from './lib/worker-events';
 
 const log = pino({ name: 'api' });
 
@@ -228,52 +229,38 @@ export async function start() {
 
     const send = (event: string, payload: any) => res.sse({ event, data: JSON.stringify(payload) });
 
-    const listeners: Array<{
-      queue: QueueName;
-      remove: () => void;
-    }> = [];
+    const isForJob = (payload: any) => {
+      if (!payload) return false;
+      const { jobId, rootId } = payload as { jobId?: string; rootId?: string };
+      if (!jobId && !rootId) return false;
+      return Boolean((jobId && (jobId === id || jobId.startsWith(id + ':'))) || (rootId && rootId === id));
+    };
 
-    for (const queueName of ALL_QUEUES) {
-      const qe = await getQueueEvents(queueName);
-      const progress = ({ jobId, data }: { jobId: string; data: any }) => {
-        if (jobId === id || jobId.startsWith(id + ':')) {
-          send('progress', { queue: queueName, jobId, progress: data });
-        }
-      };
-      const completed = ({ jobId, returnvalue }: { jobId: string; returnvalue: any }) => {
-        if (jobId === id || jobId.startsWith(id + ':')) {
-          send('completed', { queue: queueName, jobId, returnvalue });
-        }
-      };
-      const failed = ({ jobId, failedReason }: { jobId: string; failedReason: string }) => {
-        if (jobId === id || jobId.startsWith(id + ':')) {
-          send('failed', { queue: queueName, jobId, failedReason });
-        }
-      };
+    const progressListener = (payload: any) => {
+      if (isForJob(payload)) {
+        send('progress', payload);
+      }
+    };
+    const completedListener = (payload: any) => {
+      if (isForJob(payload)) {
+        send('completed', payload);
+      }
+    };
+    const failedListener = (payload: any) => {
+      if (isForJob(payload)) {
+        send('failed', payload);
+      }
+    };
 
-      qe.on('progress', progress);
-      qe.on('completed', completed);
-      qe.on('failed', failed);
-
-      listeners.push({
-        queue: queueName,
-        remove: () => {
-          qe.off('progress', progress);
-          qe.off('completed', completed);
-          qe.off('failed', failed);
-        },
-      });
-    }
+    workerEvents.on('progress', progressListener);
+    workerEvents.on('completed', completedListener);
+    workerEvents.on('failed', failedListener);
 
     req.raw.on('close', () => {
       clearInterval(heartbeat);
-      for (const listener of listeners) {
-        try {
-          listener.remove();
-        } catch (err) {
-          log.warn({ queue: listener.queue, err }, 'Failed to remove queue listener');
-        }
-      }
+      workerEvents.off('progress', progressListener);
+      workerEvents.off('completed', completedListener);
+      workerEvents.off('failed', failedListener);
     });
   });
 
