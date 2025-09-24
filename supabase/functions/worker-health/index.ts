@@ -113,18 +113,22 @@ serve(async (req) => {
       detailedHealth,
       queueStatus,
       timestamp: new Date().toISOString(),
-      // Diagnostic info
+      // Enhanced diagnostic info
       diagnostics: {
         canConnect: isHealthy,
         hasDetailedEndpoint: detailedHealth?.available !== false,
         hasQueueEndpoint: queueStatus?.available !== false,
+        hasWorkers: queueStatus?.ok && queueStatus?.totalJobs ? (queueStatus.totalJobs.active > 0 || queueStatus.totalJobs.waiting < 10) : false,
+        workersConsuming: queueStatus?.ok ? queueStatus.queues?.some((q: any) => q.active > 0) : false,
+        queuesDepth: queueStatus?.ok ? queueStatus.totalJobs : null,
+        environment: queueStatus?.environment || null,
         workerUrl: base,
         healthUrl,
         recommendations: []
       }
     };
     
-    // Add recommendations based on findings
+    // Add intelligent recommendations based on findings
     if (!isHealthy) {
       result.diagnostics.recommendations.push('Worker service is not responding - check if it\'s running and accessible');
     }
@@ -133,6 +137,18 @@ serve(async (req) => {
     }
     if (!queueStatus?.available) {
       result.diagnostics.recommendations.push('Queue status endpoint not available - may indicate missing queue management');
+    }
+    if (queueStatus?.ok && !result.diagnostics.workersConsuming && queueStatus.totalJobs?.waiting > 0) {
+      result.diagnostics.recommendations.push('Jobs are queued but no workers are consuming them - check Render.com start command should be "npm start"');
+    }
+    if (queueStatus?.environment?.workersApiKey === 'missing') {
+      result.diagnostics.recommendations.push('WORKERS_API_KEY not configured in workers environment');
+    }
+    if (queueStatus?.environment?.openaiKey === 'missing') {
+      result.diagnostics.recommendations.push('OPENAI_API_KEY not configured - transcription and text generation will fail');
+    }
+    if (!queueStatus?.redis?.connected) {
+      result.diagnostics.recommendations.push('Redis connection failed - check REDIS_URL configuration');
     }
     
     return new Response(JSON.stringify(result), { 

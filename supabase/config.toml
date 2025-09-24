@@ -33,3 +33,6 @@ verify_jwt = false
 
 [functions.job-stream]
 verify_jwt = false
+
+[functions.worker-health]
+verify_jwt = false

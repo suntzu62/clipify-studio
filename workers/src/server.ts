@@ -77,6 +77,66 @@ export async function start() {
 
   app.get('/health', async () => ({ ok: true }));
 
+  // Queue status endpoint for diagnostics
+  app.get('/api/queues/status', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
+    try {
+      const queuesStatus = await Promise.all(
+        Object.values(QUEUES).map(async (queueName) => {
+          const queue = getQueue(queueName);
+          const waiting = await queue.getWaiting();
+          const active = await queue.getActive();
+          const completed = await queue.getCompleted();
+          const failed = await queue.getFailed();
+          
+          return {
+            name: queueName,
+            waiting: waiting.length,
+            active: active.length,
+            completed: completed.length,
+            failed: failed.length,
+            isPaused: await queue.isPaused(),
+          };
+        })
+      );
+      
+      // Test Redis connection
+      let redisHealthy = true;
+      try {
+        await connection.ping();
+      } catch (err) {
+        redisHealthy = false;
+      }
+      
+      res.send({
+        ok: true,
+        timestamp: new Date().toISOString(),
+        redis: {
+          connected: redisHealthy,
+          url: process.env.REDIS_URL ? 'configured' : 'missing',
+        },
+        queues: queuesStatus,
+        totalJobs: {
+          waiting: queuesStatus.reduce((sum, q) => sum + q.waiting, 0),
+          active: queuesStatus.reduce((sum, q) => sum + q.active, 0),
+          completed: queuesStatus.reduce((sum, q) => sum + q.completed, 0),
+          failed: queuesStatus.reduce((sum, q) => sum + q.failed, 0),
+        },
+        environment: {
+          workersApiKey: process.env.WORKERS_API_KEY ? 'configured' : 'missing',
+          openaiKey: process.env.OPENAI_API_KEY ? 'configured' : 'missing',
+          supabaseUrl: process.env.SUPABASE_URL ? 'configured' : 'missing',
+          concurrency: process.env.WORKERS_CONCURRENCY || '2',
+        }
+      });
+    } catch (error) {
+      log.error({ error }, 'Failed to get queue status');
+      res.code(500).send({ 
+        error: 'queue_status_failed',
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Create pipeline
   app.post('/api/jobs/pipeline', {
     preHandler: apiKeyGuard,

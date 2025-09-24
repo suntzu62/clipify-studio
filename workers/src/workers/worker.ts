@@ -45,8 +45,18 @@ function getLimiter(queueName: string): { max: number; duration: number } | unde
   return undefined;
 }
 
-export const makeWorker = (queueName: string) =>
-  new Worker(
+export const makeWorker = (queueName: string) => {
+  const concurrency = getConcurrency(queueName);
+  const limiter = getLimiter(queueName);
+  
+  log.info({ 
+    queue: queueName, 
+    concurrency,
+    limiter: limiter ? `${limiter.max}/${limiter.duration}ms` : 'none',
+    redisConnected: !!connection
+  }, `Starting worker for queue: ${queueName}`);
+  
+  return new Worker(
     queueName,
     async (job: Job) => {
       // Route to specific worker implementations
@@ -79,7 +89,7 @@ export const makeWorker = (queueName: string) =>
       }
       return { ok: true, queue: queueName, id: job.id };
     },
-    { connection, concurrency: getConcurrency(queueName), limiter: getLimiter(queueName) }
+    { connection, concurrency, limiter }
   )
     .on('progress', (job, progress) => {
       const rootId = (job.data as any)?.rootId;

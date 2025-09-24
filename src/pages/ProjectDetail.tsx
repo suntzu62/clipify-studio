@@ -15,6 +15,7 @@ import { ClipCard } from '@/components/clips/ClipCard';
 import { SocialProof } from '@/components/social/SocialProof';
 import { VideoDebugPanel } from '@/components/debug/VideoDebugPanel';
 import { ClipDebugPanel } from '@/components/debug/ClipDebugPanel';
+import { WorkerDiagnosticPanel } from '@/components/WorkerDiagnosticPanel';
 import { EnhancedJobProgress } from '@/components/EnhancedJobProgress';
 import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { Job } from '@/lib/jobs-api';
@@ -287,34 +288,34 @@ export default function ProjectDetail() {
           </CardContent>
         </Card>
 
+        {/* Worker Diagnostic Panel */}
+        <WorkerDiagnosticPanel
+          jobId={id || ''}
+          jobStatus={jobStatus?.status}
+          workerHealth={jobStatus?.workerHealth}
+          onRefresh={reconnect}
+        />
+
         {/* Enhanced diagnostics for stalled or problematic processing */}
-        {(stalled || jobStatus?.pipelineStatus?.isStalled || !jobStatus?.workerHealth?.isHealthy) && (
+        {(stalled || jobStatus?.pipelineStatus?.isStalled) && (
           <Card className="mb-6 border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20">
             <CardContent className="p-4">
               <div className="flex items-center gap-3 mb-3">
                 <AlertCircle className="w-5 h-5 text-yellow-600" />
-                <div className="font-medium">
-                  {!jobStatus?.workerHealth?.isHealthy ? 'Processamento indisponível' : 'Processamento travado'}
-                </div>
+                <div className="font-medium">Processamento travado</div>
               </div>
               
               <div className="text-sm text-muted-foreground space-y-2 mb-4">
-                {!jobStatus?.workerHealth?.isHealthy ? (
-                  <div>O serviço de processamento não está respondendo. Verifique se o backend está funcionando.</div>
-                ) : (
-                  <>
-                    <div>Sem progresso há alguns minutos no estágio: <strong>{jobStatus?.pipelineStatus?.stage || 'desconhecido'}</strong></div>
-                    {jobStatus?.pipelineStatus?.stageDetails && (
-                      <div className="grid grid-cols-2 gap-2 mt-2 p-2 bg-white/50 rounded text-xs">
-                        <div>✓ Download: {jobStatus.pipelineStatus.stageDetails.hasSource ? 'Sim' : 'Não'}</div>
-                        <div>✓ Transcrição: {jobStatus.pipelineStatus.stageDetails.hasTranscript ? 'Sim' : 'Não'}</div>
-                        <div>✓ Análise: {jobStatus.pipelineStatus.stageDetails.hasScenes ? 'Sim' : 'Não'}</div>
-                        <div>✓ Seleção: {jobStatus.pipelineStatus.stageDetails.hasRank ? 'Sim' : 'Não'}</div>
-                        <div>✓ Render: {jobStatus.pipelineStatus.stageDetails.hasRender ? 'Sim' : 'Não'}</div>
-                        <div>✓ Textos: {jobStatus.pipelineStatus.stageDetails.hasTexts ? 'Sim' : 'Não'}</div>
-                      </div>
-                    )}
-                  </>
+                <div>Sem progresso há alguns minutos no estágio: <strong>{jobStatus?.pipelineStatus?.stage || 'desconhecido'}</strong></div>
+                {jobStatus?.pipelineStatus?.stageDetails && (
+                  <div className="grid grid-cols-2 gap-2 mt-2 p-2 bg-white/50 rounded text-xs">
+                    <div>✓ Download: {jobStatus.pipelineStatus.stageDetails.hasSource ? 'Sim' : 'Não'}</div>
+                    <div>✓ Transcrição: {jobStatus.pipelineStatus.stageDetails.hasTranscript ? 'Sim' : 'Não'}</div>
+                    <div>✓ Análise: {jobStatus.pipelineStatus.stageDetails.hasScenes ? 'Sim' : 'Não'}</div>
+                    <div>✓ Seleção: {jobStatus.pipelineStatus.stageDetails.hasRank ? 'Sim' : 'Não'}</div>
+                    <div>✓ Render: {jobStatus.pipelineStatus.stageDetails.hasRender ? 'Sim' : 'Não'}</div>
+                    <div>✓ Textos: {jobStatus.pipelineStatus.stageDetails.hasTexts ? 'Sim' : 'Não'}</div>
+                  </div>
                 )}
               </div>
               

@@ -12,6 +12,10 @@ export interface WorkerHealthStatus {
     canConnect: boolean;
     hasDetailedEndpoint: boolean;
     hasQueueEndpoint: boolean;
+    hasWorkers: boolean;
+    workersConsuming: boolean;
+    queuesDepth: any;
+    environment: any;
     workerUrl: string;
     healthUrl: string;
     recommendations: string[];
