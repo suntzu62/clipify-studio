@@ -136,5 +136,6 @@ export const makeWorker = (queueName: string) => {
         failedReason: err?.message || String(err),
       });
     });
+};
 
 export default makeWorker;
