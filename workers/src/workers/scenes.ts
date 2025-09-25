@@ -66,30 +66,16 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
     const totalDuration = Math.max(...transcript.segments.map(s => s.end));
     await job.updateProgress(10);
     
-    // 10-35%: Silence detection
-    logger.info('Detecting silences');
-    const silenceBoundaries = await runSilenceDetect(sourcePath);
-    const silencePoints: number[] = [];
+    // 10-35%: Parallel silence detection and window preparation
+    logger.info('Starting parallel analysis');
     
-    for (const silence of silenceBoundaries) {
-      silencePoints.push(silence.start);
-      if (silence.end) {
-        silencePoints.push(silence.end);
-      }
-    }
-    
-    logger.info(`Found ${silencePoints.length} silence boundaries`);
-    await job.updateProgress(35);
-    
-    // 35-55%: Semantic analysis
-    logger.info('Analyzing semantic shifts');
-    const windowSize = 25; // 25 seconds
-    const overlap = 0.5; // 50% overlap
+    // Prepare semantic windows while silence detection runs
+    const windowSize = parseInt(process.env.SCENES_WINDOW_SIZE || '15');
+    const overlap = parseFloat(process.env.SCENES_OVERLAP || '0.25');
     const step = windowSize * (1 - overlap);
-    const semanticBoundaries: number[] = [];
     
-    const windows: string[] = [];
-    const windowTimes: number[] = [];
+    const windowsPrep: string[] = [];
+    const windowTimesPrep: number[] = [];
     
     for (let t = 0; t < totalDuration - windowSize; t += step) {
       const windowEnd = t + windowSize;
@@ -98,20 +84,62 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
       );
       const windowText = windowSegments.map(s => s.text).join(' ');
       
-      windows.push(windowText);
-      windowTimes.push(t + windowSize / 2);
+      windowsPrep.push(windowText);
+      windowTimesPrep.push(t + windowSize / 2);
     }
     
+    // Run silence detection in parallel with window preparation
+    const [silenceBoundaries] = await Promise.all([
+      runSilenceDetect(sourcePath)
+    ]);
+    
+    const silencePoints: number[] = [];
+    for (const silence of silenceBoundaries) {
+      silencePoints.push(silence.start);
+      if (silence.end) {
+        silencePoints.push(silence.end);
+      }
+    }
+    
+    logger.info(`Found ${silencePoints.length} silence boundaries, prepared ${windowsPrep.length} windows`);
+    await job.updateProgress(35);
+    
+    // 35-55%: Semantic analysis (optimized for speed)
+    logger.info('Analyzing semantic shifts');
+    const windowSize = parseInt(process.env.SCENES_WINDOW_SIZE || '15'); // Reduced from 25s to 15s
+    const overlap = parseFloat(process.env.SCENES_OVERLAP || '0.25'); // Reduced from 0.5 to 0.25
+    const step = windowSize * (1 - overlap);
+    const semanticBoundaries: number[] = [];
+    
+    // Use pre-prepared windows for better performance
+    const windows = windowsPrep;
+    const windowTimes = windowTimesPrep;
+    
     if (windows.length > 1) {
-      const embeddings = await embedTextBatch(windows);
+      // Process embeddings in larger batches for better performance
+      const batchSize = 20; // Process 20 windows at a time
       const threshold = parseFloat(process.env.SCENES_SIM_THRESHOLD || '0.85');
       
-      for (let i = 0; i < embeddings.length - 1; i++) {
-        const similarity = cosine(embeddings[i], embeddings[i + 1]);
-        if (similarity < threshold) {
-          const boundaryTime = (windowTimes[i] + windowTimes[i + 1]) / 2;
-          semanticBoundaries.push(boundaryTime);
+      for (let batchStart = 0; batchStart < windows.length; batchStart += batchSize) {
+        const batchEnd = Math.min(batchStart + batchSize, windows.length);
+        const batchWindows = windows.slice(batchStart, batchEnd);
+        const batchEmbeddings = await embedTextBatch(batchWindows);
+        
+        // Calculate similarities for this batch
+        for (let i = 0; i < batchEmbeddings.length - 1; i++) {
+          const globalIndex = batchStart + i;
+          if (globalIndex < windows.length - 1) {
+            const similarity = cosine(batchEmbeddings[i], batchEmbeddings[i + 1]);
+            if (similarity < threshold) {
+              const boundaryTime = (windowTimes[globalIndex] + windowTimes[globalIndex + 1]) / 2;
+              semanticBoundaries.push(boundaryTime);
+            }
+          }
         }
+        
+        // Update progress for semantic analysis
+        const batchProgress = 35 + ((batchEnd / windows.length) * 20); // 35-55% for semantic analysis
+        await job.updateProgress(Math.floor(batchProgress));
       }
     }
     

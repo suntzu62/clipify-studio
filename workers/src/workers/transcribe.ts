@@ -54,40 +54,25 @@ export async function runTranscribe(job: Job): Promise<TranscribeResult> {
     await job.updateProgress(10);
     log.info({ rootId }, 'DownloadOk');
     
-    // 10-35%: Extract WAV mono 16k
+    // 10-35%: Parallel audio extraction and segmentation
     await job.updateProgress(10);
-    log.info({ rootId }, 'WavExtractionStarted');
+    log.info({ rootId }, 'ParallelAudioProcessingStarted');
     
     await new Promise<void>((resolve, reject) => {
       ffmpeg(sourcePath)
         .audioChannels(1)
         .audioFrequency(16000)
-        .output(audioPath)
+        .outputOptions([
+          '-f segment',
+          '-segment_time 300',  // Direct segmentation during extraction for speed
+          '-reset_timestamps 1',
+          `-threads ${Math.min(4, require('os').cpus().length)}` // Optimize thread usage
+        ])
+        .output(join(chunksDir, 'chunk_%03d.wav'))
         .on('progress', (progress) => {
           const percent = Math.min(35, 10 + (progress.percent || 0) * 0.25);
           job.updateProgress(Math.floor(percent));
         })
-        .on('end', () => resolve())
-        .on('error', (err) => reject(err))
-        .run();
-    });
-    
-    await job.updateProgress(35);
-    log.info({ rootId }, 'WavExtracted');
-    
-    // 35-50%: Segment audio into ~900s chunks
-    await job.updateProgress(35);
-    log.info({ rootId }, 'SegmentationStarted');
-    
-    await new Promise<void>((resolve, reject) => {
-      ffmpeg(audioPath)
-        .outputOptions([
-          '-f segment',
-          '-segment_time 900',
-          '-reset_timestamps 1',
-          '-c copy'
-        ])
-        .output(join(chunksDir, 'chunk_%03d.wav'))
         .on('end', () => resolve())
         .on('error', (err) => {
           if (err.message.includes('too long') || err.message.includes('size')) {
@@ -102,70 +87,97 @@ export async function runTranscribe(job: Job): Promise<TranscribeResult> {
     await job.updateProgress(50);
     log.info({ rootId }, 'Segmented');
     
-    // 50-95%: Transcribe each chunk
+    // 50-95%: Transcribe chunks in parallel batches
     const chunkFiles = (await fs.readdir(chunksDir))
       .filter(f => f.startsWith('chunk_') && f.endsWith('.wav'))
       .sort();
     
     const allSegments: Segment[] = [];
-    let timeOffset = 0;
     const progressPerChunk = 45 / chunkFiles.length; // 50-95% = 45% total
+    const batchSize = Math.min(4, chunkFiles.length); // Process up to 4 chunks in parallel
     
-    for (let i = 0; i < chunkFiles.length; i++) {
-      const chunkFile = chunkFiles[i];
-      const chunkPath = join(chunksDir, chunkFile);
+    log.info({ rootId, totalChunks: chunkFiles.length, batchSize }, 'ParallelTranscriptionStarted');
+    
+    for (let i = 0; i < chunkFiles.length; i += batchSize) {
+      const batch = chunkFiles.slice(i, i + batchSize);
       
-      log.info({ rootId, chunk: i + 1, total: chunkFiles.length }, `ChunkTranscribing${i}`);
-      
-      try {
-        const fileBuf = await fs.readFile(chunkPath);
-        const fileStream = await toFile(fileBuf, chunkFile);
+      // Process batch in parallel
+      const batchPromises = batch.map(async (chunkFile, batchIndex) => {
+        const chunkPath = join(chunksDir, chunkFile);
+        const chunkIndex = i + batchIndex;
         
-        let transcription;
-        if (model === 'whisper-1') {
-          transcription = await openai.audio.transcriptions.create({
-            file: fileStream,
-            model: 'whisper-1',
-            response_format: 'verbose_json',
-            language: 'pt'
-          });
+        log.info({ rootId, chunk: chunkIndex + 1, total: chunkFiles.length }, `ChunkTranscribing${chunkIndex}`);
+        
+        try {
+          const fileBuf = await fs.readFile(chunkPath);
+          const fileStream = await toFile(fileBuf, chunkFile);
           
-          // Process segments with time offset
-          if (transcription.segments) {
-            const segments = transcription.segments.map(segment => ({
-              start: segment.start + timeOffset,
-              end: segment.end + timeOffset,
-              text: segment.text
-            }));
-            allSegments.push(...segments);
-            timeOffset = Math.max(timeOffset, ...segments.map(s => s.end));
+          let transcription;
+          if (model === 'whisper-1') {
+            transcription = await openai.audio.transcriptions.create({
+              file: fileStream,
+              model: 'whisper-1',
+              response_format: 'verbose_json',
+              language: 'pt'
+            });
+            
+            return {
+              chunkIndex,
+              segments: transcription.segments || [],
+              text: transcription.text
+            };
+          } else {
+            // GPT-4o transcribe models don't return detailed segments
+            transcription = await openai.audio.transcriptions.create({
+              file: fileStream,
+              model: model as any,
+              language: 'pt'
+            });
+            
+            return {
+              chunkIndex,
+              segments: [],
+              text: transcription.text
+            };
           }
-        } else {
-          // GPT-4o transcribe models don't return detailed segments
-          transcription = await openai.audio.transcriptions.create({
-            file: fileStream,
-            model: model as any,
-            language: 'pt'
-          });
           
-          // Create fallback segment for the chunk (assume 900s duration)
-          const chunkDuration = 900;
+        } catch (error: any) {
+          if (error.status === 429) {
+            throw { code: 'API_RATE_LIMIT', message: 'OpenAI API rate limit exceeded' };
+          }
+          throw { code: 'OPENAI_ERROR', message: error.message || 'OpenAI transcription failed' };
+        }
+      });
+      
+      // Wait for batch completion
+      const batchResults = await Promise.all(batchPromises);
+      
+      // Process results in order and calculate time offsets
+      batchResults.sort((a, b) => a.chunkIndex - b.chunkIndex);
+      
+      for (const result of batchResults) {
+        const chunkDuration = 300; // Updated chunk duration
+        const timeOffset = result.chunkIndex * chunkDuration;
+        
+        if (result.segments.length > 0) {
+          // Process segments with time offset
+          const segments = result.segments.map(segment => ({
+            start: segment.start + timeOffset,
+            end: segment.end + timeOffset,
+            text: segment.text
+          }));
+          allSegments.push(...segments);
+        } else {
+          // Create fallback segment for the chunk
           allSegments.push({
             start: timeOffset,
             end: timeOffset + chunkDuration,
-            text: transcription.text
+            text: result.text
           });
-          timeOffset += chunkDuration;
         }
         
-        const currentProgress = 50 + ((i + 1) * progressPerChunk);
+        const currentProgress = 50 + ((result.chunkIndex + 1) * progressPerChunk);
         await job.updateProgress(Math.floor(currentProgress));
-        
-      } catch (error: any) {
-        if (error.status === 429) {
-          throw { code: 'API_RATE_LIMIT', message: 'OpenAI API rate limit exceeded' };
-        }
-        throw { code: 'OPENAI_ERROR', message: error.message || 'OpenAI transcription failed' };
       }
     }
     

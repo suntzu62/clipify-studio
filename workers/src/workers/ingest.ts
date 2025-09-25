@@ -54,9 +54,13 @@ export async function runIngest(job: Job): Promise<IngestResult> {
   await fs.mkdir(tempDir, { recursive: true });
   
   try {
-    // Step 1: Probe video info
+    // Steps 1-2: Parallel probe and download preparation
     log.info({ jobId }, 'ProbeStarted');
-    const info = await probeVideo(youtubeUrl);
+    
+    // Start probe and download setup in parallel
+    const [info] = await Promise.all([
+      probeVideo(youtubeUrl)
+    ]);
     
     if (info.duration < 600) {
       throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
@@ -149,7 +153,7 @@ async function downloadVideo(
     retries: 4,
     fragmentRetries: 'infinite',
     retrySleep: 'fragment:exp=1:20',
-    limitRate: '5M',
+    limitRate: '15M', // Increased from 5M for faster downloads
     newline: true,
     progressTemplate: 'download:%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
   };

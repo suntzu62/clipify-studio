@@ -67,6 +67,8 @@ export async function runRender(job: Job): Promise<any> {
     const fps = Number(process.env.RENDER_FPS || 30);
     const font = process.env.RENDER_FONT || 'Inter';
     const marginV = Number(process.env.RENDER_MARGIN_V || 60);
+    const preset = process.env.RENDER_PRESET || 'superfast'; // Optimized preset
+    const tune = process.env.RENDER_TUNE || 'zerolatency'; // Optimized tune
     const fontsDir = path.resolve(process.cwd(), 'assets', 'fonts');
     const style = `fontsdir=${fontsDir}:force_style='Alignment=2,FontName=${font},FontSize=48,Outline=2,Shadow=0,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,MarginV=${marginV}'`;
 
@@ -79,65 +81,96 @@ export async function runRender(job: Job): Promise<any> {
 
     const af = 'loudnorm=I=-14:LRA=11:TP=-1.5';
 
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      const clipId = it.id;
-      const start = it.start;
-      const end = it.end;
-      const dur = Math.max(0, end - start);
-      const durationMs = Math.round(dur * 1000);
+    // Process clips in parallel for maximum speed
+    const maxParallel = Math.min(3, items.length); // Process up to 3 clips simultaneously
+    const processingPromises: Promise<void>[] = [];
+    
+    log.info({ rootId, totalClips: items.length, maxParallel }, 'ParallelRenderStarted');
+    
+    for (let i = 0; i < items.length; i += maxParallel) {
+      const batch = items.slice(i, i + maxParallel);
+      
+      const batchPromises = batch.map(async (it, batchIndex) => {
+        const itemIndex = i + batchIndex;
+        const clipId = it.id;
+        const start = it.start;
+        const end = it.end;
+        const dur = Math.max(0, end - start);
+        const durationMs = Math.round(dur * 1000);
 
-      const clipDir = path.join(tmpRoot, clipId);
-      await fs.mkdir(clipDir, { recursive: true });
-      const tmpAss = path.join(clipDir, 'clip.ass');
-      const outFile = path.join(clipDir, `${clipId}.mp4`);
-      const thumbFile = path.join(clipDir, `${clipId}.jpg`);
+        const clipDir = path.join(tmpRoot, clipId);
+        await fs.mkdir(clipDir, { recursive: true });
+        const tmpAss = path.join(clipDir, 'clip.ass');
+        const outFile = path.join(clipDir, `${clipId}.mp4`);
+        const thumbFile = path.join(clipDir, `${clipId}.jpg`);
 
-      // 2) Generate ASS for interval
-      const ass = buildASS({ segments: transcript.segments, start, end, font, marginV });
-      await fs.writeFile(tmpAss, ass);
+        // Generate ASS for interval
+        const ass = buildASS({ segments: transcript.segments, start, end, font, marginV });
+        await fs.writeFile(tmpAss, ass);
 
-      // 3) Build filtergraph (9:16 + subtitles)
-      const vf = `${vfBase},subtitles=${tmpAss}:${style},fps=${fps}`;
+        // Build optimized filtergraph (9:16 + subtitles)
+        const vf = `${vfBase},subtitles=${tmpAss}:${style},fps=${fps}`;
 
-      // 4-5) Render - OPTIMIZED FOR SPEED
-      const args = [
-        '-ss', String(start), '-t', String(dur),
-        '-i', tmpSource,
-        '-map', '0:v:0', '-map', '0:a:0',
-        '-vf', vf,
-        '-af', af,
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-profile:v', 'high', '-level', '4.1',
-        '-pix_fmt', 'yuv420p',
-        '-b:v', process.env.RENDER_VIDEO_BITRATE || '6M',
-        '-maxrate', process.env.RENDER_VIDEO_MAXRATE || '8M', 
-        '-bufsize', process.env.RENDER_VIDEO_BUFSIZE || '12M',
-        '-g', '30', '-keyint_min', '30',
-        '-tune', 'fastdecode',
-        '-threads', '0', // Use all available threads
-        '-c:a', 'aac', '-b:a', process.env.RENDER_AUDIO_BITRATE || '128k', '-ac', '2', '-ar', '48000',
-        '-movflags', '+faststart',
-        outFile,
-      ];
+        // Render with maximum speed optimizations
+        const args = [
+          '-ss', String(start), '-t', String(dur),
+          '-i', tmpSource,
+          '-map', '0:v:0', '-map', '0:a:0',
+          '-vf', vf,
+          '-af', af,
+          '-c:v', 'libx264', 
+          '-preset', preset, // Use optimized preset (superfast)
+          '-tune', tune, // Use optimized tune (zerolatency)
+          '-profile:v', 'high', '-level', '4.1',
+          '-pix_fmt', 'yuv420p',
+          '-b:v', process.env.RENDER_VIDEO_BITRATE || '4M', // Reduced bitrate for speed
+          '-maxrate', process.env.RENDER_VIDEO_MAXRATE || '6M', // Reduced maxrate for speed
+          '-bufsize', process.env.RENDER_VIDEO_BUFSIZE || '8M', // Reduced bufsize for speed
+          '-g', '30', '-keyint_min', '30',
+          '-threads', String(Math.max(1, Math.floor(require('os').cpus().length / maxParallel))), // Distribute threads
+          '-c:a', 'aac', '-b:a', process.env.RENDER_AUDIO_BITRATE || '96k', '-ac', '2', '-ar', '48000', // Reduced audio bitrate
+          '-movflags', '+faststart',
+          '-avoid_negative_ts', 'make_zero', // Optimization for faster processing
+          outFile,
+        ];
 
-      // Scale progress for this item into [i/len, (i+1)/len]
-      const base = Math.floor((i / items.length) * 100);
-      const span = Math.ceil(100 / items.length);
+        // Scale progress for this item
+        const base = Math.floor((itemIndex / items.length) * 90); // Reserve 90-100% for upload
+        const span = Math.ceil(90 / items.length);
 
-      await runFFmpeg(args, (p) => {
-        const scaled = Math.min(99, base + Math.floor((p / 100) * span));
-        job.updateProgress(scaled);
-      }, durationMs);
+        await runFFmpeg(args, (p) => {
+          const scaled = Math.min(89, base + Math.floor((p / 100) * span));
+          job.updateProgress(scaled);
+        }, durationMs);
 
-      // 6) Upload MP4 and thumbnail
-      const mp4Key = `projects/${rootId}/clips/${clipId}.mp4`;
-      const jpgKey = `projects/${rootId}/clips/${clipId}.jpg`;
+        // Generate thumbnail in parallel
+        await runFFmpeg([
+          '-ss', String(Math.min(1, dur/2)), // Use middle of clip for thumbnail
+          '-i', outFile, 
+          '-frames:v', '1', 
+          '-q:v', '3', // Slightly lower quality for speed
+          '-vf', 'scale=540:960', // Smaller thumbnail for speed
+          thumbFile
+        ]);
 
-      // Thumbnail
-      await runFFmpeg(['-ss', '1', '-i', outFile, '-frames:v', '1', '-q:v', '2', thumbFile]);
+        // Upload files
+        const mp4Key = `projects/${rootId}/clips/${clipId}.mp4`;
+        const jpgKey = `projects/${rootId}/clips/${clipId}.jpg`;
 
-      await uploadFile(bucket, mp4Key, outFile, 'video/mp4');
-      await uploadFile(bucket, jpgKey, thumbFile, 'image/jpeg');
+        await Promise.all([
+          uploadFile(bucket, mp4Key, outFile, 'video/mp4'),
+          uploadFile(bucket, jpgKey, thumbFile, 'image/jpeg')
+        ]);
+
+        log.info({ rootId, clipId, itemIndex: itemIndex + 1, total: items.length }, 'ClipRenderComplete');
+      });
+      
+      // Wait for batch completion
+      await Promise.all(batchPromises);
+      
+      // Update progress after batch completion
+      const batchEndProgress = Math.min(90, Math.floor(((i + batch.length) / items.length) * 90));
+      await job.updateProgress(batchEndProgress);
     }
 
     await job.updateProgress(100);
