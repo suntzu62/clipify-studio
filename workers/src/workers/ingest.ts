@@ -92,7 +92,14 @@ export async function runIngest(job: Job): Promise<IngestResult> {
     return result;
     
   } catch (error: any) {
-    log.error({ jobId, error: error.message, code: error.code }, 'Ingest failed');
+    const detail = {
+      message: error?.message,
+      code: error?.code,
+      stderr: error?.stderr,
+      stdout: error?.stdout,
+      stack: error?.stack,
+    };
+    log.error({ jobId, rootId, youtubeUrl, detail }, 'Ingest failed');
     
     // Map common error codes
     if (error.code === 'VIDEO_TOO_SHORT' || String(error?.message || '').startsWith('VIDEO_TOO_SHORT')) {
@@ -136,7 +143,10 @@ async function probeVideo(url: string): Promise<VideoInfo> {
     
     return info as VideoInfo;
   } catch (error: any) {
-    throw new Error(`Failed to probe video: ${error.message}`);
+    const detail = [error?.message, error?.stderr, error?.stdout]
+      .filter((part) => typeof part === 'string' && part.trim().length > 0)
+      .join(' | ');
+    throw new Error(`Failed to probe video: ${detail || String(error)}`);
   }
 }
 
