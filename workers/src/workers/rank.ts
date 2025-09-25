@@ -5,6 +5,8 @@ import { computeCPS } from '../lib/cps';
 import { embedBatch, cosine } from '../lib/emb';
 import { hookScore } from '../lib/hook';
 import { createLogger } from '../lib/logger';
+import { enqueueUnique } from '../lib/bullmq';
+import { QUEUES } from '../queues';
 
 const logger = createLogger('rank');
 
@@ -307,6 +309,13 @@ export async function runRank(job: Job): Promise<{ count: number; top3: string[]
     logger.info('Uploaded', { rootId, items: items.length });
     
     await job.updateProgress(100);
+
+    await enqueueUnique(
+      QUEUES.RENDER,
+      'render',
+      `${rootId}:render`,
+      { rootId, meta: job.data.meta || {} }
+    );
     
     return {
       count: items.length,

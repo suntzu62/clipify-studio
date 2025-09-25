@@ -8,6 +8,8 @@ import ffmpegStatic from 'ffmpeg-static';
 import pino from 'pino';
 import { downloadToTemp, uploadFile } from '../lib/storage';
 import { fromSegmentsToSRT, fromSegmentsToVTT, type Segment } from '../lib/subtitles';
+import { enqueueUnique } from '../lib/bullmq';
+import { QUEUES } from '../queues';
 
 const log = pino({ name: 'transcribe' });
 
@@ -217,6 +219,13 @@ export async function runTranscribe(job: Job): Promise<TranscribeResult> {
     await job.updateProgress(100);
     log.info({ rootId, transcriptKey, srtKey, vttKey }, 'Uploaded');
     
+    await enqueueUnique(
+      QUEUES.SCENES,
+      'scenes',
+      `${rootId}:scenes`,
+      { rootId, meta: job.data.meta || {} }
+    );
+
     return {
       rootId,
       bucket,

@@ -1,4 +1,4 @@
-import { Queue } from 'bullmq';
+import { JobsOptions, Queue } from 'bullmq';
 import { connection } from '../redis';
 import { QUEUES } from '../queues';
 
@@ -19,4 +19,30 @@ export function getQueue(name: QueueName): Queue {
 
 export function getQueueKey(name: QueueName): string {
   return getQueue(name).toKey('');
+}
+
+const defaultJobOpts: JobsOptions = {
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 5000 },
+  removeOnComplete: { age: 86400, count: 2000 },
+  removeOnFail: { age: 604800 },
+};
+
+export async function enqueueUnique(
+  queueName: QueueName,
+  jobName: string,
+  jobId: string,
+  data: Record<string, any>,
+  extraOpts: JobsOptions = {}
+) {
+  const queue = getQueue(queueName);
+  const existing = await queue.getJob(jobId);
+  if (existing) {
+    return existing;
+  }
+  return queue.add(jobName, data, {
+    ...defaultJobOpts,
+    ...extraOpts,
+    jobId,
+  });
 }

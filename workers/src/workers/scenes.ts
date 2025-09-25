@@ -5,6 +5,8 @@ import { downloadToTemp, uploadFile } from '../lib/storage';
 import { runSilenceDetect } from '../lib/audio';
 import { embedTextBatch, cosine } from '../lib/semantic';
 import { sentenceBoundaries } from '../lib/text';
+import { enqueueUnique } from '../lib/bullmq';
+import { QUEUES } from '../queues';
 
 interface Segment {
   start: number;
@@ -106,9 +108,6 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
     
     // 35-55%: Semantic analysis (optimized for speed)
     logger.info('Analyzing semantic shifts');
-    const windowSize = parseInt(process.env.SCENES_WINDOW_SIZE || '15'); // Reduced from 25s to 15s
-    const overlap = parseFloat(process.env.SCENES_OVERLAP || '0.25'); // Reduced from 0.5 to 0.25
-    const step = windowSize * (1 - overlap);
     const semanticBoundaries: number[] = [];
     
     // Use pre-prepared windows for better performance
@@ -299,6 +298,13 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
       candidateCount: finalCandidates.length,
       topScore: finalCandidates[0]?.score 
     }, 'Scenes processing completed');
+
+    await enqueueUnique(
+      QUEUES.RANK,
+      'rank',
+      `${rootId}:rank`,
+      { rootId, meta: job.data.meta || {} }
+    );
     
     return {
       count: finalCandidates.length,

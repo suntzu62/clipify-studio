@@ -2,39 +2,14 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifySSE from 'fastify-sse-v2';
 import rateLimit from '@fastify/rate-limit';
-import { type JobsOptions } from 'bullmq';
 import { createHash } from 'crypto';
 import pino from 'pino';
-import { randomUUID as crypto } from 'crypto';
 import { connection } from './redis';
 import { QUEUES } from './queues';
-import { getQueue, getQueueKey, type QueueName } from './lib/bullmq';
+import { getQueue, enqueueUnique } from './lib/bullmq';
 import { workerEvents } from './lib/worker-events';
 
 const log = pino({ name: 'api' });
-
-async function ensureJob(
-  queueName: QueueName,
-  jobName: string,
-  jobId: string,
-  data: Record<string, any>,
-  extraOpts: JobsOptions = {}
-) {
-  const queue = getQueue(queueName);
-  const existing = await queue.getJob(jobId);
-  if (existing) {
-    return existing;
-  }
-
-  const jobOpts = {
-    attempts: 5,
-    backoff: { type: 'exponential', delay: 5000 },
-    removeOnComplete: { age: 86400, count: 2000 },
-    removeOnFail: { age: 604800 },
-  };
-
-  return queue.add(jobName, data, { ...jobOpts, ...extraOpts, jobId });
-}
 
 const API_KEY = process.env.WORKERS_API_KEY || '';
 // Railway injects PORT - prioritize it over custom ports
@@ -174,59 +149,11 @@ export async function start() {
 
     const baseData = { rootId, meta, youtubeUrl };
 
-    const ingestJob = await ensureJob(
+    const ingestJob = await enqueueUnique(
       QUEUES.INGEST,
       'pipeline',
       rootId,
       baseData
-    );
-
-    const transcribeJob = await ensureJob(
-      QUEUES.TRANSCRIBE,
-      'transcribe',
-      `${rootId}:transcribe`,
-      { rootId, meta },
-      { parent: { id: ingestJob.id!, queue: getQueueKey(QUEUES.INGEST) } }
-    );
-
-    const scenesJob = await ensureJob(
-      QUEUES.SCENES,
-      'scenes',
-      `${rootId}:scenes`,
-      { rootId, meta },
-      { parent: { id: transcribeJob.id!, queue: getQueueKey(QUEUES.TRANSCRIBE) } }
-    );
-
-    const rankJob = await ensureJob(
-      QUEUES.RANK,
-      'rank',
-      `${rootId}:rank`,
-      { rootId, meta },
-      { parent: { id: scenesJob.id!, queue: getQueueKey(QUEUES.SCENES) } }
-    );
-
-    const renderJob = await ensureJob(
-      QUEUES.RENDER,
-      'render',
-      `${rootId}:render`,
-      { rootId, meta },
-      { parent: { id: rankJob.id!, queue: getQueueKey(QUEUES.RANK) } }
-    );
-
-    const textsJob = await ensureJob(
-      QUEUES.TEXTS,
-      'texts',
-      `${rootId}:texts`,
-      { rootId, meta },
-      { parent: { id: renderJob.id!, queue: getQueueKey(QUEUES.RENDER) } }
-    );
-
-    await ensureJob(
-      QUEUES.EXPORT,
-      'export',
-      `${rootId}:export`,
-      { rootId, meta },
-      { parent: { id: textsJob.id!, queue: getQueueKey(QUEUES.TEXTS) } }
     );
 
     res.send({ jobId: ingestJob.id });

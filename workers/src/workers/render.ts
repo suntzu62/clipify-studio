@@ -6,6 +6,8 @@ import pino from 'pino';
 import { downloadToTemp, uploadFile } from '../lib/storage';
 import { buildASS, type Segment } from '../lib/ass';
 import { runFFmpeg } from '../lib/ffmpeg';
+import { enqueueUnique } from '../lib/bullmq';
+import { QUEUES } from '../queues';
 
 const log = pino({ name: 'render' });
 
@@ -174,6 +176,13 @@ export async function runRender(job: Job): Promise<any> {
     }
 
     await job.updateProgress(100);
+
+    await enqueueUnique(
+      QUEUES.TEXTS,
+      'texts',
+      `${rootId}:texts`,
+      { rootId, meta: job.data.meta || {} }
+    );
 
     // Return summary
     return {

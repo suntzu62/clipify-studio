@@ -6,6 +6,8 @@ import * as path from 'path';
 import * as os from 'os';
 import ffmpegPath from 'ffmpeg-static';
 import pino from 'pino';
+import { enqueueUnique } from '../lib/bullmq';
+import { QUEUES } from '../queues';
 
 // Configure youtube-dl-exec to use system binary when available
 const ytdlBinaryPath = process.env.YTDL_BINARY_PATH || '/usr/bin/yt-dlp';
@@ -79,7 +81,14 @@ export async function runIngest(job: Job): Promise<IngestResult> {
     log.info({ jobId }, 'UploadOk');
     
     await job.updateProgress(100);
-    
+
+    await enqueueUnique(
+      QUEUES.TRANSCRIBE,
+      'transcribe',
+      `${rootId}:transcribe`,
+      { rootId, meta: job.data.meta || {} }
+    );
+
     return result;
     
   } catch (error: any) {

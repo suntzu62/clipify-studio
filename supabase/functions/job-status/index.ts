@@ -338,7 +338,9 @@ function analyzePipelineStatus(jobData: any, workerBaseUrl: string, apiKey: stri
   let stage = 'queued';
   let stageDetails: any = {};
   
-  if (status === 'waiting-children' || status === 'active') {
+  const inferStatus = status === 'waiting-children' || status === 'active' || status === 'completed';
+
+  if (inferStatus) {
     // Analyze what stages have completed based on available data
     const hasSource = Boolean(jobData.result?.metadata || jobData.result?.duration);
     const hasTranscript = Boolean(jobData.result?.transcript || jobData.result?.segments);
@@ -378,6 +380,18 @@ function analyzePipelineStatus(jobData: any, workerBaseUrl: string, apiKey: stri
     } else {
       stage = 'completed';
       derivedStatus = 'completed';
+    }
+
+    if (status === 'completed' && stage !== 'completed') {
+      const stageToStatus: Record<string, string> = {
+        ingest: 'downloading',
+        transcribe: 'transcribing',
+        scenes: 'analyzing',
+        rank: 'ranking',
+        render: 'rendering',
+        texts: 'generating_texts',
+      };
+      derivedStatus = stageToStatus[stage] || derivedStatus;
     }
     
     // Detect stalled processing (stuck in waiting-children for too long without progress)
