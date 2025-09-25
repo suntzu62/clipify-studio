@@ -11,6 +11,20 @@ import { workerEvents } from './lib/worker-events';
 
 const log = pino({ name: 'api' });
 
+function normalizeYoutubeUrl(raw?: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  const idMatch = trimmed.match(/(?:youtu\.be\/|v=)([A-Za-z0-9_-]{11})(?=[^A-Za-z0-9_-]|$)/);
+  if (idMatch && idMatch[1]) {
+    return `https://www.youtube.com/watch?v=${idMatch[1]}`;
+  }
+  const firstUrl = trimmed.match(/https?:\/\/[^\s]+/);
+  if (firstUrl) {
+    return firstUrl[0];
+  }
+  return trimmed.split(/\s+/)[0];
+}
+
 const API_KEY = process.env.WORKERS_API_KEY || '';
 // Railway injects PORT - prioritize it over custom ports
 const PORT = Number(process.env.PORT || 8787);
@@ -128,7 +142,7 @@ export async function start() {
       targetDuration?: number;
       meta?: Record<string, any>;
     };
-    const youtubeUrl = body.youtubeUrl;
+    const youtubeUrl = normalizeYoutubeUrl(body.youtubeUrl);
     if (!youtubeUrl) {
       res.code(400).send({ error: 'youtubeUrl required' });
       return;
