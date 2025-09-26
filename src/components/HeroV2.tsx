@@ -13,6 +13,7 @@ import { enqueueFromUrl, type Job } from '@/lib/jobs-api';
 import { saveUserJob } from '@/lib/storage';
 import { toast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
+import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
 
 const HERO_VARIANT = (import.meta.env.VITE_HERO_VARIANT as 'A' | 'B' | undefined) || 'A';
 
@@ -22,39 +23,6 @@ const SUBHEAD = 'Cole o link do YouTube (≥10 min). Primeiro clipe em poucos mi
 
 const DEMO_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
 
-function isValidYoutubeUrl(raw: string): boolean {
-  try {
-    const url = new URL(raw);
-    const host = url.hostname.replace(/^www\./, '');
-    if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be' || host === 'music.youtube.com') {
-      if (host === 'youtu.be') return url.pathname.length > 1;
-      if (url.pathname.startsWith('/watch')) return !!url.searchParams.get('v');
-      if (url.pathname.startsWith('/shorts/')) return url.pathname.split('/')[2]?.length > 0;
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function normalizeYoutubeUrl(raw: string): string {
-  try {
-    const url = new URL(raw);
-    const host = url.hostname.replace(/^www\./, '');
-    if (host === 'youtu.be') {
-      const id = url.pathname.replace('/', '');
-      if (id) return `https://www.youtube.com/watch?v=${id}`;
-    }
-    if (host.endsWith('youtube.com') && url.pathname.startsWith('/shorts/')) {
-      const id = url.pathname.split('/')[2];
-      if (id) return `https://www.youtube.com/watch?v=${id}`;
-    }
-    return raw;
-  } catch {
-    return raw;
-  }
-}
 
 export default function HeroV2() {
   const [url, setUrl] = useState('');
@@ -87,10 +55,11 @@ export default function HeroV2() {
   };
 
   const handlePaste: React.ClipboardEventHandler<HTMLInputElement> = (e) => {
+    e.preventDefault();
     const text = e.clipboardData.getData('text');
     if (!text) return;
     const normalized = normalizeYoutubeUrl(text.trim());
-    if (isValidYoutubeUrl(normalized)) {
+    if (isValidYouTubeUrl(normalized)) {
       setUrl(normalized);
       setError(null);
       showSuccess();
@@ -99,7 +68,7 @@ export default function HeroV2() {
   };
 
   const validate = (value: string) => {
-    if (!isValidYoutubeUrl(value)) {
+    if (!isValidYouTubeUrl(value)) {
       return 'Esse link não parece do YouTube';
     }
     return null;

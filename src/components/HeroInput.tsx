@@ -11,6 +11,7 @@ import { toast } from '@/hooks/use-toast';
 import { saveUserJob } from '@/lib/storage';
 import { FileUploadZone } from '@/components/FileUploadZone';
 import { getYouTubeMetadata, createProjectTitle } from '@/lib/youtube-metadata';
+import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
 
 export interface HeroInputProps {
   className?: string;
@@ -20,39 +21,6 @@ export interface HeroInputProps {
 
 const DEMO_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
 
-function isValidYoutubeUrl(raw: string): boolean {
-  try {
-    const url = new URL(raw);
-    const host = url.hostname.replace(/^www\./, '');
-    if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be' || host === 'music.youtube.com') {
-      if (host === 'youtu.be') return url.pathname.length > 1;
-      if (url.pathname.startsWith('/watch')) return !!url.searchParams.get('v');
-      if (url.pathname.startsWith('/shorts/')) return url.pathname.split('/')[2]?.length > 0;
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function normalizeYoutubeUrl(raw: string): string {
-  try {
-    const url = new URL(raw);
-    const host = url.hostname.replace(/^www\./, '');
-    if (host === 'youtu.be') {
-      const id = url.pathname.replace('/', '');
-      if (id) return `https://www.youtube.com/watch?v=${id}`;
-    }
-    if (host.endsWith('youtube.com') && url.pathname.startsWith('/shorts/')) {
-      const id = url.pathname.split('/')[2];
-      if (id) return `https://www.youtube.com/watch?v=${id}`;
-    }
-    return raw;
-  } catch {
-    return raw;
-  }
-}
 
 export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps) {
   const [url, setUrl] = useState('');
@@ -78,7 +46,7 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
   }, [isSignedIn]);
 
   useEffect(() => {
-    if (prefillUrl && isValidYoutubeUrl(prefillUrl)) {
+    if (prefillUrl && isValidYouTubeUrl(prefillUrl)) {
       setUrl(prefillUrl);
       setError(null);
       setSuccess('Link ok!');
@@ -93,10 +61,11 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
   };
 
   const handlePaste: React.ClipboardEventHandler<HTMLInputElement> = (e) => {
+    e.preventDefault();
     const text = e.clipboardData.getData('text');
     if (!text) return;
     const normalized = normalizeYoutubeUrl(text.trim());
-    if (isValidYoutubeUrl(normalized)) {
+    if (isValidYouTubeUrl(normalized)) {
       setUrl(normalized);
       setError(null);
       setSuccess('Link ok!');
@@ -116,7 +85,7 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
 
   const handleSubmitInternal = async (rawUrl: string) => {
     const value = rawUrl.trim();
-    if (!isValidYoutubeUrl(value)) {
+    if (!isValidYouTubeUrl(value)) {
       setError('Esse link não parece do YouTube');
       setSuccess(null);
       try { posthog.capture('hero validation_error', { reason: 'invalid_url' }); } catch {}
