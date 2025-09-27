@@ -4,6 +4,9 @@ import { createClient } from '@supabase/supabase-js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { createWriteStream, constants as fsConstants } from 'fs';
+import { pipeline } from 'stream/promises';
+import { Readable } from 'stream';
 import ffmpegPath from 'ffmpeg-static';
 import pino from 'pino';
 import { enqueueUnique } from '../lib/bullmq';
@@ -18,15 +21,83 @@ if (ffmpegPath && !process.env.FFMPEG_PATH) {
 }
 
 // Check if system binary exists and configure if available
+async function ensureBundledBinary(): Promise<string> {
+  const constants = (youtubedl as any)?.constants;
+  if (!constants) {
+    throw new Error('youtube-dl-exec constants unavailable');
+  }
+
+  const {
+    YOUTUBE_DL_PATH,
+    YOUTUBE_DL_HOST,
+    YOUTUBE_DL_DIR,
+    YOUTUBE_DL_FILE,
+  } = constants as {
+    YOUTUBE_DL_PATH: string;
+    YOUTUBE_DL_HOST: string;
+    YOUTUBE_DL_DIR: string;
+    YOUTUBE_DL_FILE: string;
+  };
+
+  try {
+    await fs.access(YOUTUBE_DL_PATH, fsConstants.X_OK);
+    return YOUTUBE_DL_PATH;
+  } catch {}
+
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+
+  const resolveDownloadStream = async () => {
+    const response = await fetch(YOUTUBE_DL_HOST, headers ? { headers } : undefined);
+    const contentType = response.headers.get('content-type') || '';
+
+    if (contentType.includes('application/octet-stream')) {
+      return response.body;
+    }
+
+    const payload = await response.json();
+    const asset = payload?.assets?.find((item: any) => item?.name === YOUTUBE_DL_FILE);
+    if (!asset?.browser_download_url) {
+      throw new Error('yt-dlp binary asset not found in GitHub release payload');
+    }
+    const binaryResponse = await fetch(asset.browser_download_url, headers ? { headers } : undefined);
+    return binaryResponse.body;
+  };
+
+  const body = await resolveDownloadStream();
+  if (!body) {
+    throw new Error('Unable to download yt-dlp binary (empty body)');
+  }
+
+  await fs.mkdir(YOUTUBE_DL_DIR, { recursive: true });
+  const nodeStream = Readable.fromWeb(body as any);
+  await pipeline(nodeStream, createWriteStream(YOUTUBE_DL_PATH));
+  await fs.chmod(YOUTUBE_DL_PATH, 0o755);
+
+  return YOUTUBE_DL_PATH;
+}
+
 async function configureYtdl() {
   try {
     if (process.env.YTDL_BINARY_PATH) {
+      await fs.access(ytdlBinaryPath, fsConstants.X_OK);
       return youtubedl.create(ytdlBinaryPath);
     }
-    await fs.access(ytdlBinaryPath);
+  } catch (error) {
+    log.warn({ error: (error as Error)?.message }, 'Configured YTDL binary missing, falling back');
+  }
+
+  try {
+    await fs.access(ytdlBinaryPath, fsConstants.X_OK);
     return youtubedl.create(ytdlBinaryPath);
-  } catch {
-    return youtubedl; // Use default binary
+  } catch {}
+
+  try {
+    const bundledPath = await ensureBundledBinary();
+    return youtubedl.create(bundledPath);
+  } catch (error) {
+    log.error({ error: (error as Error)?.message }, 'Failed to prepare bundled yt-dlp');
+    return youtubedl; // Final fallback uses package defaults
   }
 }
 
