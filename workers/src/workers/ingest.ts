@@ -8,9 +8,14 @@ import ffmpegPath from 'ffmpeg-static';
 import pino from 'pino';
 import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
+import { runFFmpeg } from '../lib/ffmpeg';
 
 // Configure youtube-dl-exec to use system binary when available
 const ytdlBinaryPath = process.env.YTDL_BINARY_PATH || '/usr/bin/yt-dlp';
+
+if (ffmpegPath && !process.env.FFMPEG_PATH) {
+  process.env.FFMPEG_PATH = ffmpegPath;
+}
 
 // Check if system binary exists and configure if available
 async function configureYtdl() {
@@ -32,6 +37,7 @@ interface IngestResult {
   bucket: string;
   sourceKey: string;
   infoKey: string;
+  audioKey: string;
   durationSec: number;
   title: string;
   url: string;
@@ -74,10 +80,15 @@ export async function runIngest(job: Job): Promise<IngestResult> {
     log.info({ jobId }, 'DownloadStarted');
     const { videoPath, infoPath } = await downloadVideo(youtubeUrl, tempDir, jobId, job);
     log.info({ jobId }, 'DownloadOk');
-    
-    // Step 3: Upload to Supabase Storage (85-100%)
+
+    // Step 3: Extract normalized audio for downstream stages (85-90%)
+    log.info({ jobId }, 'AudioExtractStarted');
+    const audioPath = await extractAudio(videoPath, tempDir, info.duration, job);
+    log.info({ jobId }, 'AudioExtractOk');
+
+    // Step 4: Upload to Supabase Storage (90-100%)
     log.info({ jobId }, 'UploadStarted');
-    const result = await uploadToStorage(videoPath, infoPath, rootId, job, info);
+    const result = await uploadToStorage(videoPath, audioPath, infoPath, rootId, job, info);
     log.info({ jobId }, 'UploadOk');
     
     await job.updateProgress(100);
@@ -253,6 +264,7 @@ async function downloadVideo(
 
 async function uploadToStorage(
   videoPath: string,
+  audioPath: string,
   infoPath: string,
   rootId: string,
   job: Job,
@@ -268,46 +280,61 @@ async function uploadToStorage(
   
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   
-  // Update progress to 85% (start of upload)
-  await job.updateProgress(85);
-  
+  // Update progress to 90% (start of upload)
+  await job.updateProgress(90);
+
   const sourceKey = `projects/${rootId}/source.mp4`;
   const infoKey = `projects/${rootId}/info.json`;
-  
+  const audioKey = `projects/${rootId}/media/audio.wav`;
+
   try {
-    // Upload video file
-    const videoBuffer = await fs.readFile(videoPath);
-    const { error: videoError } = await supabase.storage
-      .from(bucket)
-      .upload(sourceKey, videoBuffer, {
-        contentType: 'video/mp4',
-        upsert: true
-      });
-    
-    if (videoError) {
-      throw new Error(`Failed to upload video: ${videoError.message}`);
+    const [videoBuffer, audioBuffer, infoBuffer] = await Promise.all([
+      fs.readFile(videoPath),
+      fs.readFile(audioPath),
+      fs.readFile(infoPath),
+    ]);
+
+    const [videoUpload, audioUpload, infoUpload] = await Promise.all([
+      supabase.storage
+        .from(bucket)
+        .upload(sourceKey, videoBuffer, {
+          contentType: 'video/mp4',
+          upsert: true,
+        }),
+      supabase.storage
+        .from(bucket)
+        .upload(audioKey, audioBuffer, {
+          contentType: 'audio/wav',
+          upsert: true,
+        }),
+      supabase.storage
+        .from(bucket)
+        .upload(infoKey, infoBuffer, {
+          contentType: 'application/json',
+          upsert: true,
+        }),
+    ]);
+
+    if (videoUpload.error) {
+      throw new Error(`Failed to upload video: ${videoUpload.error.message}`);
     }
-    
-    await job.updateProgress(95);
-    
-    // Upload info file
-    const infoBuffer = await fs.readFile(infoPath);
-    const { error: infoError } = await supabase.storage
-      .from(bucket)
-      .upload(infoKey, infoBuffer, {
-        contentType: 'application/json',
-        upsert: true
-      });
-    
-    if (infoError) {
-      throw new Error(`Failed to upload info: ${infoError.message}`);
+
+    if (audioUpload.error) {
+      throw new Error(`Failed to upload audio: ${audioUpload.error.message}`);
     }
-    
+
+    if (infoUpload.error) {
+      throw new Error(`Failed to upload info: ${infoUpload.error.message}`);
+    }
+
+    await job.updateProgress(98);
+
     return {
       rootId,
       bucket,
       sourceKey,
       infoKey,
+      audioKey,
       durationSec: Math.floor(info.duration),
       title: info.title,
       url: info.webpage_url
@@ -316,4 +343,35 @@ async function uploadToStorage(
   } catch (error: any) {
     throw new Error(`Upload failed: ${error.message}`);
   }
+}
+
+async function extractAudio(
+  videoPath: string,
+  tempDir: string,
+  durationSec: number,
+  job: Job
+): Promise<string> {
+  const audioPath = path.join(tempDir, 'source.wav');
+
+  const durationMs = Math.max(1, Math.floor(durationSec * 1000));
+
+  await runFFmpeg(
+    [
+      '-i', videoPath,
+      '-vn',
+      '-acodec', 'pcm_s16le',
+      '-ar', '16000',
+      '-ac', '1',
+      audioPath,
+    ],
+    (progress) => {
+      const scaled = 85 + Math.floor((progress / 100) * 5);
+      job.updateProgress(Math.min(90, scaled));
+    },
+    durationMs
+  );
+
+  await job.updateProgress(90);
+
+  return audioPath;
 }

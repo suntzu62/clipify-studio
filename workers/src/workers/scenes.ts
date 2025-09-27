@@ -50,13 +50,24 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
     // 0-10%: Load files
     await job.updateProgress(5);
     
-    const sourcePath = `${tmpDir}/source.mp4`;
+    const audioPath = `${tmpDir}/audio.wav`;
+    const legacyVideoPath = `${tmpDir}/source.mp4`;
     const transcriptPath = `${tmpDir}/transcript.json`;
-    
-    await Promise.all([
-      downloadToTemp(bucket, `projects/${rootId}/source.mp4`, sourcePath),
-      downloadToTemp(bucket, `projects/${rootId}/transcribe/transcript.json`, transcriptPath)
-    ]);
+
+    await downloadToTemp(bucket, `projects/${rootId}/transcribe/transcript.json`, transcriptPath);
+
+    let silenceSource = audioPath;
+    try {
+      await downloadToTemp(bucket, `projects/${rootId}/media/audio.wav`, audioPath);
+    } catch (error: any) {
+      if (error?.code === 'VIDEO_NOT_FOUND') {
+        logger.warn({ rootId }, 'AudioMissingFallbackVideo');
+        await downloadToTemp(bucket, `projects/${rootId}/source.mp4`, legacyVideoPath);
+        silenceSource = legacyVideoPath;
+      } else {
+        throw error;
+      }
+    }
     
     const transcriptContent = await fs.readFile(transcriptPath, 'utf-8');
     const transcript: Transcript = JSON.parse(transcriptContent);
@@ -92,7 +103,7 @@ export async function runScenes(job: Job): Promise<{ count: number; top3: string
     
     // Run silence detection in parallel with window preparation
     const [silenceBoundaries] = await Promise.all([
-      runSilenceDetect(sourcePath)
+      runSilenceDetect(silenceSource)
     ]);
     
     const silencePoints: number[] = [];

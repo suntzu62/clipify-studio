@@ -44,24 +44,36 @@ export async function runTranscribe(job: Job): Promise<TranscribeResult> {
     await fs.mkdir(tmpDir, { recursive: true });
     await fs.mkdir(join(tmpDir, 'chunks'), { recursive: true });
     
-    const sourcePath = join(tmpDir, 'source.mp4');
     const audioPath = join(tmpDir, 'audio.wav');
     const chunksDir = join(tmpDir, 'chunks');
-    
-    // 0-10%: Download source video
+
+    // 0-10%: Download pre-extracted audio
     await job.updateProgress(0);
-    log.info({ rootId }, 'DownloadStarted');
-    
-    await downloadToTemp(bucket, `projects/${rootId}/source.mp4`, sourcePath);
+    log.info({ rootId }, 'AudioDownloadStarted');
+
+    let segmentationSource = audioPath;
+
+    try {
+      await downloadToTemp(bucket, `projects/${rootId}/media/audio.wav`, audioPath);
+    } catch (error: any) {
+      if (error?.code === 'VIDEO_NOT_FOUND') {
+        const legacySource = join(tmpDir, 'source.mp4');
+        log.warn({ rootId }, 'AudioMissingFallbackVideo');
+        await downloadToTemp(bucket, `projects/${rootId}/source.mp4`, legacySource);
+        segmentationSource = legacySource;
+      } else {
+        throw error;
+      }
+    }
     await job.updateProgress(10);
-    log.info({ rootId }, 'DownloadOk');
-    
-    // 10-35%: Parallel audio extraction and segmentation
+    log.info({ rootId }, 'AudioDownloadOk');
+
+    // 10-35%: Direct segmentation of cached audio
     await job.updateProgress(10);
-    log.info({ rootId }, 'ParallelAudioProcessingStarted');
-    
+    log.info({ rootId }, 'AudioSegmentationStarted');
+
     await new Promise<void>((resolve, reject) => {
-      ffmpeg(sourcePath)
+      ffmpeg(segmentationSource)
         .audioChannels(1)
         .audioFrequency(16000)
         .outputOptions([
