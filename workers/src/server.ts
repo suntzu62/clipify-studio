@@ -126,7 +126,38 @@ export async function start() {
     }
   });
 
-  // Create pipeline
+  // INSTANT CLIPS - Ultra-fast response (< 2 seconds)
+  app.post('/api/jobs/instant', {
+    preHandler: apiKeyGuard,
+    config: {
+      rateLimit: {
+        max: 300,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (req: any, res: any) => {
+    const { instantProcessor } = await import('./lib/instant-processor');
+    
+    const body = (req.body || {}) as { youtubeUrl?: string };
+    const youtubeUrl = normalizeYoutubeUrl(body.youtubeUrl);
+    if (!youtubeUrl) {
+      res.code(400).send({ error: 'youtubeUrl required' });
+      return;
+    }
+
+    try {
+      const result = await instantProcessor.processInstantly(youtubeUrl);
+      res.send(result);
+    } catch (error) {
+      log.error({ error, youtubeUrl }, 'Instant processing failed');
+      res.code(500).send({ 
+        error: 'instant_processing_failed',
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Create pipeline (fallback for complex processing)
   app.post('/api/jobs/pipeline', {
     preHandler: apiKeyGuard,
     config: {
