@@ -6,7 +6,6 @@ import Pricing from "@/components/Pricing";
 import Footer from "@/components/Footer";
 import HeroV2 from "@/components/HeroV2";
 import { DualInputHero } from "@/components/DualInputHero";
-import { InstantClipsHero } from "@/components/InstantClipsHero";
 import DemoModal from "@/components/DemoModal";
 import { useSearchParams } from 'react-router-dom';
 
@@ -18,13 +17,6 @@ export default function Landing() {
     <div className="min-h-screen">
       <Header />
       <main>
-        {/* Instant Clips Section */}
-        <section className="py-20 px-4 bg-gradient-to-b from-background to-muted/20">
-          <div className="container mx-auto">
-            <InstantClipsHero />
-          </div>
-        </section>
-        
         {/* Enhanced Hero with Dual Input */}
         <section className="container mx-auto px-6 pt-16 pb-24">
           <div className="text-center space-y-12">
