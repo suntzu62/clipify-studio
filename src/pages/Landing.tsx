@@ -1,9 +1,9 @@
 import { useState } from "react";
 import Header from "@/components/Header";
-import Features from "@/components/Features";
-import HowItWorks from "@/components/HowItWorks";
-import Pricing from "@/components/Pricing";
-import Footer from "@/components/Footer";
+import LazyFeatures from "@/components/LazyFeatures";
+import LazyHowItWorks from "@/components/LazyHowItWorks";
+import LazyPricing from "@/components/LazyPricing";
+import LazyFooter from "@/components/LazyFooter";
 import HeroV2 from "@/components/HeroV2";
 import { DualInputHero } from "@/components/DualInputHero";
 import DemoModal from "@/components/DemoModal";
@@ -40,11 +40,11 @@ export default function Landing() {
         </section>
 
         {/* Keep existing sections below hero */}
-        <Features />
-        <HowItWorks />
-        <Pricing />
+        <LazyFeatures />
+        <LazyHowItWorks />
+        <LazyPricing />
       </main>
-      <Footer />
+      <LazyFooter />
       
       {/* Demo Modal */}
       <DemoModal 

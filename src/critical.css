@@ -1,0 +1,55 @@
+/* Critical CSS - Loaded immediately for Above-the-fold content */
+@tailwind base;
+
+/* Essential design tokens for immediate rendering */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --primary: 262 83% 58%;
+  --primary-foreground: 0 0% 98%;
+  --primary-hover: 262 83% 65%;
+  --primary-glow: 262 83% 70%;
+  --border: 220 13% 91%;
+  --muted-foreground: 220 8.9% 46.1%;
+  --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+  --gradient-hero: linear-gradient(135deg, hsl(262 83% 45%) 0%, hsl(262 90% 55%) 35%, hsl(280 100% 65%) 100%);
+  --radius: 0.75rem;
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --primary: 210 40% 98%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Critical utilities for hero section */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+.text-center { text-align: center; }
+.text-4xl { font-size: 2.25rem; line-height: 2.5rem; }
+.text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+.font-bold { font-weight: 700; }
+.text-primary { color: hsl(var(--primary)); }
+.bg-gradient-primary { background-image: var(--gradient-primary); }
+.bg-clip-text { background-clip: text; }
+.text-transparent { color: transparent; }
+.space-y-6 > * + * { margin-top: 1.5rem; }
+.space-y-12 > * + * { margin-top: 3rem; }
+.pt-16 { padding-top: 4rem; }
+.pb-24 { padding-bottom: 6rem; }
+.min-h-screen { min-height: 100vh; }
+
+@media (min-width: 768px) {
+  .md\\:text-5xl { font-size: 3rem; line-height: 1; }
+}
+
+@media (min-width: 1024px) {
+  .lg\\:text-6xl { font-size: 3.75rem; line-height: 1; }
+}
