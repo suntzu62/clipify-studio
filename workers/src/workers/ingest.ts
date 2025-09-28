@@ -20,6 +20,9 @@ if (ffmpegPath && !process.env.FFMPEG_PATH) {
   process.env.FFMPEG_PATH = ffmpegPath;
 }
 
+const DIRECT_DOWNLOAD_URL =
+  'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+
 // Check if system binary exists and configure if available
 async function ensureBundledBinary(): Promise<string> {
   const constants = (youtubedl as any)?.constants;
@@ -29,14 +32,14 @@ async function ensureBundledBinary(): Promise<string> {
 
   const {
     YOUTUBE_DL_PATH,
-    YOUTUBE_DL_HOST,
     YOUTUBE_DL_DIR,
     YOUTUBE_DL_FILE,
+    YOUTUBE_DL_HOST,
   } = constants as {
     YOUTUBE_DL_PATH: string;
-    YOUTUBE_DL_HOST: string;
     YOUTUBE_DL_DIR: string;
     YOUTUBE_DL_FILE: string;
+    YOUTUBE_DL_HOST: string;
   };
 
   try {
@@ -45,26 +48,71 @@ async function ensureBundledBinary(): Promise<string> {
   } catch {}
 
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+  const baseHeaders: Record<string, string> = {
+    'User-Agent': 'cortai-workers/1.0 (+https://cortai.example)',
+  };
+  if (token) {
+    baseHeaders.Authorization = `Bearer ${token}`;
+  }
 
-  const resolveDownloadStream = async () => {
-    const response = await fetch(YOUTUBE_DL_HOST, headers ? { headers } : undefined);
-    const contentType = response.headers.get('content-type') || '';
+  const downloadDirect = async () => {
+    const response = await fetch(DIRECT_DOWNLOAD_URL, {
+      headers: { ...baseHeaders, Accept: 'application/octet-stream' },
+    });
+    if (!response.ok || !response.body) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(
+        `Direct download failed: ${response.status} ${response.statusText} ${detail}`,
+      );
+    }
+    return response.body;
+  };
 
-    if (contentType.includes('application/octet-stream')) {
-      return response.body;
+  const downloadFromRelease = async () => {
+    const response = await fetch(YOUTUBE_DL_HOST, {
+      headers: {
+        ...baseHeaders,
+        Accept: 'application/vnd.github+json',
+      },
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(
+        `Failed to query GitHub release metadata: ${response.status} ${detail}`,
+      );
     }
 
     const payload = await response.json();
-    const asset = payload?.assets?.find((item: any) => item?.name === YOUTUBE_DL_FILE);
+    const asset = payload?.assets?.find(
+      (item: any) => item?.name === YOUTUBE_DL_FILE,
+    );
     if (!asset?.browser_download_url) {
-      throw new Error('yt-dlp binary asset not found in GitHub release payload');
+      const detail = payload?.message || 'asset not found';
+      throw new Error(
+        `yt-dlp binary asset not found in GitHub release payload: ${detail}`,
+      );
     }
-    const binaryResponse = await fetch(asset.browser_download_url, headers ? { headers } : undefined);
+
+    const binaryResponse = await fetch(asset.browser_download_url, {
+      headers: { ...baseHeaders, Accept: 'application/octet-stream' },
+    });
+    if (!binaryResponse.ok || !binaryResponse.body) {
+      const detail = await binaryResponse.text().catch(() => '');
+      throw new Error(
+        `Failed to download yt-dlp binary: ${binaryResponse.status} ${binaryResponse.statusText} ${detail}`,
+      );
+    }
+
     return binaryResponse.body;
   };
 
-  const body = await resolveDownloadStream();
+  const body = await downloadDirect().catch((directError) => {
+    console.warn(
+      'Direct yt-dlp download failed, falling back to GitHub API',
+      directError,
+    );
+    return downloadFromRelease();
+  });
   if (!body) {
     throw new Error('Unable to download yt-dlp binary (empty body)');
   }
