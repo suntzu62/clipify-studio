@@ -158,6 +158,48 @@ export type Database = {
         }
         Relationships: []
       }
+      user_jobs: {
+        Row: {
+          created_at: string | null
+          file_name: string | null
+          file_size: number | null
+          id: string
+          progress: number | null
+          source: string | null
+          status: string
+          storage_path: string | null
+          updated_at: string | null
+          user_id: string
+          youtube_url: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          id: string
+          progress?: number | null
+          source?: string | null
+          status?: string
+          storage_path?: string | null
+          updated_at?: string | null
+          user_id: string
+          youtube_url?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          id?: string
+          progress?: number | null
+          source?: string | null
+          status?: string
+          storage_path?: string | null
+          updated_at?: string | null
+          user_id?: string
+          youtube_url?: string | null
+        }
+        Relationships: []
+      }
       youtube_accounts: {
         Row: {
           access_token: string | null
