@@ -138,18 +138,40 @@ export async function start() {
   }, async (req: any, res: any) => {
     const body = (req.body || {}) as {
       youtubeUrl?: string;
+      upload?: {
+        bucket: string;
+        objectKey: string;
+        originalName?: string;
+      };
       neededMinutes?: number;
       targetDuration?: number;
       meta?: Record<string, any>;
     };
+
+    // At least one source must be provided
     const youtubeUrl = normalizeYoutubeUrl(body.youtubeUrl);
-    if (!youtubeUrl) {
-      res.code(400).send({ error: 'youtubeUrl required' });
+    const { upload } = body;
+
+    if (!youtubeUrl && !upload) {
+      res.code(400).send({ error: 'either youtubeUrl or upload must be provided' });
+      return;
+    }
+    if (youtubeUrl && upload) {
+      res.code(400).send({ error: 'cannot provide both youtubeUrl and upload' });
       return;
     }
 
-    // Idempotent root based on source URL (dedupe via BullMQ jobId)
-    const digest = createHash('sha1').update(String(youtubeUrl)).digest('hex').slice(0, 16);
+    // Validate upload object if provided
+    if (upload) {
+      if (!upload.bucket || !upload.objectKey) {
+        res.code(400).send({ error: 'upload.bucket and upload.objectKey are required' });
+        return;
+      }
+    }
+
+    // Idempotent root based on source identifier
+    const sourceId = youtubeUrl || `${upload!.bucket}/${upload!.objectKey}`;
+    const digest = createHash('sha1').update(sourceId).digest('hex').slice(0, 16);
     const rootId = `ingest:${digest}`;
 
     const neededMinutes = Number(body.neededMinutes || 0);
@@ -161,7 +183,12 @@ export async function start() {
       neededMinutes,
     };
 
-    const baseData = { rootId, meta, youtubeUrl };
+    // Include source information in the base data
+    const baseData = { 
+      rootId,
+      meta,
+      ...(youtubeUrl ? { youtubeUrl, sourceType: 'youtube' } : { upload, sourceType: 'upload' })
+    };
 
     const ingestJob = await enqueueUnique(
       QUEUES.INGEST,

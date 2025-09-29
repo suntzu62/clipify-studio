@@ -87,9 +87,19 @@ serve(async (req) => {
     const primaryUrl = `${base}/api/jobs/pipeline`;
     
     // Build job data based on source
+    const metaWithUser = { ...(meta || {}), userId, targetDuration, neededMinutes };
+
     const jobData = youtubeUrl 
-      ? { youtubeUrl, source: 'youtube', meta: { ...(meta || {}), userId, targetDuration, neededMinutes } }
-      : { storagePath, source: 'upload', fileName, meta: { ...(meta || {}), userId, targetDuration, neededMinutes } };
+      ? { youtubeUrl, sourceType: 'youtube', meta: metaWithUser }
+      : { 
+          upload: {
+            bucket: source === 'upload' ? 'uploads' : 'projects',
+            objectKey: storagePath,
+            originalName: fileName
+          }, 
+          sourceType: 'upload', 
+          meta: metaWithUser 
+        };
     
     console.log('[enqueue-pipeline] upstream primary:', primaryUrl, 'source:', source || 'youtube');
     let resp = await fetch(primaryUrl, {

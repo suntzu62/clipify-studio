@@ -1,17 +1,92 @@
 import { Job, UnrecoverableError } from 'bullmq';
 import youtubedl from 'youtube-dl-exec';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { createWriteStream, constants as fsConstants } from 'fs';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
+import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
 import pino from 'pino';
 import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
 import { runFFmpeg } from '../lib/ffmpeg';
+
+type Upload = {
+  bucket: string;
+  objectKey: string;
+  originalName?: string;
+};
+
+type VideoInfo = {
+  id?: string;
+  title: string;
+  duration: number;
+  width?: number;
+  height?: number;
+  webpage_url: string;
+  _filename?: string;
+  ext?: string;
+};
+
+async function prepareUploadedVideo(
+  upload: Upload,
+  tempDir: string,
+  supabase: SupabaseClient,
+  logger: pino.Logger
+): Promise<{ videoPath: string; infoPath: string; info: VideoInfo }> {
+  // Validate inputs
+  if (!upload.bucket || !upload.objectKey) {
+    throw new UnrecoverableError('Invalid upload: missing bucket or objectKey');
+  }
+
+  logger.info({ upload }, 'Downloading uploaded file from storage');
+
+  // Download the file from Supabase storage
+  const { data, error } = await supabase
+    .storage
+    .from(upload.bucket)
+    .download(upload.objectKey);
+
+  if (error || !data) {
+    throw new UnrecoverableError(`Failed to download file: ${error?.message || 'Unknown error'}`);
+  }
+
+  // Get file extension from objectKey or assume mp4
+  const ext = path.extname(upload.objectKey) || '.mp4';
+  const videoPath = path.join(tempDir, `source${ext}`);
+
+  // Save the file locally
+  const buffer = await data.arrayBuffer();
+  await fs.writeFile(videoPath, Buffer.from(buffer));
+
+  // Get video metadata using ffprobe
+  const metadata = await new Promise<any>((resolve, reject) => {
+    ffmpeg.ffprobe(videoPath, (err, metadata) => {
+      if (err) reject(err);
+      else resolve(metadata);
+    });
+  });
+
+  const videoStream = metadata.streams.find((s: any) => s.codec_type === 'video');
+  const info: VideoInfo = {
+    title: upload.originalName || path.basename(upload.objectKey),
+    duration: parseFloat(metadata.format.duration || '0'),
+    width: videoStream?.width,
+    height: videoStream?.height,
+    webpage_url: `upload://${upload.bucket}/${upload.objectKey}`,
+    ext,
+    _filename: videoPath
+  };
+
+  // Save info to JSON file
+  const infoPath = path.join(tempDir, 'source.info.json');
+  await fs.writeFile(infoPath, JSON.stringify(info, null, 2));
+
+  return { videoPath, infoPath, info };
+}
 
 // Configure youtube-dl-exec to use system binary when available
 const ytdlBinaryPath = process.env.YTDL_BINARY_PATH || '/usr/bin/yt-dlp';
@@ -170,29 +245,102 @@ interface VideoInfo {
 }
 
 export async function runIngest(job: Job): Promise<IngestResult> {
-  const { youtubeUrl, storagePath, source = 'youtube', fileName } = job.data;
+  const { youtubeUrl, upload, sourceType = 'youtube' } = job.data;
   const rootId = job.data.rootId || job.id!;
   const jobId = job.id!;
   
-  log.info({ jobId, rootId, youtubeUrl, storagePath, source }, 'Ingest started');
-  
-  // Route based on source type
-  if (source === 'upload' && storagePath) {
-    return await processUploadedVideo(job, storagePath, fileName || 'video');
-  }
-  
+  log.info({ jobId, rootId, youtubeUrl, upload, sourceType }, 'Ingest started');
+
   // Create temp directory
   const tempDir = path.join(os.tmpdir(), `cortai-${jobId}`);
   await fs.mkdir(tempDir, { recursive: true });
   
   try {
-    // Steps 1-2: Parallel probe and download preparation
-    log.info({ jobId }, 'ProbeStarted');
-    
-    // Start probe and download setup in parallel
-    const [info] = await Promise.all([
-      probeVideo(youtubeUrl)
-    ]);
+    // Initialize Supabase client for storage operations
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // Download or prepare the video file
+    let ingestedFiles: { videoPath: string; infoPath: string; info: VideoInfo };
+
+    if (sourceType === 'upload' && upload) {
+      // Handle uploaded video files
+      ingestedFiles = await prepareUploadedVideo(upload, tempDir, supabase, log);
+      log.info({ jobId }, 'UploadPrepareOk');
+    } else if (sourceType === 'youtube' && youtubeUrl) {
+      // Handle YouTube videos
+      log.info({ jobId }, 'ProbeStarted');
+      ingestedFiles = await downloadVideo(youtubeUrl, tempDir, jobId, job);
+      log.info({ jobId }, 'DownloadOk');
+    } else {
+      throw new UnrecoverableError('Invalid source configuration');
+    }
+
+    const { videoPath: sourceVideo, infoPath: infoFile, info: videoInfo } = ingestedFiles;
+
+    if (videoInfo.duration < 600) {
+      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
+    }
+
+    log.info({ jobId, duration: videoInfo.duration, title: videoInfo.title }, 'VideoOk');
+
+    // Extract audio 
+    log.info({ jobId }, 'AudioExtractStarted');
+    const extractedAudio = await extractAudio(sourceVideo, tempDir, videoInfo.duration, job);
+    log.info({ jobId }, 'AudioExtractOk');
+
+    // Upload to storage
+    log.info({ jobId }, 'UploadStarted');
+    const storageResult = await uploadToStorage(sourceVideo, extractedAudio, infoFile, rootId, job, videoInfo);
+    log.info({ jobId }, 'UploadOk');
+
+    await job.updateProgress(100);
+
+    // Clean up temp directory
+    await fs.rm(tempDir, { recursive: true, force: true });
+
+    // Queue transcription job
+    await enqueueUnique(
+      QUEUES.TRANSCRIBE,
+      'transcribe',
+      `${rootId}:transcribe`,
+      { rootId, meta: job.data.meta || {} }
+    );
+
+    return storageResult;
+
+    if (info.duration < 600) {
+      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
+    }
+
+    log.info({ jobId, duration: info.duration, title: info.title }, 'VideoOk');
+
+    // Extract audio
+    log.info({ jobId }, 'AudioExtractStarted');
+    const audioPath = await extractAudio(videoPath, tempDir, info.duration, job);
+    log.info({ jobId }, 'AudioExtractOk');
+
+    // Upload to storage
+    log.info({ jobId }, 'UploadStarted');
+    const result = await uploadToStorage(videoPath, audioPath, infoPath, rootId, job, info);
+    log.info({ jobId }, 'UploadOk');
+
+    await job.updateProgress(100);
+
+    // Clean up temp directory
+    await fs.rm(tempDir, { recursive: true, force: true });
+
+    // Queue transcription job
+    await enqueueUnique(
+      QUEUES.TRANSCRIBE,
+      'transcribe',
+      `${rootId}:transcribe`,
+      { rootId, meta: job.data.meta || {} }
+    );
+
+    return result;
     
     if (info.duration < 600) {
       throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
@@ -290,9 +438,12 @@ async function downloadVideo(
   tempDir: string, 
   jobId: string, 
   job: Job
-): Promise<{ videoPath: string; infoPath: string }> {
+): Promise<{ videoPath: string; infoPath: string; info: VideoInfo }> {
   const outputTemplate = path.join(tempDir, 'source.%(ext)s');
   const cookiesPath = process.env.YTDLP_COOKIES_PATH;
+
+  // First get video info
+  const info = await probeVideo(url);
   
   const options: any = {
     output: outputTemplate,
@@ -371,7 +522,7 @@ async function downloadVideo(
             return;
           }
           
-          resolve({ videoPath, infoPath });
+          resolve({ videoPath, infoPath, info });
         } catch (error) {
           reject(error);
         }
