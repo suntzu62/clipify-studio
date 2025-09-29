@@ -13,17 +13,7 @@ import pino from 'pino';
 import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
 import { runFFmpeg } from '../lib/ffmpeg';
-
-interface VideoInfo {
-  id?: string;
-  title: string;
-  duration: number;
-  width?: number;
-  height?: number;
-  webpage_url: string;
-  _filename?: string;
-  ext?: string;
-}
+import { VideoInfo } from '@shared/types/pipeline';
 
 interface Upload {
   bucket: string;
@@ -225,13 +215,6 @@ async function configureYtdl() {
 }
 
 const log = pino({ name: 'ingest' });
-
-interface VideoInfo {
-  duration: number;
-  title: string;
-  webpage_url: string;
-  [key: string]: any;
-}
 
 interface ProcessedFile {
   path: string;

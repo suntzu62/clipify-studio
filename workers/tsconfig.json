@@ -10,13 +10,17 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDirs": ["./src", "../src"],
     "declaration": false,
     "sourceMap": false,
     "resolveJsonModule": true,
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["../src/*"]
+    }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../src/types/**/*"],
   "exclude": ["node_modules", "dist", "scripts"]
 }
 
