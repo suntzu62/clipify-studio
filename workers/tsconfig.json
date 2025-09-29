@@ -12,7 +12,7 @@
     "outDir": "./dist",
     "rootDirs": ["./src", "../src"],
     "declaration": false,
-    "sourceMap": false,
+    "sourceMap": true,
     "resolveJsonModule": true,
     "types": ["node"],
     "baseUrl": ".",
@@ -21,6 +21,9 @@
     }
   },
   "include": ["src/**/*", "../src/types/**/*"],
-  "exclude": ["node_modules", "dist", "scripts"]
+  "exclude": ["node_modules", "dist", "scripts"],
+  "ts-node": {
+    "require": ["tsconfig-paths/register"]
+  }
 }
 
