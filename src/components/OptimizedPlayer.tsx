@@ -9,7 +9,7 @@ interface OptimizedPlayerProps {
   className?: string;
 }
 
-export const OptimizedPlayer = memo(({ url, title, className }: OptimizedPlayerProps) => {
+const OptimizedPlayer = memo(({ url, title, className }: OptimizedPlayerProps) => {
   const handleOpenVideo = () => {
     window.open(url, '_blank');
   };
@@ -48,3 +48,6 @@ export const OptimizedPlayer = memo(({ url, title, className }: OptimizedPlayerP
 });
 
 OptimizedPlayer.displayName = 'OptimizedPlayer';
+
+export { OptimizedPlayer };
+export default OptimizedPlayer;
