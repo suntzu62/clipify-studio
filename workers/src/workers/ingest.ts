@@ -170,11 +170,16 @@ interface VideoInfo {
 }
 
 export async function runIngest(job: Job): Promise<IngestResult> {
-  const { youtubeUrl } = job.data;
+  const { youtubeUrl, storagePath, source = 'youtube', fileName } = job.data;
   const rootId = job.data.rootId || job.id!;
   const jobId = job.id!;
   
-  log.info({ jobId, rootId, youtubeUrl }, 'Ingest started');
+  log.info({ jobId, rootId, youtubeUrl, storagePath, source }, 'Ingest started');
+  
+  // Route based on source type
+  if (source === 'upload' && storagePath) {
+    return await processUploadedVideo(job, storagePath, fileName || 'video');
+  }
   
   // Create temp directory
   const tempDir = path.join(os.tmpdir(), `cortai-${jobId}`);
@@ -492,5 +497,148 @@ async function extractAudio(
 
   await job.updateProgress(90);
 
+  return audioPath;
+}
+
+// Process uploaded video files (alternative to YouTube download)
+async function processUploadedVideo(
+  job: Job,
+  storagePath: string,
+  fileName: string
+): Promise<IngestResult> {
+  const rootId = job.data.rootId || job.id!;
+  const jobId = job.id!;
+  const tempDir = path.join(os.tmpdir(), `cortai-${jobId}`);
+  
+  try {
+    await fs.mkdir(tempDir, { recursive: true });
+    
+    log.info({ jobId, storagePath }, 'Processing uploaded video');
+    
+    // Step 1: Download from storage (0-30%)
+    const videoPath = path.join(tempDir, 'source.mp4');
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !serviceRoleKey) {
+      throw new Error('Missing Supabase configuration');
+    }
+    
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    
+    const { data: videoData, error: downloadError } = await supabase.storage
+      .from('raw')
+      .download(storagePath);
+    
+    if (downloadError || !videoData) {
+      throw new Error(`Failed to download uploaded video: ${downloadError?.message}`);
+    }
+    
+    await fs.writeFile(videoPath, Buffer.from(await videoData.arrayBuffer()));
+    await job.updateProgress(30);
+    
+    log.info({ jobId }, 'Video downloaded from storage');
+    
+    // Step 2: Probe video with ffprobe (30-40%)
+    const probeResult = await new Promise<any>((resolve, reject) => {
+      const ffprobe = require('fluent-ffmpeg');
+      ffprobe.ffprobe(videoPath, (err: any, metadata: any) => {
+        if (err) reject(err);
+        else resolve(metadata);
+      });
+    });
+    
+    const durationSec = probeResult.format?.duration || 0;
+    const title = fileName.replace(/\.[^/.]+$/, ''); // Remove extension
+    
+    if (durationSec < 600) {
+      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
+    }
+    
+    await job.updateProgress(40);
+    log.info({ jobId, duration: durationSec, title }, 'Video probed');
+    
+    // Step 3: Extract audio (40-70%)
+    log.info({ jobId }, 'AudioExtractStarted');
+    const audioPath = await extractAudioForUpload(videoPath, tempDir, durationSec, job, 40, 70);
+    log.info({ jobId }, 'AudioExtractOk');
+    
+    // Step 4: Create synthetic info.json (70-75%)
+    const infoPath = path.join(tempDir, 'info.json');
+    const info = {
+      duration: durationSec,
+      title,
+      webpage_url: `upload://${fileName}`,
+      uploader: 'Direct Upload',
+      upload_date: new Date().toISOString().split('T')[0].replace(/-/g, ''),
+    };
+    await fs.writeFile(infoPath, JSON.stringify(info, null, 2));
+    await job.updateProgress(75);
+    
+    // Step 5: Upload to storage (75-100%)
+    log.info({ jobId }, 'UploadStarted');
+    const result = await uploadToStorage(videoPath, audioPath, infoPath, rootId, job, info as VideoInfo);
+    log.info({ jobId }, 'UploadOk');
+    
+    await job.updateProgress(100);
+    
+    // Enqueue transcription
+    await enqueueUnique(
+      QUEUES.TRANSCRIBE,
+      'transcribe',
+      `${rootId}:transcribe`,
+      { rootId, meta: job.data.meta || {} }
+    );
+    
+    return result;
+    
+  } catch (error: any) {
+    log.error({ jobId, storagePath, error: error.message }, 'Upload processing failed');
+    
+    if (error.code === 'VIDEO_TOO_SHORT' || String(error?.message || '').startsWith('VIDEO_TOO_SHORT')) {
+      throw new UnrecoverableError('VIDEO_TOO_SHORT');
+    }
+    
+    throw { code: 'UPLOAD_PROCESSING_FAILED', message: error.message };
+    
+  } finally {
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+      log.info({ jobId }, 'Cleanup completed');
+    } catch (cleanupError) {
+      log.warn({ jobId, error: cleanupError }, 'Cleanup failed');
+    }
+  }
+}
+
+// Specialized audio extraction with custom progress range
+async function extractAudioForUpload(
+  videoPath: string,
+  tempDir: string,
+  durationSec: number,
+  job: Job,
+  startProgress: number,
+  endProgress: number
+): Promise<string> {
+  const audioPath = path.join(tempDir, 'source.wav');
+  const durationMs = Math.max(1, Math.floor(durationSec * 1000));
+
+  await runFFmpeg(
+    [
+      '-i', videoPath,
+      '-vn',
+      '-acodec', 'pcm_s16le',
+      '-ar', '16000',
+      '-ac', '1',
+      audioPath,
+    ],
+    (progress) => {
+      const scaled = startProgress + Math.floor((progress / 100) * (endProgress - startProgress));
+      job.updateProgress(Math.min(endProgress, scaled));
+    },
+    durationMs
+  );
+
+  await job.updateProgress(endProgress);
   return audioPath;
 }

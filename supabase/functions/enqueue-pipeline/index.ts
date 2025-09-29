@@ -27,9 +27,11 @@ serve(async (req) => {
   }
 
   try {
-    const { youtubeUrl, neededMinutes = 0, targetDuration, meta } = await req.json();
-    if (!youtubeUrl) {
-      return new Response(JSON.stringify({ error: 'youtubeUrl required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
+    const { youtubeUrl, storagePath, source, fileName, neededMinutes = 0, targetDuration, meta } = await req.json();
+    
+    // Validate input: must have either youtubeUrl or storagePath
+    if (!youtubeUrl && !storagePath) {
+      return new Response(JSON.stringify({ error: 'youtubeUrl or storagePath required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
     }
 
     // Per-user rate limiting (10 pipelines per hour)
@@ -83,11 +85,17 @@ serve(async (req) => {
 
     const base = raw.trim().replace(/\/+$/, '').replace(/\/api$/, '');
     const primaryUrl = `${base}/api/jobs/pipeline`;
-    console.log('[enqueue-pipeline] upstream primary:', primaryUrl);
+    
+    // Build job data based on source
+    const jobData = youtubeUrl 
+      ? { youtubeUrl, source: 'youtube', meta: { ...(meta || {}), userId, targetDuration, neededMinutes } }
+      : { storagePath, source: 'upload', fileName, meta: { ...(meta || {}), userId, targetDuration, neededMinutes } };
+    
+    console.log('[enqueue-pipeline] upstream primary:', primaryUrl, 'source:', source || 'youtube');
     let resp = await fetch(primaryUrl, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-      body: JSON.stringify({ youtubeUrl, meta: { ...(meta || {}), userId, targetDuration, neededMinutes } }),
+      body: JSON.stringify(jobData),
     });
 
     if (resp.status === 404) {
@@ -96,7 +104,7 @@ serve(async (req) => {
       resp = await fetch(altUrl, {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-        body: JSON.stringify({ youtubeUrl, meta: { ...(meta || {}), userId, targetDuration, neededMinutes } }),
+        body: JSON.stringify(jobData),
       });
     }
 

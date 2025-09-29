@@ -30,6 +30,7 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
   const [validFlash, setValidFlash] = useState(false);
   const [showFallback, setShowFallback] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [errorType, setErrorType] = useState<'quota' | 'private' | 'blocked' | 'age' | 'unknown' | null>(null);
   const submitBtnRef = useRef<HTMLButtonElement | null>(null);
   const navigate = useNavigate();
   const { isSignedIn, getToken } = useAuth();
@@ -141,11 +142,25 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
     } catch (e: any) {
       console.error('Pipeline enqueue failed:', e);
       
-      // Enhanced error handling with fallback suggestions
+      // Enhanced error handling with specific error type detection
       const errorMessage = e?.message || String(e);
-      const isYouTubeError = errorMessage.toLowerCase().includes('youtube') || 
-                            errorMessage.toLowerCase().includes('quota') ||
-                            errorMessage.toLowerCase().includes('blocked');
+      const errorLower = errorMessage.toLowerCase();
+      
+      // Detect error type
+      let detectedErrorType: typeof errorType = 'unknown';
+      if (errorLower.includes('quota') || errorLower.includes('rate limit')) {
+        detectedErrorType = 'quota';
+      } else if (errorLower.includes('private')) {
+        detectedErrorType = 'private';
+      } else if (errorLower.includes('blocked') || errorLower.includes('region')) {
+        detectedErrorType = 'blocked';
+      } else if (errorLower.includes('age') || errorLower.includes('restricted')) {
+        detectedErrorType = 'age';
+      }
+      
+      setErrorType(detectedErrorType);
+      
+      const isYouTubeError = ['quota', 'private', 'blocked', 'age'].includes(detectedErrorType);
       
       if (isYouTubeError && retryCount < 2) {
         setRetryCount(prev => prev + 1);
@@ -158,13 +173,39 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
         return;
       }
       
-      // Show fallback option after failures
+      // Show fallback option immediately for YouTube errors
       if (isYouTubeError) {
         setShowFallback(true);
-        setError('YouTube indisponível no momento');
+        
+        // Custom error messages based on type
+        const errorMessages: Record<typeof detectedErrorType, { title: string; description: string }> = {
+          quota: {
+            title: 'Limite do YouTube atingido 📺',
+            description: 'Use upload direto como alternativa rápida'
+          },
+          private: {
+            title: 'Vídeo privado 🔒',
+            description: 'Faça upload do arquivo ou configure cookies.txt'
+          },
+          blocked: {
+            title: 'Vídeo bloqueado na sua região 🌍',
+            description: 'Tente upload direto do arquivo'
+          },
+          age: {
+            title: 'Conteúdo com restrição de idade 🔞',
+            description: 'Faça upload do arquivo como alternativa'
+          },
+          unknown: {
+            title: 'YouTube indisponível 📺',
+            description: 'Tente fazer upload do arquivo local'
+          }
+        };
+        
+        const msg = errorMessages[detectedErrorType];
+        setError(msg.title);
         toast({
-          title: 'YouTube indisponível 📺',
-          description: 'Tente fazer upload do arquivo local como alternativa',
+          title: msg.title,
+          description: msg.description,
           variant: 'destructive'
         });
       } else {
@@ -219,15 +260,19 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
         </div>
       </form>
 
-      {/* Fallback upload option */}
+      {/* Fallback upload option with contextual messaging */}
       {showFallback && (
         <div className="mt-6 space-y-3">
           <div className="text-center">
-            <p className="text-sm text-muted-foreground">ou</p>
+            <p className="text-sm font-medium text-muted-foreground">ou</p>
           </div>
           <FileUploadZone onUploadSuccess={(jobId) => navigate(`/projects/${jobId}`)} />
           <p className="text-xs text-center text-muted-foreground">
-            YouTube indisponível? Faça upload do seu arquivo local como alternativa
+            {errorType === 'private' && '🔒 Para vídeos privados, faça upload do arquivo diretamente'}
+            {errorType === 'quota' && '⚡ Upload direto ignora limites do YouTube'}
+            {errorType === 'blocked' && '🌍 Upload direto funciona para qualquer região'}
+            {errorType === 'age' && '✨ Upload direto não tem restrições'}
+            {(!errorType || errorType === 'unknown') && '📤 Faça upload do seu arquivo local como alternativa'}
           </p>
         </div>
       )}

@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import ReactPlayer from 'react-player';
+import OptimizedPlayer from './OptimizedPlayer';
 
 interface DemoModalProps {
   open: boolean;
@@ -19,10 +19,8 @@ export default function DemoModal({ open, onOpenChange, onUseDemo }: DemoModalPr
         </DialogHeader>
         <div className="space-y-4">
           <div className="rounded-md overflow-hidden aspect-video bg-black">
-            <ReactPlayer
+            <OptimizedPlayer
               url={DEMO_VIDEO}
-              width="100%"
-              height="100%"
               playing
               loop
               muted

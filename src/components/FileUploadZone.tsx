@@ -32,35 +32,81 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
     setUploadProgress(0);
 
     try {
-      // Simulate upload progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => Math.min(prev + 10, 90));
-      }, 200);
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error('Authentication required');
+      }
 
-      // TODO: Implement actual file upload to Supabase storage
-      // For now, create a placeholder job
-      const jobId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      // Create FormData with video file
+      const formData = new FormData();
+      formData.append('video', file);
+
+      // Upload to edge function with progress tracking
+      const xhr = new XMLHttpRequest();
       
+      // Track upload progress
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const percentComplete = Math.floor((e.loaded / e.total) * 100);
+          setUploadProgress(percentComplete);
+        }
+      });
+
+      // Handle completion
+      const uploadPromise = new Promise<{ jobId: string; storagePath: string }>((resolve, reject) => {
+        xhr.addEventListener('load', () => {
+          if (xhr.status === 200) {
+            resolve(JSON.parse(xhr.responseText));
+          } else {
+            const error = JSON.parse(xhr.responseText);
+            reject(new Error(error.message || 'Upload failed'));
+          }
+        });
+        
+        xhr.addEventListener('error', () => {
+          reject(new Error('Network error during upload'));
+        });
+      });
+
+      // Start upload
+      xhr.open('POST', 'https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/upload-video');
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.send(formData);
+
+      const { jobId, storagePath } = await uploadPromise;
+      
+      setUploadProgress(100);
+
+      // Save job to local storage
       const job: Job = {
         id: jobId,
-        youtubeUrl: `file://${file.name}`,
+        youtubeUrl: `upload://${file.name}`,
         status: 'queued',
         progress: 0,
         createdAt: new Date().toISOString(),
-        neededMinutes: Math.ceil(file.size / (1024 * 1024)) // rough estimate
+        neededMinutes: Math.ceil(file.size / (1024 * 1024 * 60)), // rough estimate
+        result: {
+          metadata: {
+            title: file.name.replace(/\.[^/.]+$/, ''),
+            thumbnail: undefined,
+            channel: undefined
+          }
+        }
       };
-
       saveUserJob(user.id, job);
       
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-      
+      toast({
+        title: 'Upload concluído! ✨',
+        description: 'Processando seu vídeo...'
+      });
+
       setTimeout(() => {
         onUploadSuccess?.(jobId);
         navigate(`/projects/${jobId}`);
       }, 500);
 
     } catch (err: any) {
+      console.error('Upload error:', err);
       setError(err.message || 'Falha no upload');
       toast({
         title: 'Erro no upload',
@@ -69,20 +115,19 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
       });
     } finally {
       setUploading(false);
-      setUploadProgress(0);
     }
-  }, [user, navigate, onUploadSuccess]);
+  }, [user, getToken, navigate, onUploadSuccess]);
 
   const validateFile = (file: File): string | null => {
-    const maxSize = 2 * 1024 * 1024 * 1024; // 2GB
-    const allowedTypes = ['video/mp4', 'video/quicktime', 'video/avi', 'video/mov'];
+    const maxSize = 5 * 1024 * 1024 * 1024; // 5GB
+    const allowedTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska'];
     
     if (file.size > maxSize) {
-      return 'Arquivo muito grande. Máximo: 2GB';
+      return 'Arquivo muito grande. Máximo: 5GB';
     }
     
     if (!allowedTypes.includes(file.type)) {
-      return 'Formato não suportado. Use: MP4, MOV, AVI';
+      return 'Formato não suportado. Use: MP4, MOV, AVI, MKV';
     }
     
     return null;
@@ -153,7 +198,7 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
                   ou clique para selecionar
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Formatos: MP4, MOV, AVI • Máximo: 2GB
+                  Formatos: MP4, MOV, AVI, MKV • Máximo: 5GB
                 </p>
               </div>
               
