@@ -4,8 +4,8 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "prebuild": "rm -rf dist",
-    "build": "tsc && cp tsconfig-paths.js dist/ && cp package*.json dist/ && cp -r ../src dist/",
-    "start": "node -r ./tsconfig-paths.js dist/index.js",
+    "build": "mkdir -p dist/src/types && cp ../src/types/pipeline.ts dist/src/types/ && tsc && cp package*.json setup-links.js dist/",
+    "start": "cd dist && NODE_ENV=production node setup-links.js && node index.js",
     "enqueue:demo": "tsx scripts/enqueue-demo.ts",
     "demo:e2e": "tsx scripts/demo-e2e.ts"
   },

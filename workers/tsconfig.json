@@ -10,20 +10,12 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDirs": ["./src", "../src"],
     "declaration": false,
     "sourceMap": true,
     "resolveJsonModule": true,
-    "types": ["node"],
-    "baseUrl": ".",
-    "paths": {
-      "@shared/*": ["../src/*"]
-    }
+    "types": ["node"]
   },
-  "include": ["src/**/*", "../src/types/**/*"],
-  "exclude": ["node_modules", "dist", "scripts"],
-  "ts-node": {
-    "require": ["tsconfig-paths/register"]
-  }
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "scripts"]
 }
 

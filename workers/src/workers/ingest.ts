@@ -13,7 +13,7 @@ import pino from 'pino';
 import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
 import { runFFmpeg } from '../lib/ffmpeg';
-import { VideoInfo } from '@shared/types/pipeline';
+import type { VideoInfo } from '../types/pipeline';
 
 interface Upload {
   bucket: string;
