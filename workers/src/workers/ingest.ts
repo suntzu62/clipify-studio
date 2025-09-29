@@ -14,13 +14,7 @@ import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
 import { runFFmpeg } from '../lib/ffmpeg';
 
-type Upload = {
-  bucket: string;
-  objectKey: string;
-  originalName?: string;
-};
-
-type VideoInfo = {
+interface VideoInfo {
   id?: string;
   title: string;
   duration: number;
@@ -29,7 +23,13 @@ type VideoInfo = {
   webpage_url: string;
   _filename?: string;
   ext?: string;
-};
+}
+
+interface Upload {
+  bucket: string;
+  objectKey: string;
+  originalName?: string;
+}
 
 async function prepareUploadedVideo(
   upload: Upload,
@@ -226,17 +226,6 @@ async function configureYtdl() {
 
 const log = pino({ name: 'ingest' });
 
-interface IngestResult {
-  rootId: string;
-  bucket: string;
-  sourceKey: string;
-  infoKey: string;
-  audioKey: string;
-  durationSec: number;
-  title: string;
-  url: string;
-}
-
 interface VideoInfo {
   duration: number;
   title: string;
@@ -244,174 +233,137 @@ interface VideoInfo {
   [key: string]: any;
 }
 
-export async function runIngest(job: Job): Promise<IngestResult> {
-  const { youtubeUrl, upload, sourceType = 'youtube' } = job.data;
-  const rootId = job.data.rootId || job.id!;
-  const jobId = job.id!;
-  
-  log.info({ jobId, rootId, youtubeUrl, upload, sourceType }, 'Ingest started');
+interface ProcessedFile {
+  path: string;
+  duration: number;
+  title: string;
+}
 
-  // Create temp directory
-  const tempDir = path.join(os.tmpdir(), `cortai-${jobId}`);
-  await fs.mkdir(tempDir, { recursive: true });
+interface StorageResult {
+  rootId: string;
+  storagePaths: {
+    video: string;
+    audio: string;
+    info: string;
+  };
+  duration: number;
+  title: string;
+  url: string;
+}
+
+// Use same interface for both storage and ingest results
+type IngestResult = StorageResult;
+
+interface SourceFiles {
+  videoPath: string;
+  infoPath: string;
+  info: VideoInfo;
+  audioPath: string;
+  duration: number;
+  title: string;
+}
+
+interface StorageUploadResult {
+  error: Error | null;
+  data: {
+    path: string;
+  } | null;
+}
+
+interface StoragePublicUrlResult {
+  data: {
+    publicUrl: string;
+  } | null;
+}
+
+export async function runIngest(job: Job): Promise<IngestResult> {
+  const { filePath, rootId } = job.data;
+  const jobId = job.id;
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ingest-'));
   
   try {
-    // Initialize Supabase client for storage operations
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // Download or prepare the video file
-    let ingestedFiles: { videoPath: string; infoPath: string; info: VideoInfo };
-
-    if (sourceType === 'upload' && upload) {
-      // Handle uploaded video files
-      ingestedFiles = await prepareUploadedVideo(upload, tempDir, supabase, log);
-      log.info({ jobId }, 'UploadPrepareOk');
-    } else if (sourceType === 'youtube' && youtubeUrl) {
-      // Handle YouTube videos
-      log.info({ jobId }, 'ProbeStarted');
-      ingestedFiles = await downloadVideo(youtubeUrl, tempDir, jobId, job);
-      log.info({ jobId }, 'DownloadOk');
-    } else {
-      throw new UnrecoverableError('Invalid source configuration');
-    }
-
-    const { videoPath: sourceVideo, infoPath: infoFile, info: videoInfo } = ingestedFiles;
-
-    if (videoInfo.duration < 600) {
-      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
-    }
-
-    log.info({ jobId, duration: videoInfo.duration, title: videoInfo.title }, 'VideoOk');
-
-    // Extract audio 
-    log.info({ jobId }, 'AudioExtractStarted');
-    const extractedAudio = await extractAudio(sourceVideo, tempDir, videoInfo.duration, job);
-    log.info({ jobId }, 'AudioExtractOk');
-
-    // Upload to storage
-    log.info({ jobId }, 'UploadStarted');
-    const storageResult = await uploadToStorage(sourceVideo, extractedAudio, infoFile, rootId, job, videoInfo);
-    log.info({ jobId }, 'UploadOk');
-
-    await job.updateProgress(100);
-
-    // Clean up temp directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-
-    // Queue transcription job
-    await enqueueUnique(
-      QUEUES.TRANSCRIBE,
-      'transcribe',
-      `${rootId}:transcribe`,
-      { rootId, meta: job.data.meta || {} }
-    );
-
-    return storageResult;
-
-    if (info.duration < 600) {
-      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
-    }
-
-    log.info({ jobId, duration: info.duration, title: info.title }, 'VideoOk');
-
-    // Extract audio
-    log.info({ jobId }, 'AudioExtractStarted');
-    const audioPath = await extractAudio(videoPath, tempDir, info.duration, job);
-    log.info({ jobId }, 'AudioExtractOk');
-
-    // Upload to storage
-    log.info({ jobId }, 'UploadStarted');
-    const result = await uploadToStorage(videoPath, audioPath, infoPath, rootId, job, info);
-    log.info({ jobId }, 'UploadOk');
-
-    await job.updateProgress(100);
-
-    // Clean up temp directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-
-    // Queue transcription job
-    await enqueueUnique(
-      QUEUES.TRANSCRIBE,
-      'transcribe',
-      `${rootId}:transcribe`,
-      { rootId, meta: job.data.meta || {} }
-    );
-
-    return result;
+    let processedFile: ProcessedFile;
     
-    if (info.duration < 600) {
-      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
-    }
-    
-    log.info({ jobId, duration: info.duration, title: info.title }, 'ProbeOk');
-    
-    // Step 2: Download with progress (0-85%)
-    log.info({ jobId }, 'DownloadStarted');
-    const { videoPath, infoPath } = await downloadVideo(youtubeUrl, tempDir, jobId, job);
-    log.info({ jobId }, 'DownloadOk');
+    // Step 1: Probe video to get duration and metadata
+    const probeResult = await new Promise<any>((resolve, reject) => {
+      const ffprobe = require('fluent-ffmpeg');
+      ffprobe.ffprobe(filePath, (err: any, metadata: any) => {
+        if (err) reject(err);
+        else resolve(metadata);
+      });
+    });
 
-    // Step 3: Extract normalized audio for downstream stages (85-90%)
-    log.info({ jobId }, 'AudioExtractStarted');
-    const audioPath = await extractAudio(videoPath, tempDir, info.duration, job);
-    log.info({ jobId }, 'AudioExtractOk');
-
-    // Step 4: Upload to Supabase Storage (90-100%)
-    log.info({ jobId }, 'UploadStarted');
-    const result = await uploadToStorage(videoPath, audioPath, infoPath, rootId, job, info);
-    log.info({ jobId }, 'UploadOk');
+    const duration = probeResult.format?.duration || 0;
+    const title = path.basename(filePath).replace(/\.[^/.]+$/, ''); // Remove extension
     
-    await job.updateProgress(100);
-
-    await enqueueUnique(
-      QUEUES.TRANSCRIBE,
-      'transcribe',
-      `${rootId}:transcribe`,
-      { rootId, meta: job.data.meta || {} }
-    );
-
-    return result;
-    
-  } catch (error: any) {
-    const detail = {
-      message: error?.message,
-      code: error?.code,
-      stderr: error?.stderr,
-      stdout: error?.stdout,
-      stack: error?.stack,
+    processedFile = {
+      path: filePath,
+      duration,
+      title
     };
-    log.error({ jobId, rootId, youtubeUrl, detail }, 'Ingest failed');
     
-    // Map common error codes
-    if (error.code === 'VIDEO_TOO_SHORT' || String(error?.message || '').startsWith('VIDEO_TOO_SHORT')) {
-      throw new UnrecoverableError('VIDEO_TOO_SHORT');
+    // Step 2: Verify duration
+    if (duration < 600) {
+      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
     }
+    await job.updateProgress(40);
+    log.info({ jobId, duration, title }, 'Video probed');
     
-    // Handle yt-dlp specific errors
-    if (error.message?.includes('Sign in to confirm your age')) {
-      throw { code: 'AGE_RESTRICTED', message: 'Video is age-restricted' };
-    }
+    // Step 3: Create info.json file
+    const processedInfo = path.join(tempDir, 'info.json');
+    const processedMeta: VideoInfo = {
+      duration,
+      title,
+      webpage_url: `upload://${path.basename(filePath)}`
+    };
+    await fs.writeFile(processedInfo, JSON.stringify(processedMeta, null, 2));
     
-    if (error.message?.includes('Private video')) {
-      throw { code: 'PRIVATE_VIDEO', message: 'Video is private' };
-    }
+    // Step 4: Extract audio
+    const processedAudio = path.join(tempDir, 'source.wav');
+    await extractAudio(processedFile.path, processedAudio, duration, job);
     
-    if (error.message?.includes('quota')) {
-      throw { code: 'QUOTA_EXCEEDED', message: 'YouTube quota exceeded' };
-    }
+    // Step 5: Upload to storage
+    log.info({ jobId }, 'UploadStarted');
+    const storageResult = await uploadToStorage(
+      processedFile.path,
+      processedAudio, 
+      processedInfo,
+      rootId,
+      job,
+      processedMeta
+    );
+    log.info({ jobId }, 'UploadOk');
     
-    throw { code: 'DOWNLOAD_FAILED', message: error.message || 'Failed to download video' };
+    // Step 6: Update progress and queue transcription
+    await job.updateProgress(100);
+    await enqueueUnique(
+      QUEUES.TRANSCRIBE,
+      'transcribe',
+      `${rootId}:transcribe`,
+      { rootId, meta: job.data.meta || {} }
+    );
     
-  } finally {
-    // Cleanup temp files
+    // Step 7: Clean up temp files
+    await fs.rm(tempDir, { recursive: true, force: true });
+    
+    return storageResult;
+  } catch (error: any) {
+    // Clean up on error
     try {
       await fs.rm(tempDir, { recursive: true, force: true });
-      log.info({ jobId }, 'Cleanup completed');
-    } catch (cleanupError) {
+    } catch (cleanupError: any) {
       log.warn({ jobId, error: cleanupError }, 'Cleanup failed');
     }
+    
+    log.error({ jobId, rootId, error }, 'Ingest failed');
+    
+    // Rethrow video too short error
+    if (error.code === 'VIDEO_TOO_SHORT' || String(error?.message || '').startsWith('VIDEO_TOO_SHORT')) {
+      throw error;
+    }
+    
+    throw { code: 'INGEST_FAILED', message: error.message || 'Failed to ingest video' };
   }
 }
 
@@ -544,7 +496,7 @@ async function uploadToStorage(
   rootId: string,
   job: Job,
   info: VideoInfo
-): Promise<IngestResult> {
+): Promise<StorageResult> {
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'raw';
@@ -562,58 +514,67 @@ async function uploadToStorage(
   const infoKey = `projects/${rootId}/info.json`;
   const audioKey = `projects/${rootId}/media/audio.wav`;
 
-  try {
-    const [videoBuffer, audioBuffer, infoBuffer] = await Promise.all([
-      fs.readFile(videoPath),
-      fs.readFile(audioPath),
-      fs.readFile(infoPath),
-    ]);
+  const [videoBuffer, audioBuffer, infoBuffer] = await Promise.all([
+    fs.readFile(videoPath),
+    fs.readFile(audioPath),
+    fs.readFile(infoPath),
+  ]);
 
-    const [videoUpload, audioUpload, infoUpload] = await Promise.all([
-      supabase.storage
+    // Upload files to storage
+    try {
+      // Upload video first
+      const videoUpload = await supabase.storage
         .from(bucket)
         .upload(sourceKey, videoBuffer, {
           contentType: 'video/mp4',
           upsert: true,
-        }),
-      supabase.storage
-        .from(bucket)
-        .upload(audioKey, audioBuffer, {
-          contentType: 'audio/wav',
-          upsert: true,
-        }),
-      supabase.storage
-        .from(bucket)
-        .upload(infoKey, infoBuffer, {
-          contentType: 'application/json',
-          upsert: true,
-        }),
-    ]);
+        });
 
-    if (videoUpload.error) {
-      throw new Error(`Failed to upload video: ${videoUpload.error.message}`);
-    }
+      if (videoUpload.error) {
+        throw new Error(`Failed to upload video: ${videoUpload.error.message}`);
+      }
 
-    if (audioUpload.error) {
-      throw new Error(`Failed to upload audio: ${audioUpload.error.message}`);
-    }
+      // Upload audio and info in parallel
+      const [audioUpload, infoUpload] = await Promise.all([
+        supabase.storage
+          .from(bucket)
+          .upload(audioKey, audioBuffer, {
+            contentType: 'audio/wav',
+            upsert: true,
+          }),
+        supabase.storage
+          .from(bucket)
+          .upload(infoKey, infoBuffer, {
+            contentType: 'application/json',
+            upsert: true,
+          }),
+      ]);
 
-    if (infoUpload.error) {
-      throw new Error(`Failed to upload info: ${infoUpload.error.message}`);
-    }
+      if (audioUpload.error) {
+        throw new Error(`Failed to upload audio: ${audioUpload.error.message}`);
+      }
+      if (infoUpload.error) {
+        throw new Error(`Failed to upload info: ${infoUpload.error.message}`);
+      }
 
-    await job.updateProgress(98);
+      // Get URLs for uploaded files
+      const { data: videoUrl } = await supabase.storage.from(bucket).getPublicUrl(sourceKey);
+      const { data: audioUrl } = await supabase.storage.from(bucket).getPublicUrl(audioKey);
+      const { data: infoUrl } = await supabase.storage.from(bucket).getPublicUrl(infoKey);
 
-    return {
-      rootId,
-      bucket,
-      sourceKey,
-      infoKey,
-      audioKey,
-      durationSec: Math.floor(info.duration),
-      title: info.title,
-      url: info.webpage_url
-    };
+      await job.updateProgress(98);
+
+      return {
+        rootId,
+        storagePaths: {
+          video: sourceKey,
+          audio: audioKey,
+          info: infoKey
+        },
+        duration: Math.floor(info.duration),
+        title: info.title,
+        url: info.webpage_url || videoUrl?.publicUrl || `${bucket}/${sourceKey}`
+      };
     
   } catch (error: any) {
     throw new Error(`Upload failed: ${error.message}`);
@@ -736,12 +697,18 @@ async function processUploadedVideo(
     // Enqueue transcription
     await enqueueUnique(
       QUEUES.TRANSCRIBE,
-      'transcribe',
+      'transcribe', 
       `${rootId}:transcribe`,
       { rootId, meta: job.data.meta || {} }
     );
     
-    return result;
+    return {
+      rootId: result.rootId,
+      storagePaths: result.storagePaths,
+      duration: result.duration,
+      title: result.title,
+      url: result.url
+    };
     
   } catch (error: any) {
     log.error({ jobId, storagePath, error: error.message }, 'Upload processing failed');
