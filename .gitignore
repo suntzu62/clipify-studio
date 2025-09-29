@@ -17,6 +17,7 @@ dist-ssr
 *.env.local
 supabase/.env
 workers/.env
+workers/cookies/
 
 # Editor directories and files
 .vscode/*
