@@ -263,6 +263,17 @@ export async function runIngest(job: Job): Promise<IngestResult> {
   const { filePath, rootId } = job.data;
   const jobId = job.id;
 
+  // Validação melhorada de entrada
+  if (!filePath) {
+    throw new UnrecoverableError('INVALID_INPUT: filePath is required');
+  }
+
+  if (!rootId) {
+    throw new UnrecoverableError('INVALID_INPUT: rootId is required');
+  }
+
+  log.info({ jobId, filePath, rootId }, 'Starting ingest job');
+
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ingest-'));
   
   try {

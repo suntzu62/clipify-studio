@@ -19,7 +19,7 @@ export async function generateJSON<T = any>(
   prompt: string
 ): Promise<T> {
   const cli = getOpenAI();
-  const modelToUse = model || 'gpt-4o-mini';
+  const modelToUse = model || 'gpt-4';
   
   // Try different response formats for compatibility
   const responseFormats: Array<{ type: 'json_schema'; json_schema: any } | { type: 'json_object' } | undefined> = [

@@ -61,7 +61,7 @@ export async function runTexts(job: Job): Promise<any> {
     const items = Array.isArray(rank.items) ? rank.items.slice(0, 12) : [];
     if (items.length === 0) throw { code: 'TEXTS_NO_ITEMS', message: 'rank.json sem items' };
 
-    const model = process.env.TEXTS_MODEL || 'gpt-4o-mini';
+    const model = process.env.TEXTS_MODEL || 'gpt-4';
     const tone = process.env.TEXTS_TONE || 'informal-claro';
     const hashtagMax = Number(process.env.TEXTS_HASHTAG_MAX || 12);
     const blogMin = Number(process.env.TEXTS_BLOG_WORDS_MIN || 800);
@@ -72,11 +72,47 @@ export async function runTexts(job: Job): Promise<any> {
     const perItemSpan = Math.max(1, Math.floor(60 / items.length)); // spread 10–70
     const outputs: Array<{ clipId: string; titleKey: string; descriptionKey: string; hashtagsKey: string }> = [];
 
+    // Log environment and setup
+    log.info({ 
+      rootId,
+      model,
+      apiKeyPrefix: process.env.OPENAI_API_KEY?.slice(0, 7),
+      hasApiKey: Boolean(process.env.OPENAI_API_KEY),
+      itemCount: items.length,
+      tone,
+      hashtagMax,
+      blogMin,
+      blogMax
+    }, 'StartingClipGeneration');
+
+    // Log starting clip processing
+    log.info({ 
+      rootId,
+      itemCount: items.length,
+      model,
+      tone,
+      hashtagMax,
+      blogMin,
+      blogMax
+    }, 'StartingClipProcessing');
+
     // 10–70: geração por clipe
     for (let idx = 0; idx < items.length; idx++) {
       const it = items[idx];
       const { id: clipId, start, end } = it;
       const durationSec = Math.max(0, (end ?? 0) - (start ?? 0));
+
+      // Log clip attempt
+      log.debug({ 
+        rootId,
+        clipId,
+        clipIndex: idx,
+        clipDuration: durationSec,
+        clipStart: start,
+        clipEnd: end,
+        score: it.score,
+        totalClips: items.length
+      }, 'ProcessingClip');
 
       try {
         const baseText = transcript.segments
@@ -98,18 +134,22 @@ export async function runTexts(job: Job): Promise<any> {
           const titlePath = path.join(clipDir, 'title.txt');
           const descPath = path.join(clipDir, 'description.md');
           const tagsPath = path.join(clipDir, 'hashtags.txt');
-          
-          await fs.writeFile(titlePath, `Clip Interessante ${idx + 1}\n`);
-          await fs.writeFile(descPath, 'Conteúdo de vídeo gerado automaticamente.\n');
-          await fs.writeFile(tagsPath, 'video clip conteudo\n');
 
-          // Upload fallback
+          // Usar título e descrição padrão se não houver conteúdo
+          await fs.writeFile(titlePath, `Momento Interessante ${idx + 1}`);
+          await fs.writeFile(descPath, `Trecho de vídeo extraído automaticamente. Duração: ${Math.round(durationSec)}s`);
+          await fs.writeFile(tagsPath, '#viral #clipe #melhormomento');
+
+          // Upload fallback content
           const titleKey = `projects/${rootId}/texts/${clipId}/title.txt`;
           const descriptionKey = `projects/${rootId}/texts/${clipId}/description.md`;
           const hashtagsKey = `projects/${rootId}/texts/${clipId}/hashtags.txt`;
-          await uploadFile(bucket, titleKey, titlePath, 'text/plain');
-          await uploadFile(bucket, descriptionKey, descPath, 'text/markdown');
-          await uploadFile(bucket, hashtagsKey, tagsPath, 'text/plain');
+          
+          await Promise.all([
+            uploadFile(bucket, titleKey, titlePath, 'text/plain'),
+            uploadFile(bucket, descriptionKey, descPath, 'text/markdown'),
+            uploadFile(bucket, hashtagsKey, tagsPath, 'text/plain')
+          ]);
 
           outputs.push({ clipId, titleKey, descriptionKey, hashtagsKey });
           continue;
@@ -146,7 +186,30 @@ export async function runTexts(job: Job): Promise<any> {
         ].join('\n');
 
         const prompt = `${system}\n\n${user}`;
+        
+        // Log before OpenAI call
+        log.debug({ 
+          rootId,
+          clipId,
+          model,
+          promptLength: prompt.length,
+          excerptLength: excerpt?.length || 0,
+          baseTextLength: baseText.length
+        }, 'CallingOpenAI');
+
         const raw = await generateJSON<{ title: string; description: string; hashtags: string[] }>(model, schema, prompt);
+
+        // Log OpenAI response
+        log.debug({ 
+          rootId,
+          clipId,
+          titleLength: raw.title?.length || 0,
+          descriptionLength: raw.description?.length || 0,
+          hashtagCount: raw.hashtags?.length || 0,
+          hasTitle: Boolean(raw.title),
+          hasDescription: Boolean(raw.description),
+          hasHashtags: Boolean(raw.hashtags)
+        }, 'OpenAIResponse');
 
         const sanitized = enforceLimits({
           title: raw.title || '',
@@ -155,6 +218,18 @@ export async function runTexts(job: Job): Promise<any> {
           durationSec,
           hashtagMax,
         });
+        
+        // Log after sanitization
+        log.debug({ 
+          rootId,
+          clipId,
+          sanitizedTitleLength: sanitized.title.length,
+          sanitizedDescriptionLength: sanitized.description.length,
+          sanitizedHashtagCount: sanitized.hashtags.length,
+          originalHashtagCount: raw.hashtags?.length || 0,
+          durationSec,
+          hashtagMax
+        }, 'ContentSanitized');
 
         // Write temp files
         const clipDir = path.join(tmpDir, clipId);
@@ -178,26 +253,52 @@ export async function runTexts(job: Job): Promise<any> {
         outputs.push({ clipId, titleKey, descriptionKey, hashtagsKey });
 
       } catch (clipError: any) {
-        log.warn({ rootId, clipId, error: clipError?.message || clipError }, 'ClipGenerationFailed, using fallback');
+        // Log error details
+        const errorDetails = {
+          rootId,
+          clipId,
+          error: {
+            message: clipError?.message || 'Unknown clip error',
+            code: clipError?.code || 'CLIP_GENERATION_ERROR',
+            stack: clipError?.stack?.split('\n').slice(0, 3).join('\n'), // First 3 lines only
+          }
+        };
+        log.warn(errorDetails, 'ClipGenerationFailed, using fallback');
         
-        // Create fallback content for this clip
+        // Create fallback content with error context
         const clipDir = path.join(tmpDir, clipId);
         await fs.mkdir(clipDir, { recursive: true });
         const titlePath = path.join(clipDir, 'title.txt');
         const descPath = path.join(clipDir, 'description.md');
         const tagsPath = path.join(clipDir, 'hashtags.txt');
         
-        await fs.writeFile(titlePath, `Clip ${idx + 1}\n`);
-        await fs.writeFile(descPath, 'Conteúdo interessante de vídeo.\n');
-        await fs.writeFile(tagsPath, 'video clip\n');
+        const fallbackTitle = `Momento #${idx + 1} - Duração: ${Math.round(durationSec)}s`;
+        const fallbackDesc = [
+          '🎬 Trecho de vídeo interessante',
+          '',
+          '✨ Destaques:',
+          '- Conteúdo extraído automaticamente',
+          `- Duração: ${Math.round(durationSec)} segundos`,
+          '- Parte de uma série de momentos selecionados',
+          '',
+          '👉 Assista ao vídeo completo para mais contexto!'
+        ].join('\n');
+        const fallbackTags = '#shorts #trending #viral #clipe #melhormomento';
 
-        // Upload fallback
+        await fs.writeFile(titlePath, fallbackTitle + '\n');
+        await fs.writeFile(descPath, fallbackDesc + '\n'); 
+        await fs.writeFile(tagsPath, fallbackTags + '\n');
+
+        // Upload fallback content
         const titleKey = `projects/${rootId}/texts/${clipId}/title.txt`;
         const descriptionKey = `projects/${rootId}/texts/${clipId}/description.md`;
         const hashtagsKey = `projects/${rootId}/texts/${clipId}/hashtags.txt`;
-        await uploadFile(bucket, titleKey, titlePath, 'text/plain');
-        await uploadFile(bucket, descriptionKey, descPath, 'text/markdown');
-        await uploadFile(bucket, hashtagsKey, tagsPath, 'text/plain');
+        
+        await Promise.all([
+          uploadFile(bucket, titleKey, titlePath, 'text/plain'),
+          uploadFile(bucket, descriptionKey, descPath, 'text/markdown'),
+          uploadFile(bucket, hashtagsKey, tagsPath, 'text/plain')
+        ]);
 
         outputs.push({ clipId, titleKey, descriptionKey, hashtagsKey });
       }
@@ -231,6 +332,18 @@ export async function runTexts(job: Job): Promise<any> {
       required: ['blogMarkdown', 'slug', 'seoTitle', 'metaDescription'],
     };
 
+    // Log start of blog generation
+    log.info({ 
+      rootId,
+      topCount,
+      insightsCount: insights.length,
+      totalClips: items.length,
+      targetWords: {
+        min: blogMin,
+        max: blogMax
+      }
+    }, 'StartingBlogGeneration');
+
     const blogPrompt = [
       'Você é redator PT-BR. Gere UM rascunho de blog (Markdown) com 800–1200 palavras baseado nos melhores clipes abaixo.',
       'Estrutura: \n# Título H1\n\nIntrodução curta\n\n## Seções H2 por tema/clip (use H3 p/ passos/listas)\n\nConclusão com CTA. Evite repetição. Estilo: ' + tone + '.',
@@ -242,6 +355,15 @@ export async function runTexts(job: Job): Promise<any> {
       'Responda em JSON com chaves: { blogMarkdown, slug, seoTitle, metaDescription }',
     ].join('\n');
 
+    // Log before blog OpenAI call
+    log.debug({ 
+      rootId,
+      promptLength: blogPrompt.length,
+      insightsJson: JSON.stringify(insights).length,
+      model,
+      tone
+    }, 'CallingBlogOpenAI');
+
     const blogRes = await generateJSON<{
       blogMarkdown: string;
       slug: string;
@@ -249,20 +371,82 @@ export async function runTexts(job: Job): Promise<any> {
       metaDescription: string;
     }>(model, blogSchema, blogPrompt);
 
+    // Log blog OpenAI response
+    log.debug({ 
+      rootId,
+      blogLength: blogRes.blogMarkdown?.length || 0,
+      slugLength: blogRes.slug?.length || 0,
+      seoTitleLength: blogRes.seoTitle?.length || 0,
+      metaDescriptionLength: blogRes.metaDescription?.length || 0,
+      hasBlog: Boolean(blogRes.blogMarkdown),
+      hasSlug: Boolean(blogRes.slug),
+      hasSeoTitle: Boolean(blogRes.seoTitle),
+      hasMetaDescription: Boolean(blogRes.metaDescription)
+    }, 'BlogOpenAIResponse');
+
+    // Start blog sanitization
+    log.debug({ 
+      rootId,
+      rawBlogLength: blogRes.blogMarkdown?.length || 0,
+      rawSlugLength: blogRes.slug?.length || 0
+    }, 'StartingBlogSanitization');
+
     let blogMd = blogRes.blogMarkdown?.trim() || '';
     // Enforce word count roughly by truncating if way over max
     const words = blogMd.split(/\s+/g);
-    if (words.length > blogMax + 80) blogMd = words.slice(0, blogMax + 80).join(' ') + '\n';
+    const initialWordCount = words.length;
+    
+    if (words.length > blogMax + 80) {
+      blogMd = words.slice(0, blogMax + 80).join(' ') + '\n';
+      log.info({ 
+        rootId,
+        initialWordCount,
+        finalWordCount: blogMax + 80,
+        truncated: true
+      }, 'BlogTruncated');
+    }
 
-    // SEO sanitize
+    // SEO sanitize with detailed logging
     let slug = blogRes.slug?.trim() || makeSlug(blogMd.split('\n')[0] || 'post');
+    const originalSlug = slug;
     slug = makeSlug(slug);
+    
     let seoTitle = (blogRes.seoTitle || '').trim();
-    if (!seoTitle) seoTitle = removeMd(blogMd.split('\n')[0] || '').slice(0, 70);
-    if (seoTitle.length > 70) seoTitle = seoTitle.slice(0, 70).replace(/\s+\S*$/, '').trim();
+    const originalSeoTitle = seoTitle;
+    if (!seoTitle) {
+      seoTitle = removeMd(blogMd.split('\n')[0] || '').slice(0, 70);
+      log.debug({ rootId, source: 'h1' }, 'UsedFallbackSeoTitle');
+    }
+    if (seoTitle.length > 70) {
+      seoTitle = seoTitle.slice(0, 70).replace(/\s+\S*$/, '').trim();
+      log.debug({ rootId, originalLength: originalSeoTitle.length }, 'TruncatedSeoTitle');
+    }
+
     let metaDescription = (blogRes.metaDescription || '').trim();
-    if (!metaDescription) metaDescription = removeMd(blogMd).slice(0, 160);
-    if (metaDescription.length > 160) metaDescription = metaDescription.slice(0, 160).replace(/\s+\S*$/, '').trim();
+    const originalMetaDescription = metaDescription;
+    if (!metaDescription) {
+      metaDescription = removeMd(blogMd).slice(0, 160);
+      log.debug({ rootId, source: 'content' }, 'UsedFallbackMetaDescription');
+    }
+    if (metaDescription.length > 160) {
+      metaDescription = metaDescription.slice(0, 160).replace(/\s+\S*$/, '').trim();
+      log.debug({ rootId, originalLength: originalMetaDescription.length }, 'TruncatedMetaDescription');
+    }
+
+    // Log sanitization results
+    log.info({ 
+      rootId,
+      wordCount: words.length,
+      slugChanged: slug !== originalSlug,
+      seoTitleChanged: seoTitle !== originalSeoTitle,
+      metaDescriptionChanged: metaDescription !== originalMetaDescription,
+      finalLengths: {
+        blog: blogMd.length,
+        slug: slug.length,
+        seoTitle: seoTitle.length,
+        metaDescription: metaDescription.length
+      }
+    }, 'BlogSanitizationComplete');
 
     // Write and upload
     const blogPath = path.join(tmpDir, 'blog.md');
@@ -292,17 +476,80 @@ export async function runTexts(job: Job): Promise<any> {
 
     return { rootId, items: outputs, blogKey, seoKey };
   } catch (error: any) {
+    // Format error details with better structure and limits
     const errorDetails = {
-      message: error?.message || 'Unknown error',
-      code: error?.code || 'UNKNOWN_ERROR',
-      stack: error?.stack?.split('\n').slice(0, 5).join('\n'), // First 5 lines of stack
-      name: error?.name,
-      raw: JSON.stringify(error).slice(0, 500), // Limit raw error size
+      job: {
+        rootId,
+        progress: await job.progress || 0,
+      },
+      error: {
+        message: error?.message || 'Unknown error in text generation',
+        code: error?.code || 'TEXTS_WORKER_ERROR',
+        name: error?.name || 'Error',
+        stack: error?.stack?.split('\n').slice(0, 3).join('\n'), // First 3 lines only
+        context: JSON.stringify(error).slice(0, 200), // Limited context
+      },
+      meta: {
+        timestamp: new Date().toISOString(),
+        worker: 'texts',
+        severity: 'error'
+      }
     };
-    log.error({ rootId, error: errorDetails }, 'TextsFailed');
-    throw error;
+
+    // Log error with full context
+    log.error(errorDetails, 'TextsWorkerFailed');
+
+    // Try to create a minimal emergency fallback for any partial content
+    try {
+      // Ensure blog files exist even if empty/minimal
+      const blogPath = path.join(tmpDir, 'blog.md');
+      const seoPath = path.join(tmpDir, 'seo.json');
+      
+      await fs.writeFile(blogPath, '# Conteúdo em Processamento\n\nEste post está sendo gerado. Por favor, tente novamente em alguns minutos.\n');
+      await fs.writeFile(seoPath, JSON.stringify({
+        slug: 'post-em-processamento',
+        seoTitle: 'Conteúdo em Processamento',
+        metaDescription: 'Este conteúdo está sendo gerado. Por favor, tente novamente em alguns minutos.'
+      }, null, 2));
+
+      const blogKey = `projects/${rootId}/texts/blog.md`;
+      const seoKey = `projects/${rootId}/texts/seo.json`;
+      
+      await Promise.all([
+        uploadFile(bucket, blogKey, blogPath, 'text/markdown'),
+        uploadFile(bucket, seoKey, seoPath, 'application/json')
+      ]);
+
+      log.info({ rootId }, 'EmergencyFallbackCreated');
+    } catch (fallbackError: any) {
+      log.error({ 
+        rootId, 
+        error: fallbackError?.message || 'Unknown fallback error'
+      }, 'EmergencyFallbackFailed');
+    }
+
+    // Rethrow with better context
+    const enrichedError = Object.assign(
+      new Error(error?.message || 'Text generation failed'),
+      { 
+        name: 'TextsWorkerError',
+        originalError: error,
+        details: errorDetails 
+      }
+    );
+    throw enrichedError;
   } finally {
-    try { await fs.rm(tmpDir, { recursive: true, force: true }); } catch {}
+    // Cleanup with better error handling
+    try { 
+      await fs.rm(tmpDir, { recursive: true, force: true }); 
+      log.debug({ rootId, tmpDir }, 'CleanupComplete');
+    } catch (cleanupError: any) {
+      log.warn({ 
+        rootId, 
+        tmpDir,
+        error: cleanupError?.message || 'Unknown cleanup error'
+      }, 'CleanupFailed');
+    }
   }
 }
 

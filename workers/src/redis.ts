@@ -8,6 +8,15 @@ if (!url) {
 }
 
 export const connection = new Redis(url, {
-  maxRetriesPerRequest: null,
+  maxRetriesPerRequest: 3,
   enableOfflineQueue: false,
+  enableReadyCheck: false,
+  connectionName: 'cortai-worker',
+  retryStrategy(times: number) {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  },
+  // Limitar conexões por instância
+  maxLoadingRetryTime: 2000,
+  disconnectTimeout: 2000,
 });
