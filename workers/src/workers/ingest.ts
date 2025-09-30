@@ -190,35 +190,22 @@ async function ensureBundledBinary(): Promise<string> {
   return YOUTUBE_DL_PATH;
 }
 
-async function configureYtdl(): Promise<typeof youtubedl> {
-  const logger = pino({ name: 'ytdl-config' });
-  
-  // Verificar se temos um binário do yt-dlp configurado
-  if (process.env.YTDL_BINARY_PATH) {
-    try {
-      await fs.access(process.env.YTDL_BINARY_PATH, fsConstants.X_OK);
-      logger.info({ path: process.env.YTDL_BINARY_PATH }, 'Using configured yt-dlp binary');
-      return youtubedl;
-    } catch (error) {
-      logger.warn({ error: (error as Error)?.message }, 'Configured yt-dlp binary not accessible');
-    }
-  }
-
-  // Usar binário padrão do youtube-dl-exec
+async function configureYtdl() {
   try {
-    await youtubedl('--version');
-    logger.info('Using default yt-dlp binary');
-    return youtubedl;
+    if (process.env.YTDL_BINARY_PATH) {
+      await fs.access(ytdlBinaryPath, fsConstants.X_OK);
+      return youtubedl.create(ytdlBinaryPath);
+    }
   } catch (error) {
-    logger.error({ error: (error as Error)?.message }, 'Failed to configure yt-dlp');
-    throw new Error('No working yt-dlp binary found');
-  }
+    log.warn({ error: (error as Error)?.message }, 'Configured YTDL binary missing, falling back');
   }
 
   try {
     await fs.access(ytdlBinaryPath, fsConstants.X_OK);
     return youtubedl.create(ytdlBinaryPath);
-  } catch {}
+  } catch {
+    // If access check fails, continue to next fallback
+  }
 
   try {
     const bundledPath = await ensureBundledBinary();
@@ -276,68 +263,27 @@ interface StoragePublicUrlResult {
 
 async function downloadYoutubeVideo(url: string, tempDir: string): Promise<string> {
   const videoPath = path.join(tempDir, 'video.mp4');
-  const logger = pino({ name: 'youtube-dl' });
   
   try {
-    logger.info({ url }, 'Configuring yt-dlp');
-    const ytdl = await configureYtdl();
-    
     // Primeiro obter informações do vídeo
-    logger.info({ url }, 'Fetching video info');
-    const info = await ytdl(url, {
+    const info = await youtubedl(url, {
       dumpSingleJson: true,
       noCheckCertificates: true,
       noWarnings: true
     });
 
-    logger.info('Video info fetched');
-
-    // Depois baixar o vídeo com configurações otimizadas
-    logger.info({ url, path: videoPath }, 'Downloading video');
-    await ytdl(url, {
+    // Depois baixar o vídeo
+    await youtubedl(url, {
       output: videoPath,
-      format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/mp4',
+      format: 'mp4',
       noCheckCertificates: true,
       noWarnings: true,
-      retries: 3,
-      embedThumbnail: true,
-      addHeader: [
-        'referer:youtube.com',
-        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36'
-      ]
+      preferFreeFormats: true
     });
     
-    // Verificar se o arquivo foi baixado com sucesso
-    const stats = await fs.stat(videoPath);
-    if (stats.size === 0) {
-      throw new Error('Downloaded file is empty');
-    }
-    
-    log.info({ videoPath, size: stats.size }, 'Video downloaded successfully');
-    // Verificar se o arquivo foi baixado com sucesso
-    const fileStats = await fs.stat(videoPath);
-    if (fileStats.size === 0) {
-      throw new Error('Downloaded file is empty');
-    }
-    
-    log.info({ videoPath, size: fileStats.size }, 'Video downloaded successfully');
     return videoPath;
   } catch (error: any) {
-    log.error({ 
-      error: error.message,
-      stdout: error.stdout,
-      stderr: error.stderr,
-      url 
-    }, 'Failed to download YouTube video');
-
-    // Tentar extrair mais informações do erro
-    const errorDetails = [
-      error.message,
-      error.stderr,
-      error.stdout
-    ].filter(Boolean).join('\n');
-
-    throw new UnrecoverableError(`Failed to download YouTube video: ${errorDetails}`);
+    throw new UnrecoverableError(`Failed to download YouTube video: ${error?.message || 'Unknown error'}`);
   }
 }
 
@@ -364,12 +310,12 @@ async function processVideoFile(videoPath: string, jobId: string, rootId: string
     rootId,
     storagePaths: {
       video: videoPath,
-      audio: videoPath.replace('.mp4', '.mp3'),
-      info: videoPath.replace('.mp4', '.json')
+      audio: videoPath, // assumindo que é o mesmo path por enquanto
+      info: JSON.stringify(info)
     },
-    duration: info.duration,
-    title: info.title,
-    url: videoPath
+    duration: info.duration || 0,
+    title: info.title || path.basename(videoPath, path.extname(videoPath)),
+    url: videoPath // usando o path local como url por enquanto
   };
 }
 
