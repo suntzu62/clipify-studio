@@ -9,15 +9,10 @@ if (!url && process.env.NODE_ENV === 'production') {
 }
 
 export const connection = new Redis(url || fallbackUrl, {
-  maxRetriesPerRequest: 3,
-  enableOfflineQueue: false,
-  enableReadyCheck: false,
+  // Configuração básica para compatibilidade com BullMQ
   connectionName: 'cortai-worker',
   retryStrategy(times: number) {
     const delay = Math.min(times * 50, 2000);
     return delay;
-  },
-  // Limitar conexões por instância
-  maxLoadingRetryTime: 2000,
-  disconnectTimeout: 2000,
+  }
 });

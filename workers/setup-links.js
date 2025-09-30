@@ -12,8 +12,8 @@ console.log('Environment variables:', Object.keys(process.env));
 // Cria links simbólicos para os arquivos necessários em produção
 if (isProduction) {
   try {
-    const projectRoot = process.env.RENDER_PROJECT_DIR || '/opt/render/project/src';
-    console.log('Project root:', projectRoot);
+    const projectRoot = '/opt/render/project/src';
+    console.log('Project root:', projectRoot, '(absolute path)');
     const projectSrc = path.join(projectRoot, 'src');
     const currentDir = __dirname;
     
