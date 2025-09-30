@@ -30,16 +30,21 @@ function getConcurrency(queueName: string): number {
   return Number(specific ?? process.env.WORKERS_CONCURRENCY ?? 2);
 }
 
-function getLimiter(queueName: string): { max: number; duration: number } | undefined {
+interface RateLimitConfig {
+  max: number;
+  duration: number;
+}
+
+function getLimiter(queueName: string): RateLimitConfig | undefined {
   // Apply rate limits for external APIs
   if (queueName === QUEUES.TRANSCRIBE || queueName === QUEUES.RANK || queueName === QUEUES.TEXTS) {
-    const max = Number(process.env.OPENAI_RATE_MAX ?? 10);
-    const duration = Number(process.env.OPENAI_RATE_MS ?? 1000);
+    const max = Math.max(1, Number(process.env.OPENAI_RATE_MAX) || 10);
+    const duration = Math.max(100, Number(process.env.OPENAI_RATE_MS) || 1000);
     return { max, duration };
   }
   if (queueName === QUEUES.EXPORT) {
-    const max = Number(process.env.YOUTUBE_RATE_MAX ?? 10);
-    const duration = Number(process.env.YOUTUBE_RATE_MS ?? 1000);
+    const max = Math.max(1, Number(process.env.YOUTUBE_RATE_MAX) || 10);
+    const duration = Math.max(100, Number(process.env.YOUTUBE_RATE_MS) || 1000);
     return { max, duration };
   }
   return undefined;
@@ -131,9 +136,11 @@ export const makeWorker = (queueName: string) => {
       }
     },
     {
-      connection,
+      connection: bullmqConnection,
       concurrency,
-      limiter,
+      limiter: limiter ? {
+        ...limiter
+      } : undefined,
       // BullMQ default settings
       removeOnComplete: { count: 1000 },
       removeOnFail: { count: 1000 }
@@ -226,11 +233,7 @@ export const makeWorker = (queueName: string) => {
     {
       connection: bullmqConnection,
       concurrency,
-      limiter: limiter ? {
-        max: limiter.max,
-        duration: limiter.duration,
-        groupKey: queueName
-      } : undefined
+      limiter: limiter ? limiter : undefined
     }
   );
   
@@ -277,10 +280,7 @@ export const makeWorker = (queueName: string) => {
     { 
       connection: bullmqConnection,
       concurrency,
-      limiter: limiter ? {
-        max: limiter.max,
-        duration: limiter.duration
-      } : undefined
+      limiter: limiter ? limiter : undefined
     }
   )
     .on('progress', (job, progress) => {
