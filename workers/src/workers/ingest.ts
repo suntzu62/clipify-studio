@@ -259,13 +259,85 @@ interface StoragePublicUrlResult {
   } | null;
 }
 
+async function downloadYoutubeVideo(url: string, tempDir: string): Promise<string> {
+  const videoPath = path.join(tempDir, 'video.mp4');
+  
+  try {
+    // Primeiro obter informações do vídeo
+    const info = await youtubedl(url, {
+      dumpSingleJson: true,
+      noCheckCertificates: true,
+      noWarnings: true
+    });
+
+    // Depois baixar o vídeo
+    await youtubedl(url, {
+      output: videoPath,
+      format: 'mp4',
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true
+    });
+    
+    return videoPath;
+  } catch (error: any) {
+    throw new UnrecoverableError(`Failed to download YouTube video: ${error?.message || 'Unknown error'}`);
+  }
+}
+
+async function processVideoFile(videoPath: string, jobId: string, rootId: string | null): Promise<IngestResult> {
+  // Extrai informações do vídeo
+  const info: VideoInfo = await new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(videoPath, (err, metadata) => {
+      if (err) return reject(err);
+      
+      const videoStream = metadata.streams.find(s => s.codec_type === 'video');
+      if (!videoStream) return reject(new Error('No video stream found'));
+      
+      resolve({
+        duration: metadata.format.duration || 0,
+        width: videoStream.width || 1920,
+        height: videoStream.height || 1080,
+        fps: eval(videoStream.r_frame_rate || '30/1'),
+        title: path.basename(videoPath, path.extname(videoPath))
+      });
+    });
+  });
+
+  return {
+    jobId,
+    rootId,
+    videoPath,
+    info
+  };
+}
+
+async function ensureRootId(rootId: string | undefined): Promise<string> {
+  if (!rootId) {
+    return `ingest-${Date.now()}`;
+  }
+  return rootId;
+}
+
 export async function runIngest(job: Job): Promise<IngestResult> {
-  const { filePath, rootId } = job.data;
-  const jobId = job.id;
+  const { filePath, url, rootId: inputRootId } = job.data;
+  const jobId = job.id || 'unknown';
+  const rootId = await ensureRootId(inputRootId);
 
   // Validação melhorada de entrada
-  if (!filePath) {
-    throw new UnrecoverableError('INVALID_INPUT: filePath is required');
+  if (!filePath && !url) {
+    throw new UnrecoverableError('INVALID_INPUT: filePath or url is required');
+  }
+
+  // Se for URL do YouTube, vamos baixar o vídeo primeiro
+  if (url && url.includes('youtube.com')) {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cortai-'));
+    try {
+      const videoPath = await downloadYoutubeVideo(url, tempDir);
+      return await processVideoFile(videoPath, jobId, rootId);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   if (!rootId) {
