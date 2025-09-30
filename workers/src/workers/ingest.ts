@@ -190,14 +190,29 @@ async function ensureBundledBinary(): Promise<string> {
   return YOUTUBE_DL_PATH;
 }
 
-async function configureYtdl() {
-  try {
-    if (process.env.YTDL_BINARY_PATH) {
-      await fs.access(ytdlBinaryPath, fsConstants.X_OK);
-      return youtubedl.create(ytdlBinaryPath);
+async function configureYtdl(): Promise<typeof youtubedl> {
+  const logger = pino({ name: 'ytdl-config' });
+  
+  // Verificar se temos um binário do yt-dlp configurado
+  if (process.env.YTDL_BINARY_PATH) {
+    try {
+      await fs.access(process.env.YTDL_BINARY_PATH, fsConstants.X_OK);
+      logger.info({ path: process.env.YTDL_BINARY_PATH }, 'Using configured yt-dlp binary');
+      return youtubedl;
+    } catch (error) {
+      logger.warn({ error: (error as Error)?.message }, 'Configured yt-dlp binary not accessible');
     }
+  }
+
+  // Usar binário padrão do youtube-dl-exec
+  try {
+    await youtubedl('--version');
+    logger.info('Using default yt-dlp binary');
+    return youtubedl;
   } catch (error) {
-    log.warn({ error: (error as Error)?.message }, 'Configured YTDL binary missing, falling back');
+    logger.error({ error: (error as Error)?.message }, 'Failed to configure yt-dlp');
+    throw new Error('No working yt-dlp binary found');
+  }
   }
 
   try {
@@ -261,27 +276,68 @@ interface StoragePublicUrlResult {
 
 async function downloadYoutubeVideo(url: string, tempDir: string): Promise<string> {
   const videoPath = path.join(tempDir, 'video.mp4');
+  const logger = pino({ name: 'youtube-dl' });
   
   try {
+    logger.info({ url }, 'Configuring yt-dlp');
+    const ytdl = await configureYtdl();
+    
     // Primeiro obter informações do vídeo
-    const info = await youtubedl(url, {
+    logger.info({ url }, 'Fetching video info');
+    const info = await ytdl(url, {
       dumpSingleJson: true,
       noCheckCertificates: true,
       noWarnings: true
     });
 
-    // Depois baixar o vídeo
-    await youtubedl(url, {
+    logger.info('Video info fetched');
+
+    // Depois baixar o vídeo com configurações otimizadas
+    logger.info({ url, path: videoPath }, 'Downloading video');
+    await ytdl(url, {
       output: videoPath,
-      format: 'mp4',
+      format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/mp4',
       noCheckCertificates: true,
       noWarnings: true,
-      preferFreeFormats: true
+      retries: 3,
+      embedThumbnail: true,
+      addHeader: [
+        'referer:youtube.com',
+        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36'
+      ]
     });
     
+    // Verificar se o arquivo foi baixado com sucesso
+    const stats = await fs.stat(videoPath);
+    if (stats.size === 0) {
+      throw new Error('Downloaded file is empty');
+    }
+    
+    log.info({ videoPath, size: stats.size }, 'Video downloaded successfully');
+    // Verificar se o arquivo foi baixado com sucesso
+    const fileStats = await fs.stat(videoPath);
+    if (fileStats.size === 0) {
+      throw new Error('Downloaded file is empty');
+    }
+    
+    log.info({ videoPath, size: fileStats.size }, 'Video downloaded successfully');
     return videoPath;
   } catch (error: any) {
-    throw new UnrecoverableError(`Failed to download YouTube video: ${error?.message || 'Unknown error'}`);
+    log.error({ 
+      error: error.message,
+      stdout: error.stdout,
+      stderr: error.stderr,
+      url 
+    }, 'Failed to download YouTube video');
+
+    // Tentar extrair mais informações do erro
+    const errorDetails = [
+      error.message,
+      error.stderr,
+      error.stdout
+    ].filter(Boolean).join('\n');
+
+    throw new UnrecoverableError(`Failed to download YouTube video: ${errorDetails}`);
   }
 }
 
