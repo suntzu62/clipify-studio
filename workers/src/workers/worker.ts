@@ -182,14 +182,43 @@ export const makeWorker = (queueName: string) => {
         error: error?.message
       }, 'WorkerError');
     });
-  );
   
   // Configurar worker com cleanup adequado
   const worker = new Worker(
     queueName,
     async (job: Job) => {
+      const startTime = Date.now();
+      const jobId = job.id;
+      const rootId = job.data?.rootId;
+
       try {
-        return await processJob(queueName, job);
+        let result;
+        switch (queueName) {
+          case QUEUES.INGEST:
+            result = await runIngest(job);
+            break;
+          case QUEUES.TRANSCRIBE:
+            result = await runTranscribe(job);
+            break;
+          case QUEUES.SCENES:
+            result = await runScenes(job);
+            break;
+          case QUEUES.RANK:
+            result = await runRank(job);
+            break;
+          case QUEUES.RENDER:
+            result = await runRender(job);
+            break;
+          case QUEUES.TEXTS:
+            result = await runTexts(job);
+            break;
+          case QUEUES.EXPORT:
+            result = await runExport(job);
+            break;
+          default:
+            throw new Error(`Unknown queue: ${queueName}`);
+        }
+        return result;
       } finally {
         // Garantir que conexões são limpas após cada job
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -198,12 +227,15 @@ export const makeWorker = (queueName: string) => {
     {
       connection,
       concurrency,
-      limiter,
+      limiter: limiter ? {
+        max: limiter.max,
+        duration: limiter.duration
+      } : undefined,
       autorun: true,
-      // Adicionar delays entre jobs para evitar sobrecarga
-      settings: {
-        stalledInterval: 30000,
-        maxStalledCount: 1,
+      // BullMQ configs
+      prefix: 'bull',
+      metrics: {
+        maxDataPoints: 1000
       }
     }
   );
@@ -211,7 +243,7 @@ export const makeWorker = (queueName: string) => {
   log.info({ 
     queue: queueName, 
     concurrency,
-    limiter: limiter ? `${limiter.max}/${limiter.duration}ms` : 'none',
+    limiter: limiter ? `${limiter?.max}/${limiter?.duration}ms` : 'none',
     redisConnected: !!connection
   }, `Starting worker for queue: ${queueName}`);
   
