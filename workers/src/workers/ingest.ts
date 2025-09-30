@@ -14,6 +14,7 @@ import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
 import { runFFmpeg } from '../lib/ffmpeg';
 import type { VideoInfo } from '../types/pipeline';
+import { execFile } from 'child_process';
 
 const log = pino({ name: 'ingest' });
 
@@ -75,19 +76,51 @@ async function ensureRootId(rootId: string | undefined): Promise<string> {
   return rootId;
 }
 
+async function ensureYtdlp(): Promise<string> {
+  // Primeiro tentar usar o yt-dlp do sistema
+  try {
+    // Tentar usar o binário do PATH primeiro
+    await new Promise((resolve, reject) => {
+      execFile('yt-dlp', ['--version'], (error) => {
+        if (error) reject(error);
+        else resolve(null);
+      });
+    });
+    log.info('Found yt-dlp in PATH');
+    return 'yt-dlp';
+  } catch (error) {
+    log.warn({ error: (error as Error)?.message }, 'yt-dlp not found in PATH');
+  }
+
+  // Tentar o caminho configurado
+  try {
+    const ytdlpPath = process.env.YTDL_BINARY || '/usr/local/bin/yt-dlp';
+    await fs.access(ytdlpPath, fsConstants.X_OK);
+    log.info({ ytdlpPath }, 'Found configured yt-dlp');
+    return ytdlpPath;
+  } catch (error) {
+    log.error({ error: (error as Error)?.message }, 'No working yt-dlp found');
+    throw new Error('yt-dlp not found. Please install it first.');
+  }
+}
+
 async function downloadYoutubeVideo(url: string, outputDir: string): Promise<string> {
   const videoPath = path.join(outputDir, 'video.mp4');
   
   try {
+    const ytdlpPath = await ensureYtdlp();
+    log.info({ ytdlpPath, url }, 'Starting YouTube download');
+
     // Primeiro pegar info do vídeo
-    await youtubedl(url, {
+    const ytdl = youtubedl.create(ytdlpPath);
+    await ytdl(url, {
       dumpSingleJson: true,
       noCheckCertificates: true,
       noWarnings: true
     });
 
     // Depois baixar o vídeo
-    await youtubedl(url, {
+    await ytdl(url, {
       output: videoPath,
       format: 'mp4',
       noCheckCertificates: true,
