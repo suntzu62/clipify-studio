@@ -134,10 +134,9 @@ export const makeWorker = (queueName: string) => {
       connection,
       concurrency,
       limiter,
-      settings: {
-        lockDuration: 30000,
-        lockRenewTime: 15000,
-      }
+      // BullMQ default settings
+      removeOnComplete: { count: 1000 },
+      removeOnFail: { count: 1000 }
     })
     .on('completed', (job) => {
       const rootId = job.data?.rootId;
@@ -149,11 +148,11 @@ export const makeWorker = (queueName: string) => {
         duration 
       }, 'JobCompleted');
       
-      emitWorkerEvent('jobCompleted', { 
-        jobId: job.id, 
-        queueName,
+      emitWorkerEvent('completed', { 
+        jobId: job.id || '',
+        queue: queueName,
         rootId,
-        duration
+        returnvalue: { duration }
       });
     })
     .on('failed', (job, error) => {
@@ -168,11 +167,11 @@ export const makeWorker = (queueName: string) => {
           error: error?.message
         }, 'JobFailed');
 
-        emitWorkerEvent('jobFailed', { 
-          jobId: job.id,
-          queueName,
+        emitWorkerEvent('failed', { 
+          jobId: job.id || '',
+          queue: queueName,
           rootId,
-          error: error?.message
+          failedReason: error?.message
         });
       }
     })
@@ -228,15 +227,11 @@ export const makeWorker = (queueName: string) => {
       connection,
       concurrency,
       limiter: limiter ? {
-        max: limiter.max,
-        duration: limiter.duration
+        max: limiter?.max || 0,
+        duration: limiter?.duration || 0
       } : undefined,
       autorun: true,
-      // BullMQ configs
-      prefix: 'bull',
-      metrics: {
-        maxDataPoints: 1000
-      }
+      prefix: 'bull'
     }
   );
   
