@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { ConnectionOptions } from 'bullmq';
 import 'dotenv/config';
 
 const url = process.env.REDIS_URL || process.env.REDISCLOUD_URL || process.env.REDIS_TLS_URL;
@@ -8,11 +9,22 @@ if (!url && process.env.NODE_ENV === 'production') {
   console.error('Warning: No Redis URL found in environment variables. Using fallback URL.');
 }
 
-export const connection = new Redis(url || fallbackUrl, {
-  // Configuração básica para compatibilidade com BullMQ
-  connectionName: 'cortai-worker',
-  retryStrategy(times: number) {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  }
-});
+// Parse Redis URL to get host, port, and password
+const parseRedisUrl = (url: string) => {
+  const parsed = new URL(url);
+  return {
+    host: parsed.hostname,
+    port: Number(parsed.port) || 6379,
+    password: parsed.password || undefined,
+    tls: parsed.protocol === 'rediss:' ? {} : undefined
+  };
+};
+
+// BullMQ specific connection
+export const bullmqConnection: ConnectionOptions = {
+  ...parseRedisUrl(url || fallbackUrl),
+  connectTimeout: 10000
+};
+
+// General Redis connection for other purposes
+export const connection = new Redis(url || fallbackUrl);

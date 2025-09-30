@@ -1,5 +1,5 @@
 import { Worker, Job } from 'bullmq';
-import { connection } from '../redis';
+import { bullmqConnection } from '../redis';
 import { QUEUES } from '../queues';
 import { runIngest } from './ingest';
 import { runTranscribe } from './transcribe';
@@ -224,14 +224,13 @@ export const makeWorker = (queueName: string) => {
       }
     },
     {
-      connection,
+      connection: bullmqConnection,
       concurrency,
       limiter: limiter ? {
-        max: limiter?.max || 0,
-        duration: limiter?.duration || 0
-      } : undefined,
-      autorun: true,
-      prefix: 'bull'
+        max: limiter.max,
+        duration: limiter.duration,
+        groupKey: queueName
+      } : undefined
     }
   );
   
@@ -239,13 +238,7 @@ export const makeWorker = (queueName: string) => {
     queue: queueName, 
     concurrency,
     limiter: limiter ? `${limiter?.max}/${limiter?.duration}ms` : 'none',
-    redisConnected: !!connection,
-    redisConfig: {
-      host: connection.options?.host,
-      port: connection.options?.port,
-      tls: !!connection.options?.tls,
-      db: connection.options?.db
-    }
+    redisConfig: bullmqConnection
   }, `Starting worker for queue: ${queueName}`);
   
   return new Worker(
@@ -281,7 +274,14 @@ export const makeWorker = (queueName: string) => {
       }
       return { ok: true, queue: queueName, id: job.id };
     },
-    { connection, concurrency, limiter }
+    { 
+      connection: bullmqConnection,
+      concurrency,
+      limiter: limiter ? {
+        max: limiter.max,
+        duration: limiter.duration
+      } : undefined
+    }
   )
     .on('progress', (job, progress) => {
       const rootId = (job.data as any)?.rootId;
