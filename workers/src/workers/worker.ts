@@ -239,7 +239,13 @@ export const makeWorker = (queueName: string) => {
     queue: queueName, 
     concurrency,
     limiter: limiter ? `${limiter?.max}/${limiter?.duration}ms` : 'none',
-    redisConnected: !!connection
+    redisConnected: !!connection,
+    redisConfig: {
+      host: connection.options?.host,
+      port: connection.options?.port,
+      tls: !!connection.options?.tls,
+      db: connection.options?.db
+    }
   }, `Starting worker for queue: ${queueName}`);
   
   return new Worker(

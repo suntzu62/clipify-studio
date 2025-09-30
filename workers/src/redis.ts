@@ -1,13 +1,14 @@
 import Redis from 'ioredis';
 import 'dotenv/config';
 
-const url = process.env.REDIS_URL;
+const url = process.env.REDIS_URL || process.env.REDISCLOUD_URL || process.env.REDIS_TLS_URL;
+const fallbackUrl = 'redis://localhost:6379';
 
-if (!url) {
-  throw new Error('Missing REDIS_URL. Create workers/.env and set REDIS_URL to a valid redis:// or rediss:// connection string (e.g., Upstash).');
+if (!url && process.env.NODE_ENV === 'production') {
+  console.error('Warning: No Redis URL found in environment variables. Using fallback URL.');
 }
 
-export const connection = new Redis(url, {
+export const connection = new Redis(url || fallbackUrl, {
   maxRetriesPerRequest: 3,
   enableOfflineQueue: false,
   enableReadyCheck: false,

@@ -4,10 +4,16 @@ const path = require('path');
 // Verifica se estamos em produção
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Log do ambiente e diretório atual
+console.log('Environment:', process.env.NODE_ENV);
+console.log('Current directory:', __dirname);
+console.log('Environment variables:', Object.keys(process.env));
+
 // Cria links simbólicos para os arquivos necessários em produção
 if (isProduction) {
   try {
-    const projectRoot = '/opt/render/project/src';
+    const projectRoot = process.env.RENDER_PROJECT_DIR || '/opt/render/project/src';
+    console.log('Project root:', projectRoot);
     const projectSrc = path.join(projectRoot, 'src');
     const currentDir = __dirname;
     
