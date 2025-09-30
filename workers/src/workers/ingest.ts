@@ -285,7 +285,7 @@ async function downloadYoutubeVideo(url: string, tempDir: string): Promise<strin
   }
 }
 
-async function processVideoFile(videoPath: string, jobId: string, rootId: string | null): Promise<IngestResult> {
+async function processVideoFile(videoPath: string, jobId: string, rootId: string): Promise<IngestResult> {
   // Extrai informações do vídeo
   const info: VideoInfo = await new Promise((resolve, reject) => {
     ffmpeg.ffprobe(videoPath, (err, metadata) => {
@@ -305,10 +305,15 @@ async function processVideoFile(videoPath: string, jobId: string, rootId: string
   });
 
   return {
-    jobId,
     rootId,
-    videoPath,
-    info
+    storagePaths: {
+      video: videoPath,
+      audio: videoPath.replace('.mp4', '.mp3'),
+      info: videoPath.replace('.mp4', '.json')
+    },
+    duration: info.duration,
+    title: info.title,
+    url: videoPath
   };
 }
 
