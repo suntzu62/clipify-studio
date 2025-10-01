@@ -638,7 +638,7 @@ async function uploadToStorage(
           info: infoKey
         },
         duration: Math.floor(info.duration),
-        title: info.title,
+        title: info.title || 'Untitled',
         url: info.webpage_url || videoUrl?.publicUrl || `${bucket}/${sourceKey}`
       };
     
@@ -772,7 +772,7 @@ async function processUploadedVideo(
       rootId: result.rootId,
       storagePaths: result.storagePaths,
       duration: result.duration,
-      title: result.title,
+      title: result.title || 'Untitled',
       url: result.url
     };
     
