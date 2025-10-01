@@ -285,7 +285,10 @@ async function downloadYoutubeVideo(url: string, tempDir: string): Promise<strin
   }
 }
 
-async function processVideoFile(videoPath: string, jobId: string, rootId: string | null): Promise<IngestResult> {
+async function processVideoFile(videoPath: string, jobId: string, rootId: string): Promise<IngestResult> {
+  if (!rootId) {
+    throw new Error('rootId is required');
+  }
   // Extrai informações do vídeo
   const info: VideoInfo = await new Promise((resolve, reject) => {
     ffmpeg.ffprobe(videoPath, (err, metadata) => {
@@ -294,21 +297,27 @@ async function processVideoFile(videoPath: string, jobId: string, rootId: string
       const videoStream = metadata.streams.find(s => s.codec_type === 'video');
       if (!videoStream) return reject(new Error('No video stream found'));
       
+      const videoFileName = path.basename(videoPath);
       resolve({
         duration: metadata.format.duration || 0,
+        title: path.basename(videoFileName, path.extname(videoFileName)) || 'Untitled',
         width: videoStream.width || 1920,
         height: videoStream.height || 1080,
-        fps: eval(videoStream.r_frame_rate || '30/1'),
-        title: path.basename(videoPath, path.extname(videoPath))
+        fps: eval(videoStream.r_frame_rate || '30/1')
       });
     });
   });
 
   return {
-    jobId,
     rootId,
-    videoPath,
-    info
+    storagePaths: {
+      video: videoPath,
+      audio: videoPath.replace('.mp4', '.wav'),
+      info: videoPath.replace('.mp4', '.info.json')
+    },
+    duration: info.duration,
+    title: info.title,
+    url: `file://${videoPath}`
   };
 }
 
@@ -743,7 +752,7 @@ async function processUploadedVideo(
     
     // Step 4: Create synthetic info.json (70-75%)
     const infoPath = path.join(tempDir, 'info.json');
-    const info = {
+    const info: VideoInfo = {
       duration: durationSec,
       title: title || 'Untitled',
       webpage_url: `upload://${fileName}`,
