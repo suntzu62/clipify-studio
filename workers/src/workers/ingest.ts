@@ -745,7 +745,7 @@ async function processUploadedVideo(
     const infoPath = path.join(tempDir, 'info.json');
     const info = {
       duration: durationSec,
-      title,
+      title: title || 'Untitled',
       webpage_url: `upload://${fileName}`,
       uploader: 'Direct Upload',
       upload_date: new Date().toISOString().split('T')[0].replace(/-/g, ''),
