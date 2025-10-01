@@ -1,4 +1,5 @@
-import { Worker, Job } from 'bullmq';
+import { Job, Worker } from 'bullmq';
+import { enqueueUnique } from '../lib/bullmq';
 import { bullmqConnection } from '../redis';
 import { QUEUES } from '../queues';
 import { runIngest } from '../workers/ingest';
@@ -199,18 +200,30 @@ export const makeWorker = (queueName: string) => {
 
       try {
         let result;
+        log.info({ jobId, rootId, queueName, data: job.data }, 'ProcessingJob');
+        
         switch (queueName) {
           case QUEUES.INGEST:
             result = await runIngest(job);
             break;
           case QUEUES.TRANSCRIBE:
             result = await runTranscribe(job);
+            // After transcription, enqueue scenes and rank
+            await Promise.all([
+              enqueueUnique(QUEUES.SCENES, 'scenes', `${rootId}:scenes`, { rootId, result }),
+              enqueueUnique(QUEUES.RANK, 'rank', `${rootId}:rank`, { rootId, result })
+            ]);
             break;
           case QUEUES.SCENES:
             result = await runScenes(job);
             break;
           case QUEUES.RANK:
             result = await runRank(job);
+            // After ranking, enqueue texts and render
+            await Promise.all([
+              enqueueUnique(QUEUES.TEXTS, 'texts', `${rootId}:texts`, { rootId, result }),
+              enqueueUnique(QUEUES.RENDER, 'render', `${rootId}:render`, { rootId, result })
+            ]);
             break;
           case QUEUES.RENDER:
             result = await runRender(job);

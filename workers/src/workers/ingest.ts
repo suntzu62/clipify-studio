@@ -782,13 +782,27 @@ async function processUploadedVideo(
     
     await job.updateProgress(100);
     
-    // Enqueue transcription
-    await enqueueUnique(
-      QUEUES.TRANSCRIBE,
-      'transcribe', 
-      `${rootId}:transcribe`,
-      { rootId, meta: job.data.meta || {} }
-    );
+    // Enqueue next jobs in pipeline
+    await Promise.all([
+      enqueueUnique(
+        QUEUES.TRANSCRIBE,
+        'transcribe', 
+        `${rootId}:transcribe`,
+        { rootId, meta: job.data.meta || {} }
+      ),
+      enqueueUnique(
+        QUEUES.SCENES,
+        'scenes',
+        `${rootId}:scenes`,
+        { rootId, meta: job.data.meta || {} }
+      ),
+      enqueueUnique(
+        QUEUES.RANK,
+        'rank',
+        `${rootId}:rank`,
+        { rootId, meta: job.data.meta || {} }
+      )
+    ]);
     
     return {
       rootId: result.rootId,
