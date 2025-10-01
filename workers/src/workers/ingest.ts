@@ -335,117 +335,160 @@ async function ensureRootId(rootId: string | undefined): Promise<string> {
   return rootId;
 }
 
-export async function runIngest(job: Job): Promise<IngestResult> {
-  const { filePath, url, rootId: inputRootId } = job.data;
-  const jobId = job.id || 'unknown';
-  const rootId = await ensureRootId(inputRootId);
+// Helper to determine job source
+function determineSource(job: Job): 'youtube' | 'upload' {
+  if (job.data.source) return job.data.source;
+  if (job.data.youtubeUrl) return 'youtube';
+  if (job.data.storagePath) return 'upload';
+  
+  // Legacy support
+  if (job.data.url && job.data.url.includes('youtube')) return 'youtube';
+  if (job.data.filePath) return 'upload';
+  
+  throw new UnrecoverableError('INVALID_INPUT: Cannot determine job source');
+}
 
-  // Validação melhorada de entrada
-  if (!filePath && !url) {
-    throw new UnrecoverableError('INVALID_INPUT: filePath or url is required');
-  }
-
-  // Se for URL do YouTube, vamos baixar o vídeo primeiro
-  if (url && url.includes('youtube.com')) {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cortai-'));
-    try {
-      const videoPath = await downloadYoutubeVideo(url, tempDir);
-      return await processVideoFile(videoPath, jobId, rootId);
-    } finally {
-      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
-    }
-  }
-
-  if (!rootId) {
-    throw new UnrecoverableError('INVALID_INPUT: rootId is required');
-  }
-
-  log.info({ jobId, filePath, rootId }, 'Starting ingest job');
-
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ingest-'));
+// Process YouTube video
+async function processYoutubeVideo(job: Job, youtubeUrl: string): Promise<IngestResult> {
+  const rootId = job.data.rootId || job.id!;
+  const jobId = job.id!;
+  const tempDir = path.join(os.tmpdir(), `cortai-yt-${jobId}`);
   
   try {
-    let processedFile: ProcessedFile;
+    await fs.mkdir(tempDir, { recursive: true });
     
-    // Step 1: Probe video to get duration and metadata
+    log.info({ jobId, youtubeUrl }, 'Processing YouTube video');
+    
+    // Step 1: Download video (0-50%)
+    const videoPath = await downloadYoutubeVideo(youtubeUrl, tempDir);
+    await job.updateProgress(50);
+    
+    log.info({ jobId }, 'YouTube video downloaded');
+    
+    // Step 2: Probe video (50-60%)
     const probeResult = await new Promise<any>((resolve, reject) => {
       const ffprobe = require('fluent-ffmpeg');
-      ffprobe.ffprobe(filePath, (err: any, metadata: any) => {
+      ffprobe.ffprobe(videoPath, (err: any, metadata: any) => {
         if (err) reject(err);
         else resolve(metadata);
       });
     });
-
-    const duration = probeResult.format?.duration || 0;
-    const title = path.basename(filePath).replace(/\.[^/.]+$/, ''); // Remove extension
     
-    processedFile = {
-      path: filePath,
-      duration,
-      title
-    };
+    const durationSec = probeResult.format?.duration || 0;
+    const MIN_DURATION = job.data.meta?.minDuration || 180; // 3 minutes default
     
-    // Step 2: Verify duration
-    if (duration < 600) {
-      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
+    if (durationSec < MIN_DURATION) {
+      throw new UnrecoverableError(`VIDEO_TOO_SHORT: Video must be at least ${MIN_DURATION / 60} minutes long`);
     }
-    await job.updateProgress(40);
-    log.info({ jobId, duration, title }, 'Video probed');
     
-    // Step 3: Create info.json file
-    const processedInfo = path.join(tempDir, 'info.json');
-    const processedMeta: VideoInfo = {
-      duration,
-      title,
-      webpage_url: `upload://${path.basename(filePath)}`
+    await job.updateProgress(60);
+    
+    const title = path.basename(videoPath).replace(/\.[^/.]+$/, '');
+    log.info({ jobId, duration: durationSec, title }, 'YouTube video probed');
+    
+    // Step 3: Extract audio (60-80%)
+    log.info({ jobId }, 'AudioExtractStarted');
+    const audioPath = await extractAudioForUpload(videoPath, tempDir, durationSec, job, 60, 80);
+    log.info({ jobId }, 'AudioExtractOk');
+    
+    // Step 4: Create info.json (80-85%)
+    const infoPath = path.join(tempDir, 'info.json');
+    const info: VideoInfo = {
+      duration: durationSec,
+      title: title || 'YouTube Video',
+      webpage_url: youtubeUrl,
+      ext: path.extname(videoPath).substring(1) || 'mp4',
+      width: probeResult.streams?.[0]?.width || 1920,
+      height: probeResult.streams?.[0]?.height || 1080,
+      dimensions: {
+        width: probeResult.streams?.[0]?.width || 1920,
+        height: probeResult.streams?.[0]?.height || 1080
+      },
+      fps: probeResult.streams?.[0]?.r_frame_rate ? eval(probeResult.streams[0].r_frame_rate) : 30
     };
-    await fs.writeFile(processedInfo, JSON.stringify(processedMeta, null, 2));
+    await fs.writeFile(infoPath, JSON.stringify(info, null, 2));
+    await job.updateProgress(85);
     
-    // Step 4: Extract audio
-    const processedAudio = path.join(tempDir, 'source.wav');
-    await extractAudio(processedFile.path, processedAudio, duration, job);
-    
-    // Step 5: Upload to storage
+    // Step 5: Upload to storage (85-100%)
     log.info({ jobId }, 'UploadStarted');
-    const storageResult = await uploadToStorage(
-      processedFile.path,
-      processedAudio, 
-      processedInfo,
-      rootId,
-      job,
-      processedMeta
-    );
+    const result = await uploadToStorage(videoPath, audioPath, infoPath, rootId, job, info);
     log.info({ jobId }, 'UploadOk');
     
-    // Step 6: Update progress and queue transcription
     await job.updateProgress(100);
-    await enqueueUnique(
-      QUEUES.TRANSCRIBE,
-      'transcribe',
-      `${rootId}:transcribe`,
-      { rootId, meta: job.data.meta || {} }
-    );
     
-    // Step 7: Clean up temp files
-    await fs.rm(tempDir, { recursive: true, force: true });
+    // Enqueue next jobs
+    await Promise.all([
+      enqueueUnique(QUEUES.TRANSCRIBE, 'transcribe', `${rootId}:transcribe`, { rootId, meta: job.data.meta || {} }),
+      enqueueUnique(QUEUES.SCENES, 'scenes', `${rootId}:scenes`, { rootId, meta: job.data.meta || {} }),
+      enqueueUnique(QUEUES.RANK, 'rank', `${rootId}:rank`, { rootId, meta: job.data.meta || {} })
+    ]);
     
-    return storageResult;
+    return {
+      rootId: result.rootId,
+      storagePaths: result.storagePaths,
+      duration: result.duration,
+      title: result.title || 'YouTube Video',
+      url: result.url || youtubeUrl
+    };
+    
   } catch (error: any) {
-    // Clean up on error
+    log.error({ jobId, youtubeUrl, error: error.message }, 'YouTube processing failed');
+    
+    if (error.code === 'VIDEO_TOO_SHORT' || String(error?.message || '').startsWith('VIDEO_TOO_SHORT')) {
+      throw new UnrecoverableError('VIDEO_TOO_SHORT');
+    }
+    
+    throw { code: 'YOUTUBE_PROCESSING_FAILED', message: error.message };
+    
+  } finally {
     try {
       await fs.rm(tempDir, { recursive: true, force: true });
-    } catch (cleanupError: any) {
+      log.info({ jobId }, 'Cleanup completed');
+    } catch (cleanupError) {
       log.warn({ jobId, error: cleanupError }, 'Cleanup failed');
     }
+  }
+}
+
+export async function runIngest(job: Job): Promise<IngestResult> {
+  const jobId = job.id || 'unknown';
+  const { youtubeUrl, storagePath, source, fileName, meta } = job.data;
+  
+  // Determine source (new or legacy parameters)
+  const detectedSource = determineSource(job);
+  
+  // Enhanced logging
+  log.info({ 
+    jobId, 
+    source: detectedSource,
+    youtubeUrl, 
+    storagePath, 
+    fileName,
+    jobDataKeys: Object.keys(job.data)
+  }, 'Processing ingest job with enhanced parameters');
+  
+  // Route to appropriate processor
+  if (detectedSource === 'upload') {
+    const uploadPath = storagePath || job.data.filePath;
+    const uploadFileName = fileName || job.data.fileName || 'video.mp4';
     
-    log.error({ jobId, rootId, error }, 'Ingest failed');
-    
-    // Rethrow video too short error
-    if (error.code === 'VIDEO_TOO_SHORT' || String(error?.message || '').startsWith('VIDEO_TOO_SHORT')) {
-      throw error;
+    if (!uploadPath) {
+      throw new UnrecoverableError('INVALID_INPUT: storagePath is required for upload source');
     }
     
-    throw { code: 'INGEST_FAILED', message: error.message || 'Failed to ingest video' };
+    return await processUploadedVideo(job, uploadPath, uploadFileName);
+    
+  } else if (detectedSource === 'youtube') {
+    const ytUrl = youtubeUrl || job.data.url;
+    
+    if (!ytUrl) {
+      throw new UnrecoverableError('INVALID_INPUT: youtubeUrl is required for youtube source');
+    }
+    
+    return await processYoutubeVideo(job, ytUrl);
+    
+  } else {
+    throw new UnrecoverableError('INVALID_INPUT: source must be "youtube" or "upload"');
   }
 }
 
@@ -744,9 +787,10 @@ async function processUploadedVideo(
     
     const durationSec = probeResult.format?.duration || 0;
     const title = fileName.replace(/\.[^/.]+$/, ''); // Remove extension
+    const MIN_DURATION = job.data.meta?.minDuration || 180; // 3 minutes default
     
-    if (durationSec < 600) {
-      throw new UnrecoverableError('VIDEO_TOO_SHORT: Video must be at least 10 minutes long');
+    if (durationSec < MIN_DURATION) {
+      throw new UnrecoverableError(`VIDEO_TOO_SHORT: Video must be at least ${MIN_DURATION / 60} minutes long`);
     }
     
     await job.updateProgress(40);

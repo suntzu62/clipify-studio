@@ -7,6 +7,10 @@ interface OptimizedPlayerProps {
   url: string;
   title?: string;
   className?: string;
+  playing?: boolean;
+  loop?: boolean;
+  muted?: boolean;
+  controls?: boolean;
 }
 
 const OptimizedPlayer = memo(({ url, title, className }: OptimizedPlayerProps) => {
