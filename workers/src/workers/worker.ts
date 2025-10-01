@@ -1,7 +1,7 @@
 import { Worker, Job } from 'bullmq';
 import { bullmqConnection } from '../redis';
 import { QUEUES } from '../queues';
-import { runIngest } from './ingest';
+import { runIngest } from '../workers/ingest';
 import { runTranscribe } from './transcribe';
 import { runScenes } from './scenes';
 import { runRank } from './rank';
