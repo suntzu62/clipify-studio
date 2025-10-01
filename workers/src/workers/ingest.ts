@@ -298,13 +298,20 @@ async function processVideoFile(videoPath: string, jobId: string, rootId: string
       if (!videoStream) return reject(new Error('No video stream found'));
       
       const videoFileName = path.basename(videoPath);
-      resolve({
-        duration: metadata.format.duration || 0,
+      const info: VideoInfo = {
+        duration: typeof metadata.format.duration === 'string' ? parseFloat(metadata.format.duration) : (metadata.format.duration || 0),
         title: path.basename(videoFileName, path.extname(videoFileName)) || 'Untitled',
         width: videoStream.width || 1920,
         height: videoStream.height || 1080,
-        fps: eval(videoStream.r_frame_rate || '30/1')
-      });
+        fps: typeof videoStream.r_frame_rate === 'string' ? eval(videoStream.r_frame_rate) : 30,
+        dimensions: {
+          width: videoStream.width || 1920,
+          height: videoStream.height || 1080
+        },
+        webpage_url: `file://${videoPath}`,
+        ext: path.extname(videoFileName).substring(1) || 'mp4'
+      };
+      resolve(info);
     });
   });
 
@@ -756,8 +763,14 @@ async function processUploadedVideo(
       duration: durationSec,
       title: title || 'Untitled',
       webpage_url: `upload://${fileName}`,
-      uploader: 'Direct Upload',
-      upload_date: new Date().toISOString().split('T')[0].replace(/-/g, ''),
+      ext: path.extname(fileName).substring(1) || 'mp4',
+      width: probeResult.streams?.[0]?.width || 1920,
+      height: probeResult.streams?.[0]?.height || 1080,
+      dimensions: {
+        width: probeResult.streams?.[0]?.width || 1920,
+        height: probeResult.streams?.[0]?.height || 1080
+      },
+      fps: probeResult.streams?.[0]?.r_frame_rate ? eval(probeResult.streams[0].r_frame_rate) : 30
     };
     await fs.writeFile(infoPath, JSON.stringify(info, null, 2));
     await job.updateProgress(75);
@@ -782,7 +795,7 @@ async function processUploadedVideo(
       storagePaths: result.storagePaths,
       duration: result.duration,
       title: result.title || 'Untitled',
-      url: result.url
+      url: result.url || `upload://${fileName}`
     };
     
   } catch (error: any) {
