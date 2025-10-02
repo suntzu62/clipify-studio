@@ -78,8 +78,10 @@ async function prepareUploadedVideo(
   return { videoPath, infoPath, info };
 }
 
-// Configure youtube-dl-exec to use system binary when available
+// Configure youtube-dl-exec defaults and fallbacks
 const ytdlBinaryPath = process.env.YTDL_BINARY_PATH || '/usr/bin/yt-dlp';
+const DEFAULT_FORMAT = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best';
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
 
 if (ffmpegPath && !process.env.FFMPEG_PATH) {
   process.env.FFMPEG_PATH = ffmpegPath;
@@ -517,32 +519,34 @@ async function downloadVideo(
   job: Job
 ): Promise<{ videoPath: string; infoPath: string; info: VideoInfo }> {
   const outputTemplate = path.join(tempDir, 'source.%(ext)s');
-  const cookiesPath = process.env.YTDLP_COOKIES_PATH;
 
   // First get video info
   const info = await probeVideo(url);
   
   const options: any = {
     output: outputTemplate,
-    format: 'best[height<=1080]',
+    format: process.env.YTDLP_FORMAT || 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
     mergeOutputFormat: 'mp4',
     remuxVideo: 'mp4',
     writeInfoJson: true,
     noPlaylist: true,
-    // Robustness: resume and avoid overwrites
+    noCheckCertificates: true,
+    preferFreeFormats: true,
+    addHeader: [
+      'referer:youtube.com',
+      'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    ],
+    // Robustness settings
     continue: true,
     noOverwrites: true,
-    retries: 4,
+    retries: parseInt(process.env.YTDLP_RETRIES || '3'),
     fragmentRetries: 'infinite',
     retrySleep: 'fragment:exp=1:20',
+    forceIpv4: process.env.YTDLP_FORCE_IP_V4 === 'true',
     limitRate: '15M', // Increased from 5M for faster downloads
     newline: true,
     progressTemplate: 'download:%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
   };
-  
-  if (cookiesPath && await fs.access(cookiesPath).then(() => true).catch(() => false)) {
-    options.cookies = cookiesPath;
-  }
   
   // Set custom ffmpeg path if available
   if (ffmpegPath) {
