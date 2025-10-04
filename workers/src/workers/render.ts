@@ -8,6 +8,7 @@ import { buildASS, type Segment } from '../lib/ass';
 import { runFFmpeg } from '../lib/ffmpeg';
 import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
+import { track } from '../lib/analytics';
 
 const log = pino({ name: 'render' });
 
@@ -30,9 +31,38 @@ export async function runRender(job: Job): Promise<any> {
 
   const { rootId } = job.data as { rootId: string };
   const inputClip = job.data as { clipId?: string; start?: number; end?: number };
+  const userId = job.data.userId || 'unknown';
 
   const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'raw';
   const tmpRoot = `/tmp/${rootId}/render`;
+  const startTime = Date.now();
+
+  log.info({ rootId, jobId: job.id }, 'RenderStarted');
+
+  // Prevent render loops by checking if clips already exist
+  const existingClipsPath = `projects/${rootId}/clips/`;
+  let hasExistingClips = false;
+  
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (supabaseUrl && serviceRoleKey) {
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabase = createClient(supabaseUrl, serviceRoleKey);
+      
+      const { data: existingFiles } = await supabase.storage
+        .from(bucket)
+        .list(`projects/${rootId}/clips`, { limit: 1 });
+      
+      if (existingFiles && existingFiles.length > 0) {
+        hasExistingClips = true;
+        log.info({ rootId, jobId: job.id, existingCount: existingFiles.length }, 'ExistingClipsFound');
+      }
+    }
+  } catch (error) {
+    log.warn({ rootId, error: (error as Error).message }, 'Failed to check existing clips');
+  }
 
   await fs.mkdir(tmpRoot, { recursive: true });
 
@@ -63,7 +93,29 @@ export async function runRender(job: Job): Promise<any> {
     }
 
     if (items.length === 0) {
+      // If no clips to render and we have existing clips, just return success
+      if (hasExistingClips) {
+        log.info({ rootId, jobId: job.id }, 'No new clips to render, existing clips found');
+        return { 
+          success: true, 
+          message: 'Render skipped - clips already exist',
+          clipsGenerated: 0,
+          hasExistingClips: true
+        };
+      }
       throw { code: 'RENDER_NO_ITEMS', message: 'No clips to render' };
+    }
+
+    // If we already have clips and this isn't a specific clip render, skip
+    if (hasExistingClips && !inputClip.clipId) {
+      log.info({ rootId, jobId: job.id, itemsCount: items.length }, 'Skipping render - clips already exist');
+      return { 
+        success: true, 
+        message: 'Render skipped - clips already exist',
+        clipsGenerated: 0,
+        hasExistingClips: true,
+        items: items.length
+      };
     }
 
     const fps = Number(process.env.RENDER_FPS || 30);
@@ -177,24 +229,63 @@ export async function runRender(job: Job): Promise<any> {
 
     await job.updateProgress(100);
 
-    await enqueueUnique(
-      QUEUES.TEXTS,
-      'texts',
-      `${rootId}:texts`,
-      { rootId, meta: job.data.meta || {} }
-    );
+    const totalDuration = Date.now() - startTime;
+    log.info({ 
+      rootId, 
+      jobId: job.id, 
+      clipsGenerated: items.length,
+      totalDuration 
+    }, 'RenderCompleted');
+
+    // Track success
+    await track(userId, 'stage_completed', {
+      stage: 'render',
+      duration: totalDuration,
+      clipsGenerated: items.length,
+      jobId: job.id,
+      rootId
+    });
+
+    // Only enqueue texts if we actually rendered clips
+    if (!hasExistingClips || inputClip.clipId) {
+      await enqueueUnique(
+        QUEUES.TEXTS,
+        'texts',
+        `${rootId}:texts`,
+        { rootId, meta: job.data.meta || {} }
+      );
+    }
 
     // Return summary
     return {
       rootId,
       bucket,
+      success: true,
+      clipsGenerated: items.length,
+      totalDuration,
       items: items.map((it) => ({
         clipId: it.id,
         key: `projects/${rootId}/clips/${it.id}.mp4`,
+        thumbnail: `projects/${rootId}/clips/${it.id}.jpg`,
       })),
     };
   } catch (error: any) {
-    log.error({ rootId, error: error?.message || error }, 'RenderFailed');
+    const totalDuration = Date.now() - startTime;
+    log.error({ 
+      rootId, 
+      jobId: job.id, 
+      error: error?.message || error,
+      totalDuration 
+    }, 'RenderFailed');
+    
+    // Track failure
+    await track(userId, 'render_failed', {
+      jobId: job.id,
+      error: error?.message,
+      duration: totalDuration,
+      rootId
+    });
+    
     throw error;
   } finally {
     try { await fs.rm(tmpRoot, { recursive: true, force: true }); } catch {}

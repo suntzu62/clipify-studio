@@ -562,21 +562,22 @@ export async function runIngest(job: Job): Promise<IngestResult> {
   }
 }
 
-async function probeVideo(url: string): Promise<VideoInfo> {
+async function probeVideo(url: string): Promise<VideoInfo | null> {
   try {
     const ytdl = await configureYtdl();
     const info = await ytdl(url, {
       dumpSingleJson: true,
       skipDownload: true,
       noPlaylist: true,
+      noCheckCertificates: true,
+      ignoreErrors: true,
+      quiet: true
     });
     
     return info as VideoInfo;
   } catch (error: any) {
-    const detail = [error?.message, error?.stderr, error?.stdout]
-      .filter((part) => typeof part === 'string' && part.trim().length > 0)
-      .join(' | ');
-    throw new Error(`Failed to probe video: ${detail || String(error)}`);
+    log.warn({ url, error: error?.message }, 'Failed to probe video, will attempt download anyway');
+    return null;
   }
 }
 
@@ -588,8 +589,8 @@ async function downloadVideo(
 ): Promise<{ videoPath: string; infoPath: string; info: VideoInfo }> {
   const outputTemplate = path.join(tempDir, 'source.%(ext)s');
 
-  // First get video info
-  const info = await probeVideo(url);
+  // Try to get video info first, but don't fail if it doesn't work
+  const probeInfo = await probeVideo(url);
   
   const baseOptions: any = {
     output: outputTemplate,
@@ -600,6 +601,7 @@ async function downloadVideo(
     noPlaylist: true,
     noCheckCertificates: true,
     preferFreeFormats: true,
+    extractFlat: false,
     addHeader: [
       'referer:youtube.com',
       'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -614,6 +616,11 @@ async function downloadVideo(
     limitRate: '5M',
     newline: true,
     progressTemplate: 'download:%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
+    // Additional options for problematic videos
+    skipUnavailableFragments: true,
+    keepFragments: false,
+    bufferSize: '16K',
+    httpChunkSize: '10M'
   };
   
   // Set custom ffmpeg path if available
@@ -647,8 +654,10 @@ async function downloadVideo(
         ignoreErrors: false,
         skipUnavailableFragments: true,
         keepFragments: false,
-        bufferSize: '16K',
-        httpChunkSize: '10M'
+        embedSubs: false,
+        writeSubtitles: false,
+        // Try different formats for problematic videos
+        format: 'best[height<=720]/best'
       };
       
       log.info({ jobId, url }, 'StartDownload - Fallback attempt with cookies');
@@ -674,8 +683,10 @@ async function attemptDownload(
     const process = ytdl.exec(url, options);
     
     let lastProgress = 0;
+    let hasOutput = false;
     
     process.stdout?.on('data', (data: Buffer) => {
+      hasOutput = true;
       const lines = data.toString().split('\n');
       
       for (const line of lines) {
@@ -705,27 +716,38 @@ async function attemptDownload(
     
     process.stderr?.on('data', (data: Buffer) => {
       const output = data.toString();
-      if (output.includes('ERROR') || output.includes('WARNING')) {
-        log.warn({ jobId: job.id, stderr: output.trim() }, 'Download warning/error');
+      // Log warnings but don't fail on them
+      if (output.includes('WARNING')) {
+        log.warn({ jobId: job.id, warning: output.trim() }, 'Download warning');
+      } else if (output.includes('ERROR')) {
+        log.error({ jobId: job.id, stderr: output.trim() }, 'Download error');
       }
     });
     
+    // Set a reasonable timeout for downloads
+    const timeout = setTimeout(() => {
+      process.kill('SIGTERM');
+      reject(new Error('Download timeout after 30 minutes'));
+    }, 30 * 60 * 1000); // 30 minutes
+    
     process.on('close', async (code) => {
+      clearTimeout(timeout);
+      
       if (code === 0) {
         try {
           // Find the downloaded files
           const outputDir = path.dirname(options.output);
           const files = await fs.readdir(outputDir);
-          const videoFile = files.find(f => f.endsWith('.mp4'));
+          const videoFile = files.find(f => f.match(/\.(mp4|mkv|avi|mov|webm)$/i));
           const infoFile = files.find(f => f.endsWith('.info.json'));
           
-          if (!videoFile || !infoFile) {
-            reject(new Error('Downloaded files not found'));
+          if (!videoFile) {
+            reject(new Error('Video file not found after download'));
             return;
           }
           
           const videoPath = path.join(outputDir, videoFile);
-          const infoPath = path.join(outputDir, infoFile);
+          const infoPath = path.join(outputDir, infoFile || 'info.json');
           
           // Verify video file exists and has content
           const stats = await fs.stat(videoPath);
@@ -734,23 +756,76 @@ async function attemptDownload(
             return;
           }
           
-          log.info({ jobId: job.id, fileSize: stats.size }, 'DownloadComplete');
+          log.info({ jobId: job.id, fileSize: stats.size, fileName: videoFile }, 'DownloadComplete');
           
-          // Read info from the downloaded file
-          const infoContent = await fs.readFile(infoPath, 'utf-8');
-          const info = JSON.parse(infoContent);
+          // Read or create info from the downloaded file
+          let info: VideoInfo;
+          
+          if (infoFile && await fs.access(infoPath).then(() => true).catch(() => false)) {
+            try {
+              const infoContent = await fs.readFile(infoPath, 'utf-8');
+              info = JSON.parse(infoContent);
+            } catch (error) {
+              log.warn({ jobId: job.id, error: (error as Error).message }, 'Failed to parse info.json, using ffprobe');
+              info = await extractVideoInfoFromFile(videoPath);
+            }
+          } else {
+            // Create info using ffprobe if no info.json available
+            info = await extractVideoInfoFromFile(videoPath);
+            await fs.writeFile(infoPath, JSON.stringify(info, null, 2));
+          }
           
           resolve({ videoPath, infoPath, info });
         } catch (error) {
           reject(error);
         }
       } else {
-        reject(new Error(`yt-dlp exited with code ${code}`));
+        const errorMsg = hasOutput 
+          ? `yt-dlp exited with code ${code}` 
+          : `yt-dlp failed with code ${code} (no output received - may be a network or authentication issue)`;
+        reject(new Error(errorMsg));
       }
     });
     
     process.on('error', (error) => {
+      clearTimeout(timeout);
       reject(error);
+    });
+  });
+}
+
+async function extractVideoInfoFromFile(videoPath: string): Promise<VideoInfo> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(videoPath, (err, metadata) => {
+      if (err) {
+        reject(new Error(`Failed to probe downloaded video: ${err.message}`));
+        return;
+      }
+      
+      const videoStream = metadata.streams?.find(s => s.codec_type === 'video');
+      const audioStream = metadata.streams?.find(s => s.codec_type === 'audio');
+      
+      const info: VideoInfo = {
+        title: path.basename(videoPath, path.extname(videoPath)),
+        duration: typeof metadata.format?.duration === 'string' 
+          ? parseFloat(metadata.format.duration) 
+          : (metadata.format?.duration || 0),
+        width: videoStream?.width || 1920,
+        height: videoStream?.height || 1080,
+        fps: videoStream?.r_frame_rate ? eval(videoStream.r_frame_rate) : 30,
+        ext: path.extname(videoPath).substring(1),
+        webpage_url: `file://${videoPath}`,
+        dimensions: {
+          width: videoStream?.width || 1920,
+          height: videoStream?.height || 1080
+        },
+        format_id: metadata.format?.format_name || 'unknown',
+        filesize: metadata.format?.size 
+          ? (typeof metadata.format.size === 'string' ? parseInt(metadata.format.size) : metadata.format.size)
+          : undefined
+      };
+      
+      resolve(info);
     });
   });
 }

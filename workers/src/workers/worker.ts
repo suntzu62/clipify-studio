@@ -75,6 +75,7 @@ export const makeWorker = (queueName: string) => {
       const startTime = Date.now();
       const jobId = job.id;
       const rootId = job.data?.rootId;
+      const userId = job.data?.userId || 'unknown';
 
       try {
         log.info({ jobId, rootId, queueName, data: job.data }, 'ProcessingJob');
@@ -113,7 +114,17 @@ export const makeWorker = (queueName: string) => {
         }
 
         const duration = Date.now() - startTime;
-        log.info({ jobId, rootId, queueName, duration }, 'JobCompleted');
+        log.info({ jobId, rootId, queueName, duration, success: true }, 'JobCompleted');
+        
+        // Track success
+        await track(userId, 'job_completed', {
+          jobId,
+          rootId,
+          queue: queueName,
+          duration,
+          success: true
+        });
+
         return result;
 
       } catch (error: any) {
@@ -127,40 +138,68 @@ export const makeWorker = (queueName: string) => {
             message: error?.message,
             code: error?.code,
             name: error?.name,
-            stack: error?.stack?.split('\n').slice(0, 3).join('\n')
+            stack: error?.stack?.split('\n').slice(0, 5).join('\n')
           }
         }, 'JobFailed');
+        
+        // Track failure
+        await track(userId, 'job_failed', {
+          jobId,
+          rootId,
+          queue: queueName,
+          duration,
+          error: error?.message,
+          errorCode: error?.code
+        });
+        
         throw error;
       } finally {
         // Garantir cleanup de recursos
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
     },
     {
       connection: bullmqConnection,
       concurrency,
       limiter: limiter ? {
-        ...limiter
-      } : undefined,
-      // BullMQ default settings
-      removeOnComplete: { count: 1000 },
-      removeOnFail: { count: 1000 }
+        max: limiter.max,
+        duration: limiter.duration
+      } : undefined
     })
-    .on('completed', (job) => {
+    .on('progress', (job, progress) => {
+      const rootId = job.data?.rootId;
+      log.debug({ 
+        jobId: job.id, 
+        rootId,
+        queueName, 
+        progress,
+        attempt: job.attemptsMade 
+      }, 'JobProgress');
+      
+      emitWorkerEvent('progress', { 
+        jobId: job.id || '',
+        queue: queueName,
+        rootId,
+        progress
+      });
+    })
+    .on('completed', (job, result) => {
       const rootId = job.data?.rootId;
       const duration = Date.now() - (job.processedOn || Date.now());
       log.info({ 
         jobId: job.id, 
         rootId,
         queueName, 
-        duration 
+        duration,
+        attempt: job.attemptsMade,
+        result: typeof result === 'object' ? Object.keys(result || {}) : result
       }, 'JobCompleted');
       
       emitWorkerEvent('completed', { 
         jobId: job.id || '',
         queue: queueName,
         rootId,
-        returnvalue: { duration }
+        returnvalue: { duration, result }
       });
     })
     .on('failed', (job, error) => {
@@ -172,7 +211,10 @@ export const makeWorker = (queueName: string) => {
           rootId,
           queueName,
           duration,
-          error: error?.message
+          attempt: job.attemptsMade,
+          maxAttempts: job.opts.attempts,
+          error: error?.message,
+          willRetry: job.attemptsMade < (job.opts.attempts || 1)
         }, 'JobFailed');
 
         emitWorkerEvent('failed', { 
@@ -186,160 +228,16 @@ export const makeWorker = (queueName: string) => {
     .on('error', (error) => {
       log.error({ 
         queueName,
-        error: error?.message
+        error: error?.message,
+        stack: error?.stack?.split('\n').slice(0, 3).join('\n')
       }, 'WorkerError');
-    });
-  
-  // Configurar worker com cleanup adequado
-  const worker = new Worker(
-    queueName,
-    async (job: Job) => {
-      const startTime = Date.now();
-      const jobId = job.id;
-      const rootId = job.data?.rootId;
-
-      try {
-        let result;
-        log.info({ jobId, rootId, queueName, data: job.data }, 'ProcessingJob');
-        
-        switch (queueName) {
-          case QUEUES.INGEST:
-            result = await runIngest(job);
-            break;
-          case QUEUES.TRANSCRIBE:
-            result = await runTranscribe(job);
-            // After transcription, enqueue scenes and rank
-            await Promise.all([
-              enqueueUnique(QUEUES.SCENES, 'scenes', `${rootId}:scenes`, { rootId, result }),
-              enqueueUnique(QUEUES.RANK, 'rank', `${rootId}:rank`, { rootId, result })
-            ]);
-            break;
-          case QUEUES.SCENES:
-            result = await runScenes(job);
-            break;
-          case QUEUES.RANK:
-            result = await runRank(job);
-            // After ranking, enqueue texts and render
-            await Promise.all([
-              enqueueUnique(QUEUES.TEXTS, 'texts', `${rootId}:texts`, { rootId, result }),
-              enqueueUnique(QUEUES.RENDER, 'render', `${rootId}:render`, { rootId, result })
-            ]);
-            break;
-          case QUEUES.RENDER:
-            result = await runRender(job);
-            break;
-          case QUEUES.TEXTS:
-            result = await runTexts(job);
-            break;
-          case QUEUES.EXPORT:
-            result = await runExport(job);
-            break;
-          default:
-            throw new Error(`Unknown queue: ${queueName}`);
-        }
-        return result;
-      } finally {
-        // Garantir que conexões são limpas após cada job
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    },
-    {
-      connection: bullmqConnection,
-      concurrency,
-      limiter: limiter ? limiter : undefined
-    }
-  );
-  
-  log.info({ 
-    queue: queueName, 
-    concurrency,
-    limiter: limiter ? `${limiter?.max}/${limiter?.duration}ms` : 'none',
-    redisConfig: bullmqConnection
-  }, `Starting worker for queue: ${queueName}`);
-  
-  return new Worker(
-    queueName,
-    async (job: Job) => {
-      // Route to specific worker implementations
-      if (queueName === QUEUES.INGEST) {
-        return await runIngest(job);
-      }
-      if (queueName === QUEUES.TRANSCRIBE) {
-        return await runTranscribe(job);
-      }
-      if (queueName === QUEUES.SCENES) {
-        return await runScenes(job);
-      }
-      if (queueName === QUEUES.RANK) {
-        return await runRank(job);
-      }
-      if (queueName === QUEUES.RENDER) {
-        return await runRender(job);
-      }
-      if (queueName === QUEUES.TEXTS) {
-        return await runTexts(job);
-      }
-      if (queueName === QUEUES.EXPORT) {
-        return await runExport(job);
-      }
-      
-      // Fallback: simulate processing for other queues
-      for (let p = 0; p <= 100; p += 20) {
-        await job.updateProgress(p);
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      return { ok: true, queue: queueName, id: job.id };
-    },
-    { 
-      connection: bullmqConnection,
-      concurrency,
-      limiter: limiter ? limiter : undefined
-    }
-  )
-    .on('progress', (job, progress) => {
-      const rootId = (job.data as any)?.rootId;
-      log.info({ queue: queueName, jobId: job.id, rootId, stage: queueName, attempt: job.attemptsMade, progress }, 'progress');
-      emitWorkerEvent('progress', {
-        queue: queueName,
-        jobId: job.id || '',
-        rootId,
-        progress,
-      });
     })
-    .on('completed', (job, ret) => {
-      const rootId = (job.data as any)?.rootId;
-      log.info({ queue: queueName, jobId: job.id, rootId, stage: queueName, attempt: job.attemptsMade, ret }, 'completed');
-      // Analytics (optional)
-      track((job.data as any)?.meta?.userId || 'system', 'job.completed', {
-        queue: queueName,
-        jobId: job.id,
-        rootId,
-        attempt: job.attemptsMade,
-      });
-      emitWorkerEvent('completed', {
-        queue: queueName,
-        jobId: job.id || '',
-        rootId,
-        returnvalue: ret,
-      });
-    })
-    .on('failed', (job, err) => {
-      const rootId = (job?.data as any)?.rootId;
-      log.error({ queue: queueName, jobId: job?.id, rootId, stage: queueName, attempt: job?.attemptsMade, err: err?.message || String(err) }, 'failed');
-      // Analytics (optional)
-      track((job?.data as any)?.meta?.userId || 'system', 'job.failed', {
-        queue: queueName,
-        jobId: job?.id,
-        rootId,
-        attempt: job?.attemptsMade,
-        error: err?.message || String(err),
-      });
-      emitWorkerEvent('failed', {
-        queue: queueName,
-        jobId: job?.id || '',
-        rootId,
-        failedReason: err?.message || String(err),
-      });
+    .on('stalled', (jobId) => {
+      log.warn({ 
+        queueName,
+        jobId,
+        message: 'Job stalled - will be retried'
+      }, 'JobStalled');
     });
 };
 
