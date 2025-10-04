@@ -124,19 +124,25 @@ serve(async (req) => {
       headers.set('Cache-Control', 'no-cache');
       headers.set('Connection', 'keep-alive');
 
-      // Much more aggressive backoff for rate limits
+      // Much more aggressive backoff for rate limits with fallback info
       const retryAfter = 120000; // 2 minutes instead of 30 seconds
-      const sseResponse = `retry: ${retryAfter}\n\nevent: info\ndata: ${JSON.stringify({ 
+      const fallbackInfo = {
         reason: "upstream_rate_limited", 
         retryAfter,
         message: "Upstream API rate limit exceeded, backing off for 2 minutes",
-        jobId: id
-      })}\n\n`;
+        jobId: id,
+        fallbackAction: "use_polling",
+        pollingInterval: 10000, // 10 seconds during rate limiting
+        pollingUrl: `https://qibjqqucmbrtuirysexl.functions.supabase.co/job-status?id=${id}`,
+        authNote: "Include Authorization: Bearer <token> header for polling"
+      };
+      
+      const sseResponse = `retry: ${retryAfter}\n\nevent: info\ndata: ${JSON.stringify(fallbackInfo)}\n\n`;
 
       return new Response(sseResponse, { status: 200, headers });
     }
 
-    // Handle other error responses
+    // Handle other error responses with fallback guidance
     if (!upstream.ok) {
       console.error(`[job-stream] Upstream error ${upstream.status} for job ${id}, user ${userId}`);
       
@@ -146,11 +152,17 @@ serve(async (req) => {
       headers.set('Cache-Control', 'no-cache');
       headers.set('Connection', 'keep-alive');
 
-      const sseResponse = `event: error\ndata: ${JSON.stringify({ 
+      const fallbackInfo = {
         error: `Upstream error ${upstream.status}`,
         jobId: id,
-        status: upstream.status
-      })}\n\n`;
+        status: upstream.status,
+        fallbackAction: "use_polling",
+        pollingInterval: 5000, // 5 seconds
+        pollingUrl: `https://qibjqqucmbrtuirysexl.functions.supabase.co/job-status?id=${id}`,
+        message: "SSE unavailable, client should switch to polling"
+      };
+
+      const sseResponse = `event: error\ndata: ${JSON.stringify(fallbackInfo)}\n\n`;
 
       return new Response(sseResponse, { status: 200, headers });
     }

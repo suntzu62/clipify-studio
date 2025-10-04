@@ -13,6 +13,7 @@ import pino from 'pino';
 import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
 import { runFFmpeg } from '../lib/ffmpeg';
+import { track } from '../lib/analytics';
 import type { VideoInfo } from '../types/pipeline';
 
 interface Upload {
@@ -261,6 +262,7 @@ interface StoragePublicUrlResult {
   } | null;
 }
 
+// Legacy function - deprecated, use downloadVideo instead
 async function downloadYoutubeVideo(url: string, tempDir: string): Promise<string> {
   const videoPath = path.join(tempDir, 'video.mp4');
   
@@ -350,24 +352,44 @@ function determineSource(job: Job): 'youtube' | 'upload' {
   throw new UnrecoverableError('INVALID_INPUT: Cannot determine job source');
 }
 
-// Process YouTube video
+// Process YouTube video with comprehensive tracking
 async function processYoutubeVideo(job: Job, youtubeUrl: string): Promise<IngestResult> {
   const rootId = job.data.rootId || job.id!;
   const jobId = job.id!;
+  const userId = job.data.userId || 'unknown';
   const tempDir = path.join(os.tmpdir(), `cortai-yt-${jobId}`);
+  const startTime = Date.now();
   
   try {
     await fs.mkdir(tempDir, { recursive: true });
     
-    log.info({ jobId, youtubeUrl }, 'Processing YouTube video');
+    log.info({ jobId, youtubeUrl, userId }, 'Processing YouTube video');
+    await track(userId, 'ingest_youtube_started', { 
+      jobId, 
+      youtubeUrl, 
+      stage: 'ingest',
+      source: 'youtube'
+    });
     
-    // Step 1: Download video (0-50%)
-    const videoPath = await downloadYoutubeVideo(youtubeUrl, tempDir);
-    await job.updateProgress(50);
+    // Step 1: Download video with robust options (0-85%)
+    log.info({ jobId, youtubeUrl }, 'StartDownload');
+    const downloadStartTime = Date.now();
     
-    log.info({ jobId }, 'YouTube video downloaded');
+    const { videoPath, infoPath, info } = await downloadVideo(youtubeUrl, tempDir, jobId, job);
     
-    // Step 2: Probe video (50-60%)
+    const downloadDuration = Date.now() - downloadStartTime;
+    log.info({ jobId, videoPath, downloadDuration }, 'DownloadComplete');
+    await track(userId, 'stage_completed', { 
+      stage: 'download', 
+      duration: downloadDuration,
+      jobId,
+      source: 'youtube'
+    });
+    
+    // Step 2: Probe video and validate duration (85-90%)
+    log.info({ jobId }, 'Starting video probe');
+    const probeStartTime = Date.now();
+    
     const probeResult = await new Promise<any>((resolve, reject) => {
       const ffprobe = require('fluent-ffmpeg');
       ffprobe.ffprobe(videoPath, (err: any, metadata: any) => {
@@ -376,45 +398,70 @@ async function processYoutubeVideo(job: Job, youtubeUrl: string): Promise<Ingest
       });
     });
     
-    const durationSec = probeResult.format?.duration || 0;
+    const durationSec = probeResult.format?.duration || info.duration || 0;
     const MIN_DURATION = job.data.meta?.minDuration || 180; // 3 minutes default
     
     if (durationSec < MIN_DURATION) {
+      await track(userId, 'ingest_failed', { 
+        reason: 'VIDEO_TOO_SHORT',
+        duration: durationSec,
+        minRequired: MIN_DURATION,
+        jobId
+      });
       throw new UnrecoverableError(`VIDEO_TOO_SHORT: Video must be at least ${MIN_DURATION / 60} minutes long`);
     }
     
-    await job.updateProgress(60);
+    const probeDuration = Date.now() - probeStartTime;
+    await job.updateProgress(90);
+    log.info({ jobId, duration: durationSec, title: info.title, probeDuration }, 'ProbeComplete');
+    await track(userId, 'stage_completed', { 
+      stage: 'probe', 
+      duration: probeDuration,
+      videoDuration: durationSec,
+      jobId
+    });
     
-    const title = path.basename(videoPath).replace(/\.[^/.]+$/, '');
-    log.info({ jobId, duration: durationSec, title }, 'YouTube video probed');
-    
-    // Step 3: Extract audio (60-80%)
+    // Step 3: Extract audio (90-95%)
     log.info({ jobId }, 'AudioExtractStarted');
-    const audioPath = await extractAudioForUpload(videoPath, tempDir, durationSec, job, 60, 80);
-    log.info({ jobId }, 'AudioExtractOk');
+    const audioStartTime = Date.now();
+    const audioPath = await extractAudioForUpload(videoPath, tempDir, durationSec, job, 90, 95);
+    const audioDuration = Date.now() - audioStartTime;
+    log.info({ jobId, audioPath, audioDuration }, 'AudioExtracted');
+    await track(userId, 'stage_completed', { 
+      stage: 'audio_extract', 
+      duration: audioDuration,
+      jobId
+    });
     
-    // Step 4: Create info.json (80-85%)
-    const infoPath = path.join(tempDir, 'info.json');
-    const info: VideoInfo = {
+    // Step 4: Update info.json with validated data (95-98%)
+    const enhancedInfo: VideoInfo = {
+      ...info,
       duration: durationSec,
-      title: title || 'YouTube Video',
+      title: info.title || path.basename(videoPath).replace(/\.[^/.]+$/, ''),
       webpage_url: youtubeUrl,
-      ext: path.extname(videoPath).substring(1) || 'mp4',
-      width: probeResult.streams?.[0]?.width || 1920,
-      height: probeResult.streams?.[0]?.height || 1080,
+      width: probeResult.streams?.[0]?.width || info.width || 1920,
+      height: probeResult.streams?.[0]?.height || info.height || 1080,
       dimensions: {
-        width: probeResult.streams?.[0]?.width || 1920,
-        height: probeResult.streams?.[0]?.height || 1080
+        width: probeResult.streams?.[0]?.width || info.width || 1920,
+        height: probeResult.streams?.[0]?.height || info.height || 1080
       },
-      fps: probeResult.streams?.[0]?.r_frame_rate ? eval(probeResult.streams[0].r_frame_rate) : 30
+      fps: probeResult.streams?.[0]?.r_frame_rate ? eval(probeResult.streams[0].r_frame_rate) : (info.fps || 30)
     };
-    await fs.writeFile(infoPath, JSON.stringify(info, null, 2));
-    await job.updateProgress(85);
     
-    // Step 5: Upload to storage (85-100%)
+    await fs.writeFile(infoPath, JSON.stringify(enhancedInfo, null, 2));
+    await job.updateProgress(98);
+    
+    // Step 5: Upload to storage (98-100%)
     log.info({ jobId }, 'UploadStarted');
-    const result = await uploadToStorage(videoPath, audioPath, infoPath, rootId, job, info);
-    log.info({ jobId }, 'UploadOk');
+    const uploadStartTime = Date.now();
+    const result = await uploadToStorage(videoPath, audioPath, infoPath, rootId, job, enhancedInfo);
+    const uploadDuration = Date.now() - uploadStartTime;
+    log.info({ jobId, storagePaths: result.storagePaths, uploadDuration }, 'UploadComplete');
+    await track(userId, 'stage_completed', { 
+      stage: 'upload', 
+      duration: uploadDuration,
+      jobId
+    });
     
     await job.updateProgress(100);
     
@@ -425,21 +472,42 @@ async function processYoutubeVideo(job: Job, youtubeUrl: string): Promise<Ingest
       enqueueUnique(QUEUES.RANK, 'rank', `${rootId}:rank`, { rootId, meta: job.data.meta || {} })
     ]);
     
+    const totalDuration = Date.now() - startTime;
+    await track(userId, 'ingest_youtube_completed', { 
+      jobId,
+      totalDuration,
+      videoDuration: durationSec,
+      videoTitle: enhancedInfo.title,
+      videoResolution: `${enhancedInfo.width}x${enhancedInfo.height}`,
+      success: true
+    });
+    
     return {
       rootId: result.rootId,
       storagePaths: result.storagePaths,
       duration: result.duration,
-      title: result.title || 'YouTube Video',
+      title: result.title || enhancedInfo.title,
       url: result.url || youtubeUrl
     };
     
   } catch (error: any) {
-    log.error({ jobId, youtubeUrl, error: error.message }, 'YouTube processing failed');
+    const totalDuration = Date.now() - startTime;
+    log.error({ jobId, youtubeUrl, error: error.message, stack: error.stack, totalDuration }, 'YouTube processing failed');
+    
+    await track(userId, 'ingest_failed', { 
+      jobId,
+      source: 'youtube',
+      error: error.message,
+      errorCode: error.code,
+      totalDuration,
+      youtubeUrl
+    });
     
     if (error.code === 'VIDEO_TOO_SHORT' || String(error?.message || '').startsWith('VIDEO_TOO_SHORT')) {
       throw new UnrecoverableError('VIDEO_TOO_SHORT');
     }
     
+    // For download failures, the job data already contains failedVideoUrl
     throw { code: 'YOUTUBE_PROCESSING_FAILED', message: error.message };
     
   } finally {
@@ -523,7 +591,7 @@ async function downloadVideo(
   // First get video info
   const info = await probeVideo(url);
   
-  const options: any = {
+  const baseOptions: any = {
     output: outputTemplate,
     format: process.env.YTDLP_FORMAT || 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
     mergeOutputFormat: 'mp4',
@@ -534,25 +602,73 @@ async function downloadVideo(
     preferFreeFormats: true,
     addHeader: [
       'referer:youtube.com',
-      'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+      'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     ],
-    // Robustness settings
+    // Enhanced robustness settings
     continue: true,
     noOverwrites: true,
-    retries: parseInt(process.env.YTDLP_RETRIES || '3'),
+    retries: 'infinite',
     fragmentRetries: 'infinite',
-    retrySleep: 'fragment:exp=1:20',
+    retrySleep: 'fragment:exp=1:10',
     forceIpv4: process.env.YTDLP_FORCE_IP_V4 === 'true',
-    limitRate: '15M', // Increased from 5M for faster downloads
+    limitRate: '5M',
     newline: true,
     progressTemplate: 'download:%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
   };
   
   // Set custom ffmpeg path if available
   if (ffmpegPath) {
-    options.ffmpegLocation = ffmpegPath;
+    baseOptions.ffmpegLocation = ffmpegPath;
   }
   
+  // First attempt - standard download
+  try {
+    log.info({ jobId, url }, 'StartDownload - Standard attempt');
+    return await attemptDownload(url, baseOptions, job);
+  } catch (primaryError: any) {
+    log.warn({ jobId, url, error: primaryError.message }, 'Standard download failed, trying fallback');
+    
+    // Fallback attempt with cookies and enhanced headers
+    try {
+      const fallbackOptions = {
+        ...baseOptions,
+        addHeader: [
+          ...baseOptions.addHeader,
+          'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language: en-US,en;q=0.5',
+          'Accept-Encoding: gzip, deflate',
+          'Connection: keep-alive',
+          'Upgrade-Insecure-Requests: 1'
+        ],
+        // Try to use cookies if available from Supabase
+        ...(await getCookiesOptions()),
+        // Additional fallback options
+        extractor: 'youtube',
+        ignoreErrors: false,
+        skipUnavailableFragments: true,
+        keepFragments: false,
+        bufferSize: '16K',
+        httpChunkSize: '10M'
+      };
+      
+      log.info({ jobId, url }, 'StartDownload - Fallback attempt with cookies');
+      return await attemptDownload(url, fallbackOptions, job);
+      
+    } catch (fallbackError: any) {
+      log.error({ jobId, url, primaryError: primaryError.message, fallbackError: fallbackError.message }, 'All download attempts failed');
+      
+      // Mark as failed and store URL for inspection
+      await markJobAsFailed(job, url, fallbackError.message);
+      throw new UnrecoverableError(`Download failed after fallback: ${fallbackError.message}`);
+    }
+  }
+}
+
+async function attemptDownload(
+  url: string,
+  options: any,
+  job: Job
+): Promise<{ videoPath: string; infoPath: string; info: VideoInfo }> {
   return new Promise(async (resolve, reject) => {
     const ytdl = await configureYtdl();
     const process = ytdl.exec(url, options);
@@ -574,9 +690,23 @@ async function downloadVideo(
               const jobProgress = Math.floor((percent / 100) * 85);
               job.updateProgress(jobProgress);
               lastProgress = percent;
+              
+              log.info({ 
+                jobId: job.id, 
+                progress: `${percent.toFixed(1)}%`,
+                bytes: parts[1],
+                total: parts[2] 
+              }, 'DownloadProgress');
             }
           }
         }
+      }
+    });
+    
+    process.stderr?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      if (output.includes('ERROR') || output.includes('WARNING')) {
+        log.warn({ jobId: job.id, stderr: output.trim() }, 'Download warning/error');
       }
     });
     
@@ -584,7 +714,8 @@ async function downloadVideo(
       if (code === 0) {
         try {
           // Find the downloaded files
-          const files = await fs.readdir(tempDir);
+          const outputDir = path.dirname(options.output);
+          const files = await fs.readdir(outputDir);
           const videoFile = files.find(f => f.endsWith('.mp4'));
           const infoFile = files.find(f => f.endsWith('.info.json'));
           
@@ -593,8 +724,8 @@ async function downloadVideo(
             return;
           }
           
-          const videoPath = path.join(tempDir, videoFile);
-          const infoPath = path.join(tempDir, infoFile);
+          const videoPath = path.join(outputDir, videoFile);
+          const infoPath = path.join(outputDir, infoFile);
           
           // Verify video file exists and has content
           const stats = await fs.stat(videoPath);
@@ -602,6 +733,12 @@ async function downloadVideo(
             reject(new Error('Downloaded video file is empty'));
             return;
           }
+          
+          log.info({ jobId: job.id, fileSize: stats.size }, 'DownloadComplete');
+          
+          // Read info from the downloaded file
+          const infoContent = await fs.readFile(infoPath, 'utf-8');
+          const info = JSON.parse(infoContent);
           
           resolve({ videoPath, infoPath, info });
         } catch (error) {
@@ -616,6 +753,57 @@ async function downloadVideo(
       reject(error);
     });
   });
+}
+
+async function getCookiesOptions(): Promise<any> {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !serviceRoleKey) {
+      return {};
+    }
+    
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    
+    // Try to download cookies file from storage
+    const { data: cookiesData, error } = await supabase.storage
+      .from('config')
+      .download('cookies/youtube.txt');
+    
+    if (error || !cookiesData) {
+      return {};
+    }
+    
+    // Save cookies to temp file
+    const cookiesPath = path.join(os.tmpdir(), `cookies-${Date.now()}.txt`);
+    await fs.writeFile(cookiesPath, Buffer.from(await cookiesData.arrayBuffer()));
+    
+    return { cookies: cookiesPath };
+  } catch (error) {
+    log.warn({ error: (error as Error).message }, 'Failed to load cookies, continuing without');
+    return {};
+  }
+}
+
+async function markJobAsFailed(job: Job, failedVideoUrl: string, errorMessage: string): Promise<void> {
+  try {
+    // Update job data with failed URL for inspection
+    await job.updateData({
+      ...job.data,
+      failedVideoUrl,
+      failureReason: errorMessage,
+      failedAt: new Date().toISOString()
+    });
+    
+    log.error({ 
+      jobId: job.id, 
+      failedVideoUrl, 
+      errorMessage 
+    }, 'Job marked as failed due to download failure');
+  } catch (error) {
+    log.error({ jobId: job.id, error: (error as Error).message }, 'Failed to mark job as failed');
+  }
 }
 
 async function uploadToStorage(
