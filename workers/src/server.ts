@@ -64,7 +64,30 @@ export async function start() {
   });
   app.register(fastifySSE);
 
-  app.get('/health', async () => ({ ok: true }));
+  app.get('/health', async () => ({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    redis: connection.status === 'ready' ? 'connected' : 'disconnected'
+  }));
+
+  // Queue health check endpoint (auth required)  
+  app.get('/api/health/queue', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
+    try {
+      const ingestQueue = getQueue(QUEUES.INGEST);
+      const waiting = await ingestQueue.getWaiting();
+      const active = await ingestQueue.getActive();
+      
+      res.send({
+        status: 'healthy',
+        queues: {
+          ingest: { waiting: waiting.length, active: active.length }
+        },
+        redis: connection.status
+      });
+    } catch (error: any) {
+      res.code(500).send({ status: 'unhealthy', error: error.message });
+    }
+  });
 
   // Queue status endpoint for diagnostics
   app.get('/api/queues/status', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
