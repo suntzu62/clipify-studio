@@ -4,7 +4,7 @@ import { VideoSource } from '../types/pipeline';
 
 export interface Job extends VideoSource {
   id: string;
-  status: 'queued' | 'active' | 'completed' | 'failed' | 'waiting-children';
+  status: 'queued' | 'active' | 'waiting-children' | 'completed' | 'failed';
   progress: number;
   createdAt: string;
   neededMinutes: number;
@@ -126,6 +126,7 @@ export async function enqueuePipeline(
   targetDuration: string,
   getToken?: () => Promise<string | null>
 ) {
+  // Edge function transforma entrada no novo formato JobData
   // Use local workers API if available during development
   const useLocalAPI = import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY;
   

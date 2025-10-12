@@ -145,8 +145,8 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
         });
 
         // Stop polling once we have clips or job is completed/failed
-        if ((enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) || 
-            enrichedJob.status === 'completed' || enrichedJob.status === 'failed') {
+        const isTerminal = enrichedJob.status === 'completed' || enrichedJob.status === 'failed';
+        if ((enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) || isTerminal) {
           console.log('[useJobStatus] Clips found or job terminal, stopping enrichment polling');
           setEnrichedDataFetched(true);
           setStalled(false);

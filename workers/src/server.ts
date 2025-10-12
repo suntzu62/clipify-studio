@@ -170,7 +170,7 @@ export async function start() {
     }
   });
 
-  // Create pipeline
+  // Create pipeline - NEW FORMAT
   app.post('/api/jobs/pipeline', {
     preHandler: apiKeyGuard,
     config: {
@@ -180,68 +180,63 @@ export async function start() {
       },
     },
   }, async (req: any, res: any) => {
-    const body = (req.body || {}) as {
-      youtubeUrl?: string;
-      upload?: {
-        bucket: string;
-        objectKey: string;
-        originalName?: string;
-      };
-      neededMinutes?: number;
-      targetDuration?: number;
-      meta?: Record<string, any>;
-    };
-
-    // At least one source must be provided
-    const youtubeUrl = normalizeYoutubeUrl(body.youtubeUrl);
-    const { upload } = body;
-
-    if (!youtubeUrl && !upload) {
-      res.code(400).send({ error: 'either youtubeUrl or upload must be provided' });
+    const jobData = req.body as any;
+    
+    // Validação básica do novo formato JobData
+    if (!jobData || !jobData.rootId || !jobData.source || !jobData.meta) {
+      log.error({ body: req.body }, 'InvalidJobData');
+      res.code(400).send({ 
+        error: 'invalid_job_data',
+        message: 'JobData must include rootId, source, and meta' 
+      });
       return;
     }
-    if (youtubeUrl && upload) {
-      res.code(400).send({ error: 'cannot provide both youtubeUrl and upload' });
+    
+    // Validar source.type
+    if (!['youtube', 'upload'].includes(jobData.source.type)) {
+      log.error({ sourceType: jobData.source.type }, 'InvalidSourceType');
+      res.code(400).send({ 
+        error: 'invalid_source_type',
+        message: 'source.type must be either "youtube" or "upload"' 
+      });
       return;
     }
-
-    // Validate upload object if provided
-    if (upload) {
-      if (!upload.bucket || !upload.objectKey) {
-        res.code(400).send({ error: 'upload.bucket and upload.objectKey are required' });
-        return;
-      }
+    
+    // Validar campos obrigatórios baseado no tipo
+    if (jobData.source.type === 'youtube' && !jobData.source.youtubeUrl) {
+      res.code(400).send({ 
+        error: 'missing_youtube_url',
+        message: 'youtubeUrl required for youtube source' 
+      });
+      return;
     }
-
-    // Idempotent root based on source identifier
-    const sourceId = youtubeUrl || `${upload!.bucket}/${upload!.objectKey}`;
-    const digest = createHash('sha1').update(sourceId).digest('hex').slice(0, 16);
-    const rootId = `ingest:${digest}`;
-
-    const neededMinutes = Number(body.neededMinutes || 0);
-    const targetDuration = body.targetDuration;
-
-    const meta = {
-      ...(body.meta || {}),
-      targetDuration,
-      neededMinutes,
-    };
-
-    // Include source information in the base data
-    const baseData = { 
-      rootId,
-      meta,
-      ...(youtubeUrl ? { youtubeUrl, sourceType: 'youtube' } : { upload, sourceType: 'upload' })
-    };
-
+    
+    if (jobData.source.type === 'upload' && !jobData.source.storagePath) {
+      res.code(400).send({ 
+        error: 'missing_storage_path',
+        message: 'storagePath required for upload source' 
+      });
+      return;
+    }
+    
+    log.info({ 
+      rootId: jobData.rootId, 
+      sourceType: jobData.source.type,
+      userId: jobData.meta.userId 
+    }, 'EnqueueingPipeline');
+    
+    // Enfileirar job
     const ingestJob = await enqueueUnique(
       QUEUES.INGEST,
-      'pipeline',
-      rootId,
-      baseData
+      'ingest',
+      jobData.rootId,
+      jobData
     );
-
-    res.send({ jobId: ingestJob.id });
+    
+    res.send({ 
+      jobId: ingestJob.id, 
+      source: jobData.source.type 
+    });
   });
 
   // Enqueue a single export job (per clip)
