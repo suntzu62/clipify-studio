@@ -17,6 +17,7 @@ import { VideoDebugPanel } from '@/components/debug/VideoDebugPanel';
 import { ClipDebugPanel } from '@/components/debug/ClipDebugPanel';
 import { WorkerDiagnosticPanel } from '@/components/WorkerDiagnosticPanel';
 import { EnhancedJobProgress } from '@/components/EnhancedJobProgress';
+import { EmptyState } from '@/components/EmptyState';
 import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { Job } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
@@ -479,39 +480,48 @@ export default function ProjectDetail() {
                   </>
                 ) : (
                   <>
-                    {/* Show all clips including processing ones */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                      {clips.map((clip, index) => (
-                        <ClipCard key={clip.id} clip={clip} index={index} />
-                      ))}
-                    </div>
+                    {/* No clips message for failed jobs */}
+                    {clips.length === 0 && job?.status === 'failed' && (
+                      <EmptyState
+                        variant="error"
+                        error={jobStatus?.error || job?.error || "Erro desconhecido"}
+                        onAction={() => {
+                          // Implementar lógica de retry se necessário
+                          window.location.reload();
+                        }}
+                      />
+                    )}
                     
-                    {/* No clips message */}
+                    {/* No clips message for completed jobs */}
                     {clips.length === 0 && job?.status === 'completed' && (
-                      <Card className="p-8 text-center">
-                        <div className="space-y-4">
-                          <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto">
-                            <AlertCircle className="w-8 h-8 text-muted-foreground" />
-                          </div>
-                          <div>
-                            <h3 className="text-lg font-semibold mb-2">Nenhum clipe disponível</h3>
-                            <p className="text-muted-foreground mb-4">
-                              Não foi possível gerar clipes a partir deste vídeo. Tente com um vídeo mais longo ou com conteúdo diferente.
-                            </p>
-                            <Button 
-                              variant="outline" 
-                              onClick={handleRefreshClips}
-                              className="mt-2"
-                            >
-                              Tentar buscar novamente
-                            </Button>
-                          </div>
-                        </div>
-                      </Card>
+                      <EmptyState
+                        title="Nenhum clipe disponível"
+                        description="Não foi possível gerar clipes a partir deste vídeo. Tente com um vídeo mais longo ou com conteúdo diferente."
+                        actionLabel="Tentar Novo Vídeo"
+                        onAction={() => navigate('/dashboard')}
+                      />
+                    )}
+
+                    {/* Show clips only if they are not failed clips */}
+                    {clips.length > 0 && clips.some(clip => clip.status !== 'failed') && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                        {clips.filter(clip => clip.status !== 'failed').map((clip, index) => (
+                          <ClipCard key={clip.id} clip={clip} index={index} />
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Show error state if all clips failed */}
+                    {clips.length > 0 && clips.every(clip => clip.status === 'failed') && (
+                      <EmptyState
+                        variant="error"
+                        error={clips[0]?.description || "Erro ao processar clipes"}
+                        onAction={() => window.location.reload()}
+                      />
                     )}
                     
                     {/* Processing message */}
-                    {clips.length === 0 && job?.status !== 'completed' && (
+                    {clips.length === 0 && job?.status !== 'completed' && job?.status !== 'failed' && (
                       <Card className="bg-gradient-card">
                         <CardContent className="py-16 text-center">
                           <div className="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -524,9 +534,6 @@ export default function ProjectDetail() {
                             Estamos analisando seu conteúdo para criar os clipes mais envolventes. 
                             Os primeiros resultados aparecerão aqui em breve!
                           </p>
-                          <div className="text-sm text-primary font-medium">
-                            ⏱️ Primeiro clipe em aproximadamente {getEstimatedTime()}
-                          </div>
                         </CardContent>
                       </Card>
                     )}

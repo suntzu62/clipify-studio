@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifySSE from 'fastify-sse-v2';
+import fastifyCors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { createHash } from 'crypto';
 import pino from 'pino';
@@ -38,6 +39,18 @@ const apiKeyGuard = async (req: any, res: any) => {
   return true;
 };
 
+const apiKeyGuardSSE = async (req: any, res: any) => {
+  const headerKey = req.headers['x-api-key'];
+  const queryKey = req.query.api_key;
+  const key = headerKey || queryKey;
+  
+  if (!API_KEY || key !== API_KEY) {
+    res.code(401).send({ error: 'invalid_api_key' });
+    return false;
+  }
+  return true;
+};
+
 export async function start() {
   // Add error handlers for unhandled rejections
   process.on('unhandledRejection', (reason, promise) => {
@@ -50,6 +63,14 @@ export async function start() {
   });
 
   const app = Fastify({ logger: false });
+  
+  // Add CORS configuration
+  await app.register(fastifyCors, {
+    origin: ['http://localhost:8080', 'http://127.0.0.1:8080', 'https://qibjqqucmbrtuirysexl.supabase.co'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'apikey']
+  });
   
   // Add root route
   app.get('/', async () => 'OK');
@@ -255,13 +276,50 @@ export async function start() {
       res.code(404).send({ error: 'not_found' });
       return;
     }
+    
     const state = await job.getState();
     const progress = (typeof job.progress === 'number' ? job.progress : job.progress || 0) as number;
-    res.send({ id: job.id, state, progress });
+    
+    // Map BullMQ states to expected frontend status
+    let status: string;
+    switch (state) {
+      case 'waiting':
+      case 'active':
+        status = 'active';
+        break;
+      case 'completed':
+        status = 'completed';
+        break;
+      case 'failed':
+        status = 'failed';
+        break;
+      default:
+        status = state;
+    }
+    
+    // Get job data and results
+    const jobData = job.data || {};
+    const result = job.returnvalue || {};
+    
+    // Build response matching expected Job interface
+    const response = {
+      id: job.id,
+      status,
+      progress,
+      createdAt: new Date(job.timestamp).toISOString(),
+      neededMinutes: jobData.meta?.neededMinutes || 0,
+      targetDuration: jobData.meta?.targetDuration,
+      youtubeUrl: jobData.youtubeUrl,
+      sourceType: jobData.sourceType,
+      ...(state === 'failed' && job.failedReason ? { error: job.failedReason } : {}),
+      ...(result ? { result } : {})
+    };
+    
+    res.send(response);
   });
 
   // SSE stream of job events - with heartbeat
-  app.get('/api/jobs/:id/stream', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
+  app.get('/api/jobs/:id/stream', { preHandler: apiKeyGuardSSE }, async (req: any, res: any) => {
     const { id } = req.params as { id: string };
     res.raw.setHeader('Content-Type', 'text/event-stream');
     res.raw.setHeader('Cache-Control', 'no-cache');

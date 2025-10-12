@@ -82,6 +82,7 @@ async function prepareUploadedVideo(
 // Configure youtube-dl-exec defaults and fallbacks
 const ytdlBinaryPath = process.env.YTDL_BINARY_PATH || '/usr/bin/yt-dlp';
 const DEFAULT_FORMAT = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best';
+const COOKIES_FILE_PATH = process.env.COOKIES_FILE_PATH || './cookies.txt';
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
 
 if (ffmpegPath && !process.env.FFMPEG_PATH) {
@@ -465,12 +466,13 @@ async function processYoutubeVideo(job: Job, youtubeUrl: string): Promise<Ingest
     
     await job.updateProgress(100);
     
-    // Enqueue next jobs
-    await Promise.all([
-      enqueueUnique(QUEUES.TRANSCRIBE, 'transcribe', `${rootId}:transcribe`, { rootId, meta: job.data.meta || {} }),
-      enqueueUnique(QUEUES.SCENES, 'scenes', `${rootId}:scenes`, { rootId, meta: job.data.meta || {} }),
-      enqueueUnique(QUEUES.RANK, 'rank', `${rootId}:rank`, { rootId, meta: job.data.meta || {} })
-    ]);
+    // Enqueue transcription; downstream stages chain from its completion
+    await enqueueUnique(
+      QUEUES.TRANSCRIBE,
+      'transcribe',
+      `${rootId}:transcribe`,
+      { rootId, meta: job.data.meta || {} }
+    );
     
     const totalDuration = Date.now() - startTime;
     await track(userId, 'ingest_youtube_completed', { 
@@ -594,14 +596,13 @@ async function downloadVideo(
   
   const baseOptions: any = {
     output: outputTemplate,
-    format: process.env.YTDLP_FORMAT || 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+    format: process.env.YTDLP_FORMAT || 'best[height<=720]/best',
     mergeOutputFormat: 'mp4',
-    remuxVideo: 'mp4',
     writeInfoJson: true,
     noPlaylist: true,
     noCheckCertificates: true,
     preferFreeFormats: true,
-    extractFlat: false,
+    flatPlaylist: false,
     addHeader: [
       'referer:youtube.com',
       'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -609,19 +610,19 @@ async function downloadVideo(
     // Enhanced robustness settings
     continue: true,
     noOverwrites: true,
-    retries: 'infinite',
-    fragmentRetries: 'infinite',
-    retrySleep: 'fragment:exp=1:10',
-    forceIpv4: process.env.YTDLP_FORCE_IP_V4 === 'true',
-    limitRate: '5M',
+    retries: 3,
+    fragmentRetries: 5,
     newline: true,
     progressTemplate: 'download:%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
     // Additional options for problematic videos
     skipUnavailableFragments: true,
-    keepFragments: false,
     bufferSize: '16K',
     httpChunkSize: '10M'
   };
+
+  if (process.env.YTDLP_FORCE_IP_V4 === 'true') {
+    baseOptions.forceIpv4 = true;
+  }
   
   // Set custom ffmpeg path if available
   if (ffmpegPath) {
@@ -635,40 +636,65 @@ async function downloadVideo(
   } catch (primaryError: any) {
     log.warn({ jobId, url, error: primaryError.message }, 'Standard download failed, trying fallback');
     
-    // Fallback attempt with cookies and enhanced headers
+    // Fallback attempt with simplified options and better error handling
     try {
       const fallbackOptions = {
-        ...baseOptions,
+        output: outputTemplate,
+        format: 'best[height<=480]/best',
+        mergeOutputFormat: 'mp4',
+        writeInfoJson: true,
+        noPlaylist: true,
+        noCheckCertificates: true,
+        preferFreeFormats: true,
+        flatPlaylist: false,
+        // Simplified headers
         addHeader: [
-          ...baseOptions.addHeader,
-          'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language: en-US,en;q=0.5',
-          'Accept-Encoding: gzip, deflate',
-          'Connection: keep-alive',
-          'Upgrade-Insecure-Requests: 1'
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         ],
+        // Basic settings only
+        continue: true,
+        noOverwrites: true,
+        retries: 2,
+        fragmentRetries: 3,
+        newline: true,
         // Try to use cookies if available from Supabase
         ...(await getCookiesOptions()),
         // Additional fallback options
-        extractor: 'youtube',
-        ignoreErrors: false,
+        noIgnoreErrors: true,
         skipUnavailableFragments: true,
-        keepFragments: false,
-        embedSubs: false,
-        writeSubtitles: false,
-        // Try different formats for problematic videos
-        format: 'best[height<=720]/best'
+        // Add more robust timeout and connection settings
+        socketTimeout: 60,
+        verbose: true
       };
       
-      log.info({ jobId, url }, 'StartDownload - Fallback attempt with cookies');
+      log.info({ jobId, url }, 'StartDownload - Fallback attempt with enhanced options');
       return await attemptDownload(url, fallbackOptions, job);
       
     } catch (fallbackError: any) {
-      log.error({ jobId, url, primaryError: primaryError.message, fallbackError: fallbackError.message }, 'All download attempts failed');
+      log.error({ 
+        jobId, 
+        url, 
+        primaryError: primaryError.message, 
+        fallbackError: fallbackError.message,
+        errorCode: fallbackError.code,
+        errorStack: fallbackError.stack
+      }, 'All download attempts failed');
+      
+      // Provide more specific error messages based on common failure patterns
+      let specificError = fallbackError.message;
+      if (fallbackError.message.includes('code 2')) {
+        specificError = 'Video não está disponível ou foi removido do YouTube. Verifique se o link está correto e o vídeo é público.';
+      } else if (fallbackError.message.includes('network') || fallbackError.message.includes('timeout')) {
+        specificError = 'Problema de conexão com o YouTube. Tente novamente em alguns minutos.';
+      } else if (fallbackError.message.includes('authentication') || fallbackError.message.includes('private')) {
+        specificError = 'Este vídeo é privado ou requer autenticação. Use apenas vídeos públicos.';
+      } else if (fallbackError.message.includes('geo')) {
+        specificError = 'Este vídeo não está disponível na sua região.';
+      }
       
       // Mark as failed and store URL for inspection
-      await markJobAsFailed(job, url, fallbackError.message);
-      throw new UnrecoverableError(`Download failed after fallback: ${fallbackError.message}`);
+      await markJobAsFailed(job, url, specificError);
+      throw new UnrecoverableError(`Download failed after fallback: ${specificError}`);
     }
   }
 }
@@ -680,14 +706,30 @@ async function attemptDownload(
 ): Promise<{ videoPath: string; infoPath: string; info: VideoInfo }> {
   return new Promise(async (resolve, reject) => {
     const ytdl = await configureYtdl();
+    
+    // Debug: Log the command that will be executed
+    log.info({ 
+      jobId: job.id, 
+      url, 
+      options: JSON.stringify(options, null, 2),
+      ytdlPath: ytdl.name 
+    }, 'Attempting download with yt-dlp');
+    
     const process = ytdl.exec(url, options);
     
     let lastProgress = 0;
     let hasOutput = false;
+    let allStdout = '';
+    let allStderr = '';
     
     process.stdout?.on('data', (data: Buffer) => {
       hasOutput = true;
-      const lines = data.toString().split('\n');
+      const output = data.toString();
+      allStdout += output;
+      
+      log.info({ jobId: job.id, stdout: output.trim() }, 'yt-dlp stdout');
+      
+      const lines = output.split('\n');
       
       for (const line of lines) {
         if (line.startsWith('download:')) {
@@ -716,6 +758,10 @@ async function attemptDownload(
     
     process.stderr?.on('data', (data: Buffer) => {
       const output = data.toString();
+      allStderr += output;
+      
+      log.info({ jobId: job.id, stderr: output.trim() }, 'yt-dlp stderr');
+      
       // Log warnings but don't fail on them
       if (output.includes('WARNING')) {
         log.warn({ jobId: job.id, warning: output.trim() }, 'Download warning');
@@ -726,12 +772,21 @@ async function attemptDownload(
     
     // Set a reasonable timeout for downloads
     const timeout = setTimeout(() => {
+      log.error({ jobId: job.id }, 'Download timeout after 30 minutes');
       process.kill('SIGTERM');
       reject(new Error('Download timeout after 30 minutes'));
     }, 30 * 60 * 1000); // 30 minutes
     
     process.on('close', async (code) => {
       clearTimeout(timeout);
+      
+      log.info({ 
+        jobId: job.id, 
+        exitCode: code, 
+        hasOutput,
+        stdoutLength: allStdout.length,
+        stderrLength: allStderr.length 
+      }, 'yt-dlp process closed');
       
       if (code === 0) {
         try {
@@ -740,6 +795,14 @@ async function attemptDownload(
           const files = await fs.readdir(outputDir);
           const videoFile = files.find(f => f.match(/\.(mp4|mkv|avi|mov|webm)$/i));
           const infoFile = files.find(f => f.endsWith('.info.json'));
+          
+          log.info({ 
+            jobId: job.id, 
+            outputDir, 
+            files, 
+            videoFile, 
+            infoFile 
+          }, 'Checking downloaded files');
           
           if (!videoFile) {
             reject(new Error('Video file not found after download'));
@@ -783,12 +846,23 @@ async function attemptDownload(
         const errorMsg = hasOutput 
           ? `yt-dlp exited with code ${code}` 
           : `yt-dlp failed with code ${code} (no output received - may be a network or authentication issue)`;
+          
+        log.error({ 
+          jobId: job.id, 
+          exitCode: code, 
+          hasOutput, 
+          errorMsg,
+          lastStdout: allStdout.slice(-500), // Last 500 chars
+          lastStderr: allStderr.slice(-500)  // Last 500 chars
+        }, 'yt-dlp failed');
+        
         reject(new Error(errorMsg));
       }
     });
     
     process.on('error', (error) => {
       clearTimeout(timeout);
+      log.error({ jobId: job.id, error: error.message }, 'yt-dlp process error');
       reject(error);
     });
   });
@@ -1093,27 +1167,13 @@ async function processUploadedVideo(
     
     await job.updateProgress(100);
     
-    // Enqueue next jobs in pipeline
-    await Promise.all([
-      enqueueUnique(
-        QUEUES.TRANSCRIBE,
-        'transcribe', 
-        `${rootId}:transcribe`,
-        { rootId, meta: job.data.meta || {} }
-      ),
-      enqueueUnique(
-        QUEUES.SCENES,
-        'scenes',
-        `${rootId}:scenes`,
-        { rootId, meta: job.data.meta || {} }
-      ),
-      enqueueUnique(
-        QUEUES.RANK,
-        'rank',
-        `${rootId}:rank`,
-        { rootId, meta: job.data.meta || {} }
-      )
-    ]);
+    // Enqueue transcription; scenes/rank will trigger when transcripts exist
+    await enqueueUnique(
+      QUEUES.TRANSCRIBE,
+      'transcribe', 
+      `${rootId}:transcribe`,
+      { rootId, meta: job.data.meta || {} }
+    );
     
     return {
       rootId: result.rootId,

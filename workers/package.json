@@ -10,10 +10,11 @@
     "demo:e2e": "tsx scripts/demo-e2e.ts"
   },
   "dependencies": {
+    "@fastify/cors": "^8.5.0",
     "@fastify/rate-limit": "^7.6.0",
     "@supabase/supabase-js": "^2.57.2",
     "bullmq": "^5.58.4",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.6.1",
     "fastify": "^4.26.2",
     "fastify-sse-v2": "^4.0.0",
     "ffmpeg-static": "^5.2.0",

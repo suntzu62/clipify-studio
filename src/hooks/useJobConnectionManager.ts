@@ -179,7 +179,26 @@ class JobConnectionManager {
       }
       
       console.log(`[ConnectionManager] Starting SSE connection for job ${jobId} (attempt ${connection.connectionAttempts})`);
-      const url = `https://qibjqqucmbrtuirysexl.functions.supabase.co/job-stream?id=${jobId}&token=${token}`;
+      
+      // Use local workers API if available, otherwise fallback to Supabase
+      const useLocalAPI = import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY;
+      let url: string;
+      
+      if (useLocalAPI) {
+        // Development: use local workers API
+        const apiKey = import.meta.env.VITE_WORKERS_API_KEY;
+        url = `${import.meta.env.VITE_WORKERS_API_URL}/api/jobs/${jobId}/stream`;
+        console.log(`[ConnectionManager] Using local workers API: ${url}`);
+        
+        // For local API, we need to pass the API key in headers via EventSource constructor options
+        // Since EventSource doesn't support custom headers, we'll add it as a query parameter
+        url += `?api_key=${apiKey}`;
+      } else {
+        // Production: use Supabase functions
+        url = `https://qibjqqucmbrtuirysexl.functions.supabase.co/job-stream?id=${jobId}&token=${token}`;
+        console.log(`[ConnectionManager] Using Supabase functions: ${url}`);
+      }
+      
       const eventSource = new EventSource(url);
       
       connection.eventSource = eventSource;

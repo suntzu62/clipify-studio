@@ -141,8 +141,29 @@ export const useClipList = (jobResult?: any) => {
       return;
     }
 
+    // Strategy 4.5: Handle failed jobs - don't create placeholders for failed jobs
+    if (jobResult?.status === 'failed') {
+      log.error('[useClipList] Job failed, not creating clips', { 
+        jobId: jobResult?.id,
+        error: jobResult?.error,
+        status: jobResult?.status 
+      });
+      setDebugInfo(prev => ({ ...prev, processed: true, strategy: 'failed_job', foundClips: 0 }));
+      // Create failed clips to show error state
+      const failedClips = Array.from({ length: 1 }, (_, index) => ({
+        id: `failed-clip-${index + 1}`,
+        title: 'Falha no processamento',
+        description: jobResult?.error || 'Erro ao processar o vídeo. Tente novamente.',
+        hashtags: [],
+        duration: 0,
+        status: 'failed' as const
+      }));
+      setClips(failedClips);
+      return;
+    }
+
     // Strategy 5: Default to placeholder clips for processing jobs only
-    if (jobResult?.status !== 'completed') {
+    if (jobResult?.status && !['completed', 'failed'].includes(jobResult.status)) {
       log.info('[useClipList] Creating placeholder clips for processing job', { 
         status: jobResult?.status,
         estimatedClipCount 

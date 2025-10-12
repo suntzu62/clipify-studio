@@ -23,8 +23,14 @@ const parseRedisUrl = (url: string) => {
 // BullMQ specific connection
 export const bullmqConnection: ConnectionOptions = {
   ...parseRedisUrl(url || fallbackUrl),
-  connectTimeout: 10000
+  connectTimeout: 10000,
+  lazyConnect: true,
+  maxRetriesPerRequest: null // Required by BullMQ
 };
 
 // General Redis connection for other purposes
-export const connection = new Redis(url || fallbackUrl);
+export const connection = new Redis(url || fallbackUrl, {
+  maxRetriesPerRequest: null,
+  lazyConnect: true,
+  connectTimeout: 10000
+});

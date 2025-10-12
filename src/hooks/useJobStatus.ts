@@ -93,15 +93,40 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
 
   // Periodic enrichment polling - fetch clips every 20 seconds while job is active
   useEffect(() => {
-    if (!enabled || !jobId || isJobTerminal(jobStatus)) return;
+    // Don't poll if job is terminal (completed or failed)
+    if (!enabled || !jobId || isJobTerminal(jobStatus) || enrichedDataFetched) {
+      return;
+    }
 
     console.log('[useJobStatus] Starting periodic enrichment polling');
     
     const fetchEnrichedData = async () => {
       try {
+        // Check again before fetching to avoid race conditions
+        if (isJobTerminal(jobStatus)) {
+          console.log('[useJobStatus] Job is terminal, skipping enrichment fetch');
+          return;
+        }
+        
         console.log('[useJobStatus] Fetching enriched job status via polling');
         const enrichedJob = await getJobStatus(jobId, getSupabaseToken);
         console.log('[useJobStatus] Enriched job status fetched:', enrichedJob);
+        
+        // If job failed, stop polling immediately
+        if (enrichedJob.status === 'failed') {
+          console.log('[useJobStatus] Job failed, stopping enrichment polling');
+          setEnrichedDataFetched(true);
+          setStalled(false);
+          setJobStatus(prevStatus => ({
+            ...prevStatus,
+            ...enrichedJob,
+            result: {
+              ...prevStatus?.result,
+              ...enrichedJob.result
+            }
+          } as JobStatus));
+          return;
+        }
         
         // Merge enriched data with current status, prioritizing enriched clips
         setJobStatus(prevStatus => {
@@ -119,9 +144,10 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
           } as JobStatus;
         });
 
-        // Stop polling once we have clips
-        if (enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) {
-          console.log('[useJobStatus] Clips found, stopping enrichment polling');
+        // Stop polling once we have clips or job is completed/failed
+        if ((enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) || 
+            enrichedJob.status === 'completed' || enrichedJob.status === 'failed') {
+          console.log('[useJobStatus] Clips found or job terminal, stopping enrichment polling');
           setEnrichedDataFetched(true);
           setStalled(false);
         }
@@ -137,6 +163,10 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     const pollInterval = setInterval(() => {
       if (!isJobTerminal(jobStatus) && !enrichedDataFetched) {
         fetchEnrichedData();
+      } else {
+        // Clear interval if job became terminal
+        clearInterval(pollInterval);
+        setEnrichedDataFetched(true);
       }
     }, 20000);
 
