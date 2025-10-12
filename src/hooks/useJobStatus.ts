@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import { useJobConnectionManager } from './useJobConnectionManager';
 import { JobStatus } from './useJobStream';
-import { getJobStatus } from '@/lib/jobs-api';
+import { getJobStatus, type Job } from '@/lib/jobs-api';
 
 interface UseJobStatusOptions {
   jobId: string;
@@ -109,7 +109,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
         }
         
         console.log('[useJobStatus] Fetching enriched job status via polling');
-        const enrichedJob = await getJobStatus(jobId, getSupabaseToken);
+        const enrichedJob: Job = await getJobStatus(jobId, getSupabaseToken);
         console.log('[useJobStatus] Enriched job status fetched:', enrichedJob);
         
         // If job failed, stop polling immediately
@@ -145,7 +145,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
         });
 
         // Stop polling once we have clips or job is completed/failed
-        const isTerminal = enrichedJob.status === 'completed' || enrichedJob.status === 'failed';
+        const isTerminal = (enrichedJob as Job).status === 'completed' || (enrichedJob as Job).status === 'failed';
         if ((enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) || isTerminal) {
           console.log('[useJobStatus] Clips found or job terminal, stopping enrichment polling');
           setEnrichedDataFetched(true);
@@ -212,7 +212,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
   // Manual refresh to fetch enriched data immediately
   const refreshNow = useCallback(async () => {
     try {
-      const enrichedJob = await getJobStatus(jobId, getSupabaseToken);
+      const enrichedJob: Job = await getJobStatus(jobId, getSupabaseToken);
       setJobStatus(prevStatus => ({
         ...prevStatus,
         ...enrichedJob,

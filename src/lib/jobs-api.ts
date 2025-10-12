@@ -1,11 +1,13 @@
 import { getAuthHeader } from './auth-token';
 
-import { VideoSource } from '../types/pipeline';
-
-export interface Job extends VideoSource {
+export interface Job {
   id: string;
   status: 'queued' | 'active' | 'waiting-children' | 'completed' | 'failed';
   progress: number;
+  // VideoSource fields
+  youtubeUrl?: string;
+  storagePath?: string;
+  fileName?: string;
   createdAt: string;
   neededMinutes: number;
   targetDuration?: string;
