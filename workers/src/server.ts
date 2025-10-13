@@ -66,7 +66,15 @@ export async function start() {
   
   // Add CORS configuration
   await app.register(fastifyCors, {
-    origin: ['http://localhost:8080', 'http://127.0.0.1:8080', 'https://qibjqqucmbrtuirysexl.supabase.co'],
+    origin: [
+      // Frontend produção
+      'https://clipify-studio.lovable.app',
+      // Frontend dev local
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      // Supabase edge functions
+      'https://qibjqqucmbrtuirysexl.supabase.co'
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'apikey']
