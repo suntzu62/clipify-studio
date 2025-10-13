@@ -8,7 +8,7 @@ import pino from 'pino';
 import { uploadFile, downloadToTemp } from '../lib/storage';
 import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
-import type { JobData, IngestResult, VideoInfo } from '../../src/types/pipeline';
+import type { JobData, IngestResult, VideoInfo } from '../types/pipeline';
 
 const log = pino({ name: 'ingest' });
 
