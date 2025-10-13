@@ -103,8 +103,23 @@ serve(async (req) => {
       source: source.type
     });
     
-    const workersApiUrl = Deno.env.get('WORKERS_API_URL')!;
-    const workersApiKey = Deno.env.get('WORKERS_API_KEY')!;
+    const workersApiUrl = Deno.env.get('WORKERS_API_URL');
+    if (!workersApiUrl) {
+      console.error('[enqueue-pipeline] WORKERS_API_URL not configured');
+      return new Response(JSON.stringify({ error: 'workers_api_not_configured' }), { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 
+      });
+    }
+    
+    const workersApiKey = Deno.env.get('WORKERS_API_KEY');
+    if (!workersApiKey) {
+      console.error('[enqueue-pipeline] WORKERS_API_KEY not configured');
+      return new Response(JSON.stringify({ error: 'workers_api_key_not_configured' }), { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 
+      });
+    }
+    
+    console.log('[enqueue-pipeline] Using Workers API:', workersApiUrl);
     
     const response = await fetch(`${workersApiUrl}/api/jobs/pipeline`, {
       method: 'POST',

@@ -1,0 +1,148 @@
+services:
+  # Backend Workers API
+  - type: web
+    name: cortai-workers
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: cd workers && npm install && npm run build
+    startCommand: cd workers && npm start
+    healthCheckPath: /health
+    envVars:
+      # Redis Cloud
+      - key: REDIS_URL
+        value: redis://default:c3NlSqpGqpWT2BPSrLwRTtMQqscGi2zuX@redis-14366.c256.us-east-1-2.ec2.reds.redis-cloud.com:14366
+      
+      # Workers API
+      - key: WORKERS_API_PORT
+        value: 8787
+      - key: WORKERS_API_KEY
+        sync: false
+      
+      # Supabase
+      - key: SUPABASE_URL
+        value: https://qibjqqucmbrtuirysexl.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os
+      - key: SUPABASE_STORAGE_BUCKET
+        value: raw
+      
+      # OpenAI
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TRANSCRIBE_MODEL
+        value: whisper-1
+      - key: TEXTS_MODEL
+        value: gpt-4o-mini
+      - key: RANK_EMBED_MODEL
+        value: text-embedding-3-small
+      
+      # Workers Concurrency
+      - key: WORKERS_CONCURRENCY
+        value: 1
+      - key: INGEST_CONCURRENCY
+        value: 1
+      - key: TRANSCRIBE_CONCURRENCY
+        value: 1
+      - key: SCENES_CONCURRENCY
+        value: 1
+      - key: RANK_CONCURRENCY
+        value: 1
+      - key: RENDER_CONCURRENCY
+        value: 1
+      - key: TEXTS_CONCURRENCY
+        value: 1
+      - key: EXPORT_CONCURRENCY
+        value: 1
+      
+      # YT-DLP
+      - key: YTDLP_FORMAT
+        value: best[height<=720]/best
+      - key: YTDLP_RETRIES
+        value: 3
+      - key: YTDLP_FORCE_IP_V4
+        value: false
+      
+      # Scenes
+      - key: SCENES_SILENCE_DB
+        value: -25
+      - key: SCENES_SILENCE_MIN
+        value: 0.2
+      - key: SCENES_SIM_THRESHOLD
+        value: 0.65
+      - key: SCENES_MIN
+        value: 15
+      - key: SCENES_MAX
+        value: 90
+      
+      # Rank
+      - key: RANK_TOP_K
+        value: 12
+      - key: RANK_MIN
+        value: 20
+      - key: RANK_MAX
+        value: 90
+      - key: RANK_TARGET
+        value: 55
+      
+      # Render
+      - key: RENDER_FPS
+        value: 30
+      - key: RENDER_MODE
+        value: crop
+      - key: RENDER_VIDEO_BITRATE
+        value: 8M
+      - key: RENDER_VIDEO_MAXRATE
+        value: 10M
+      - key: RENDER_VIDEO_BUFSIZE
+        value: 20M
+      - key: RENDER_AUDIO_BITRATE
+        value: 160k
+      - key: RENDER_FONT
+        value: Inter
+      - key: RENDER_MARGIN_V
+        value: 60
+      
+      # Texts
+      - key: TEXTS_TONE
+        value: informal
+      - key: TEXTS_HASHTAG_MAX
+        value: 12
+      - key: TEXTS_BLOG_WORDS_MIN
+        value: 800
+      - key: TEXTS_BLOG_WORDS_MAX
+        value: 1200
+      
+      # YouTube OAuth
+      - key: GOOGLE_CLIENT_ID
+        value: 364881545126-2nvag3er67ahden3t4cjp382g8ipgk2j.apps.googleusercontent.com
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: YT_REDIRECT_URI
+        value: https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/yt-oauth-callback
+      - key: YT_SCOPES
+        value: https://www.googleapis.com/auth/youtube.upload
+      - key: YT_PRIVACY
+        value: unlisted
+      - key: YT_CATEGORY_ID
+        value: 22
+      - key: YT_MADE_FOR_KIDS
+        value: false
+      
+      # Rate Limits
+      - key: OPENAI_RATE_MAX
+        value: 5
+      - key: OPENAI_RATE_MS
+        value: 2000
+      - key: YOUTUBE_RATE_MAX
+        value: 5
+      - key: YOUTUBE_RATE_MS
+        value: 2000
+      
+      # Analytics
+      - key: POSTHOG_KEY
+        value: ""
+      - key: POSTHOG_HOST
+        value: https://app.posthog.com
