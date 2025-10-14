@@ -74,8 +74,9 @@ export async function enqueueFromUrl(
   url: string,
   getToken?: () => Promise<string | null>
 ) {
-  // Use local workers API if available during development
-  const useLocalAPI = import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY;
+  // Use local workers API only in development with explicit envs
+  const useLocalAPI = import.meta.env.DEV &&
+    Boolean(import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY);
   
   if (useLocalAPI) {
     const headers = {
@@ -129,8 +130,9 @@ export async function enqueuePipeline(
   getToken?: () => Promise<string | null>
 ) {
   // Edge function transforma entrada no novo formato JobData
-  // Use local workers API if available during development
-  const useLocalAPI = import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY;
+  // Use local workers API only in development with explicit envs
+  const useLocalAPI = import.meta.env.DEV &&
+    Boolean(import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY);
   
   if (useLocalAPI) {
     const headers = {
@@ -256,8 +258,9 @@ export async function getJobStatus(
   jobId: string,
   getToken?: () => Promise<string | null>
 ): Promise<Job> {
-  // Use local workers API if available during development
-  const useLocalAPI = import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY;
+  // Use local workers API only in development with explicit envs
+  const useLocalAPI = import.meta.env.DEV &&
+    Boolean(import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY);
   
   if (useLocalAPI) {
     const headers = {
