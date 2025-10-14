@@ -64,20 +64,15 @@ export async function start() {
 
   const app = Fastify({ logger: false });
   
-  // Add CORS configuration
+  // Add CORS configuration with wildcard for more flexibility
   await app.register(fastifyCors, {
-    origin: [
-      // Frontend produção
-      'https://clipify-studio.lovable.app',
-      // Frontend dev local
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      // Supabase edge functions
-      'https://qibjqqucmbrtuirysexl.supabase.co'
-    ],
+    origin: true, // Accept all origins for now to debug
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'apikey']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'apikey'],
+    exposedHeaders: ['Content-Type'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204
   });
   
   // Add root route
