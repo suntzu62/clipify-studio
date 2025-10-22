@@ -210,15 +210,17 @@ async function processYouTube(
     // Detectar binário yt-dlp instalado via apt ou env
     const systemBinary = process.env.YTDLP_BINARY || '/usr/bin/yt-dlp';
     
-    // Instanciar yt-dlp-wrap
-    const ytDlp = new YTDlpWrap();
-    
-    // Configurar binary path se o binário do sistema existir
+    // Verificar se binário do sistema existe
     const fsSync = await import('fs');
+    let ytDlp: YTDlpWrap;
+    
     if (fsSync.existsSync(systemBinary)) {
-      ytDlp.setBinaryPath(systemBinary);
+      // Passar binary path no construtor
+      ytDlp = new YTDlpWrap(systemBinary);
       log.info({ binaryPath: systemBinary }, 'UsingSystemYTDlp');
     } else {
+      // Usar construtor sem parâmetros (deixa wrapper gerenciar)
+      ytDlp = new YTDlpWrap();
       log.info({ 
         binaryPath: ytDlp.getBinaryPath(),
         note: 'System binary not found, using default'
