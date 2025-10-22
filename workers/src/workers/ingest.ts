@@ -1,7 +1,7 @@
 import { Job, UnrecoverableError } from 'bullmq';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import youtubeDl from 'youtube-dl-exec';
+import YTDlpWrap from 'yt-dlp-wrap';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import pino from 'pino';
@@ -207,20 +207,27 @@ async function processYouTube(
   log.info({ youtubeUrl }, 'DownloadingFromYouTube');
   
   try {
+    // Instanciar yt-dlp-wrap
+    const ytDlp = new YTDlpWrap();
+    
+    log.info({ 
+      youtubeUrl,
+      binaryPath: ytDlp.getBinaryPath()
+    }, 'InitializingYTDlp');
+    
     // Download com yt-dlp usando flags seguras
-    await youtubeDl(youtubeUrl, {
-      output: videoPath,
-      format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
-      writeInfoJson: true,
-      noPlaylist: true,
-      noPart: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      addHeader: [
-        'referer:youtube.com', 
-        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      ]
-    });
+    await ytDlp.execPromise([
+      youtubeUrl,
+      '--output', videoPath,
+      '--format', 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
+      '--write-info-json',
+      '--no-playlist',
+      '--no-part',
+      '--no-warnings',
+      '--prefer-free-formats',
+      '--referer', 'youtube.com',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    ]);
     
     await job.updateProgress(40);
     
@@ -247,7 +254,12 @@ async function processYouTube(
     return { videoPath, info };
     
   } catch (error: any) {
-    log.error({ youtubeUrl, error: error.message }, 'YouTubeDownloadFailed');
+    log.error({ 
+      youtubeUrl, 
+      error: error.message,
+      stderr: error.stderr,
+      stack: error.stack 
+    }, 'YouTubeDownloadFailed');
     
     if (error.message?.includes('Video unavailable')) {
       throw new UnrecoverableError('VIDEO_UNAVAILABLE: This video is not available');
