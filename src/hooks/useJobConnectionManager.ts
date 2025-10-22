@@ -180,23 +180,21 @@ class JobConnectionManager {
       
       console.log(`[ConnectionManager] Starting SSE connection for job ${jobId} (attempt ${connection.connectionAttempts})`);
       
-      // Use local workers API if available, otherwise fallback to Supabase
-      const useLocalAPI = import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY;
+      // CRITICAL: Only use local workers API in development mode
+      // In production, ALWAYS use Supabase Edge Function (job-stream) to avoid CORS issues
+      const useLocalAPI = import.meta.env.DEV && import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY;
       let url: string;
       
       if (useLocalAPI) {
-        // Development: use local workers API
+        // Development only: connect directly to local workers API
         const apiKey = import.meta.env.VITE_WORKERS_API_KEY;
-        url = `${import.meta.env.VITE_WORKERS_API_URL}/api/jobs/${jobId}/stream`;
-        console.log(`[ConnectionManager] Using local workers API: ${url}`);
-        
-        // For local API, we need to pass the API key in headers via EventSource constructor options
-        // Since EventSource doesn't support custom headers, we'll add it as a query parameter
-        url += `?api_key=${apiKey}`;
+        url = `${import.meta.env.VITE_WORKERS_API_URL}/api/jobs/${jobId}/stream?api_key=${apiKey}`;
+        console.log(`[ConnectionManager] 🔧 DEV MODE: Using local workers API: ${url}`);
       } else {
-        // Production: use Supabase functions
-        url = `https://qibjqqucmbrtuirysexl.functions.supabase.co/job-stream?id=${jobId}&token=${token}`;
-        console.log(`[ConnectionManager] Using Supabase functions: ${url}`);
+        // Production: ALWAYS use Supabase Edge Function (job-stream) as proxy
+        // The Edge Function uses WORKERS_API_URL and WORKERS_API_KEY from Supabase Secrets
+        url = `https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/job-stream?id=${jobId}&token=${token}`;
+        console.log(`[ConnectionManager] 🚀 PRODUCTION: Using Supabase Edge Function: https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/job-stream`);
       }
       
       const eventSource = new EventSource(url);
