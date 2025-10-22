@@ -319,6 +319,10 @@ export async function start() {
   // SSE stream of job events - with heartbeat
   app.get('/api/jobs/:id/stream', { preHandler: apiKeyGuardSSE }, async (req: any, res: any) => {
     const { id } = req.params as { id: string };
+    
+    // Explicit CORS headers for SSE
+    res.raw.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.raw.setHeader('Access-Control-Allow-Credentials', 'true');
     res.raw.setHeader('Content-Type', 'text/event-stream');
     res.raw.setHeader('Cache-Control', 'no-cache');
     res.raw.setHeader('Connection', 'keep-alive');
