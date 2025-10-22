@@ -78,10 +78,9 @@ export const useJobStream = (jobId: string) => {
           return;
         }
 
-        // Connect directly to Workers API instead of Supabase proxy
-        const apiKey = import.meta.env.VITE_WORKERS_API_KEY || '';
-        const workersUrl = import.meta.env.VITE_WORKERS_API_URL || 'https://cortai-redis.onrender.com';
-        const url = `${workersUrl}/api/jobs/${jobId}/stream?api_key=${apiKey}`;
+        // Connect to Supabase Edge Function (job-stream) which proxies to Render
+        // The Edge Function uses WORKERS_API_URL and WORKERS_API_KEY from Supabase Secrets
+        const url = `https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/job-stream?id=${jobId}&token=${token}`;
         const eventSource = new EventSource(url);
         eventSourceRef.current = eventSource;
 
