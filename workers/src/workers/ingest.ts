@@ -1,7 +1,7 @@
 import { Job, UnrecoverableError } from 'bullmq';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import YTDlpWrap from 'yt-dlp-wrap';
+import youtubedl from 'youtube-dl-exec';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import pino from 'pino';
@@ -206,47 +206,23 @@ async function processYouTube(
   
   log.info({ youtubeUrl }, 'DownloadingFromYouTube');
   
+  // Use youtube-dl-exec which automatically manages yt-dlp binary
   try {
-    // Detectar binário yt-dlp instalado via apt ou env
-    const systemBinary = process.env.YTDLP_BINARY || '/usr/bin/yt-dlp';
-    
-    // Verificar se binário do sistema existe
-    const fsSync = await import('fs');
-    let ytDlp: YTDlpWrap;
-    
-    if (fsSync.existsSync(systemBinary)) {
-      // Passar binary path no construtor
-      ytDlp = new YTDlpWrap(systemBinary);
-      log.info({ binaryPath: systemBinary }, 'UsingSystemYTDlp');
-    } else {
-      // Usar construtor sem parâmetros (deixa wrapper gerenciar)
-      ytDlp = new YTDlpWrap();
-      log.info({ 
-        binaryPath: ytDlp.getBinaryPath(),
-        note: 'System binary not found, using default'
-      }, 'UsingDefaultYTDlp');
-    }
-    
-    log.info({ 
-      youtubeUrl,
-      binaryPath: ytDlp.getBinaryPath()
-    }, 'InitializingYTDlp');
-    
-    // Download com yt-dlp usando flags seguras
-    await ytDlp.execPromise([
-      youtubeUrl,
-      '--output', videoPath,
-      '--format', 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
-      '--write-info-json',
-      '--no-playlist',
-      '--no-part',
-      '--no-warnings',
-      '--prefer-free-formats',
-      '--referer', 'youtube.com',
-      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    ]);
-    
+    await youtubedl(youtubeUrl, {
+      output: videoPath,
+      format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      noPlaylist: true,
+      mergeOutputFormat: 'mp4',
+      writeInfoJson: true,
+      noPart: true,
+      noWarnings: true,
+      preferFreeFormats: true,
+      referer: 'youtube.com',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    });
+
     await job.updateProgress(40);
+    log.info({ videoPath }, 'YouTubeDownloadComplete');
     
     // Ler metadata
     const rawInfo = JSON.parse(await fs.readFile(infoPath, 'utf-8'));

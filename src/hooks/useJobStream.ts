@@ -78,9 +78,10 @@ export const useJobStream = (jobId: string) => {
           return;
         }
 
-        // SSE doesn't support custom headers, so we still need to use query params
-        // The backend will validate the token from query params
-        const url = `https://qibjqqucmbrtuirysexl.functions.supabase.co/job-stream?id=${jobId}&token=${token}`;
+        // Connect directly to Workers API instead of Supabase proxy
+        const apiKey = import.meta.env.VITE_WORKERS_API_KEY || '';
+        const workersUrl = import.meta.env.VITE_WORKERS_API_URL || 'https://cortai-redis.onrender.com';
+        const url = `${workersUrl}/api/jobs/${jobId}/stream?api_key=${apiKey}`;
         const eventSource = new EventSource(url);
         eventSourceRef.current = eventSource;
 
