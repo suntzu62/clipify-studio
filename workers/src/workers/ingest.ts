@@ -225,8 +225,8 @@ async function processYouTube(
       noWarnings: true,
       preferFreeFormats: true,
       
-      // 🔥 FLAGS ANTI-BLOQUEIO: Finge ser cliente Android do YouTube (formato CLI string)
-      extractorArgs: 'youtube:player_client=android,mweb',
+      // 🔥 FLAGS ANTI-BLOQUEIO: Passa argumento CLI direto para yt-dlp
+      '--extractor-args': 'youtube:player_client=android',
       
       // Headers que fazem parecer app Android
       userAgent: 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
