@@ -202,7 +202,7 @@ async function processYouTube(
   job: Job
 ): Promise<{ videoPath: string; info: VideoInfo }> {
   const videoPath = join(tmpDir, 'video.mp4');
-  const infoPath = join(tmpDir, 'info.json');
+  const infoPath = `${videoPath}.info.json`;
   
   log.info({ youtubeUrl }, 'DownloadingFromYouTube');
   
@@ -215,30 +215,22 @@ async function processYouTube(
   const youtubedlWithBinary = youtubedl.create(ytDlpPath);
   
   try {
-    await youtubedlWithBinary(youtubeUrl, {
-      output: videoPath,
-      format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      noPlaylist: true,
-      mergeOutputFormat: 'mp4',
-      writeInfoJson: true,
-      noPart: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      
-      // 🔥 FLAGS ANTI-BLOQUEIO: Passa argumento CLI direto para yt-dlp
-      '--extractor-args': 'youtube:player_client=android',
-      
-      // Headers que fazem parecer app Android
-      userAgent: 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
-      referer: 'https://www.youtube.com/',
-      
-      // Retry logic para lidar com falhas temporárias
-      retries: 3,
-      fragmentRetries: 10,
-      
-      // Ignora erros de certificado SSL
-      noCheckCertificates: true,
-    });
+    await youtubedlWithBinary(youtubeUrl, [
+      '-o', videoPath,
+      '-f', 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      '--no-playlist',
+      '--merge-output-format', 'mp4',
+      '--write-info-json',
+      '--no-part',
+      '--no-warnings',
+      '--prefer-free-formats',
+      '--extractor-args', 'youtube:player_client=android',
+      '--user-agent', 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
+      '--referer', 'https://www.youtube.com/',
+      '--retries', '3',
+      '--fragment-retries', '10',
+      '--no-check-certificates'
+    ] as any);
 
     await job.updateProgress(40);
     log.info({ videoPath }, 'YouTubeDownloadComplete');
