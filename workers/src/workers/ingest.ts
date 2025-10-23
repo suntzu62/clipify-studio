@@ -225,19 +225,12 @@ async function processYouTube(
       noWarnings: true,
       preferFreeFormats: true,
       
-      // 🔥 FLAGS ANTI-BLOQUEIO: Finge ser cliente Android do YouTube
-      extractorArgs: {
-        youtube: [
-          'player_client=android',           // Simula app Android
-          'player_skip=webpage,configs',     // Pula parsing da webpage
-        ]
-      },
+      // 🔥 FLAGS ANTI-BLOQUEIO: Finge ser cliente Android do YouTube (formato CLI string)
+      extractorArgs: 'youtube:player_client=android,mweb',
       
       // Headers que fazem parecer app Android
-      addHeader: [
-        'User-Agent:com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
-        'Accept-Language:en-US,en;q=0.9',
-      ],
+      userAgent: 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
+      referer: 'https://www.youtube.com/',
       
       // Retry logic para lidar com falhas temporárias
       retries: 3,
