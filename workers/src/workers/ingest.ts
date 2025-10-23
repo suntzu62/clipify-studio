@@ -224,8 +224,27 @@ async function processYouTube(
       noPart: true,
       noWarnings: true,
       preferFreeFormats: true,
-      referer: 'youtube.com',
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      
+      // 🔥 FLAGS ANTI-BLOQUEIO: Finge ser cliente Android do YouTube
+      extractorArgs: {
+        youtube: [
+          'player_client=android',           // Simula app Android
+          'player_skip=webpage,configs',     // Pula parsing da webpage
+        ]
+      },
+      
+      // Headers que fazem parecer app Android
+      addHeader: [
+        'User-Agent:com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
+        'Accept-Language:en-US,en;q=0.9',
+      ],
+      
+      // Retry logic para lidar com falhas temporárias
+      retries: 3,
+      fragmentRetries: 10,
+      
+      // Ignora erros de certificado SSL
+      noCheckCertificates: true,
     });
 
     await job.updateProgress(40);
@@ -261,14 +280,32 @@ async function processYouTube(
       stack: error.stack 
     }, 'YouTubeDownloadFailed');
     
-    if (error.message?.includes('Video unavailable')) {
-      throw new UnrecoverableError('VIDEO_UNAVAILABLE: This video is not available');
-    }
-    if (error.message?.includes('Private video')) {
-      throw new UnrecoverableError('VIDEO_PRIVATE: This video is private');
+    // Mensagens de erro mais específicas e úteis
+    const errorMsg = error.message || '';
+    const stderr = error.stderr || '';
+    
+    if (errorMsg.includes('Sign in to confirm') || stderr.includes('Sign in to confirm')) {
+      throw new UnrecoverableError(
+        'YOUTUBE_BLOCKED: Este vídeo está temporariamente bloqueado pelo YouTube. Tente: (1) outro vídeo público, ou (2) faça upload do arquivo MP4 diretamente.'
+      );
     }
     
-    throw error;
+    if (errorMsg.includes('Video unavailable') || stderr.includes('Video unavailable')) {
+      throw new UnrecoverableError('VIDEO_UNAVAILABLE: Vídeo não está disponível');
+    }
+    
+    if (errorMsg.includes('Private video') || stderr.includes('Private video')) {
+      throw new UnrecoverableError('VIDEO_PRIVATE: Vídeo é privado');
+    }
+    
+    if (errorMsg.includes('This video has been removed')) {
+      throw new UnrecoverableError('VIDEO_REMOVED: Vídeo foi removido');
+    }
+    
+    // Erro genérico mais útil
+    throw new UnrecoverableError(
+      `YOUTUBE_ERROR: Não foi possível baixar o vídeo. Tente fazer upload do arquivo MP4 diretamente. Erro: ${errorMsg}`
+    );
   }
 }
 
