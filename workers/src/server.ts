@@ -113,6 +113,36 @@ export async function start() {
     }
   });
 
+  // yt-dlp binary health check endpoint (auth required)
+  app.get('/api/health/yt-dlp', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
+    try {
+      const { ensureYtDlpBinary } = await import('./lib/yt-dlp');
+      const binaryPath = await ensureYtDlpBinary();
+      
+      // Try to get version
+      let version = 'unknown';
+      try {
+        const { execSync } = await import('child_process');
+        version = execSync(`${binaryPath} --version`, { encoding: 'utf-8', timeout: 3000 }).trim();
+      } catch (versionError: any) {
+        log.warn({ error: versionError.message }, 'Failed to get yt-dlp version');
+      }
+      
+      res.send({
+        status: 'healthy',
+        binaryPath,
+        version,
+        executable: true
+      });
+    } catch (error: any) {
+      res.code(500).send({ 
+        status: 'unhealthy', 
+        error: error.message,
+        executable: false
+      });
+    }
+  });
+
   // Queue status endpoint for diagnostics
   app.get('/api/queues/status', { preHandler: apiKeyGuard }, async (req: any, res: any) => {
     try {

@@ -206,9 +206,16 @@ async function processYouTube(
   
   log.info({ youtubeUrl }, 'DownloadingFromYouTube');
   
-  // Use youtube-dl-exec which automatically manages yt-dlp binary
+  // Ensure yt-dlp binary is available
+  const { ensureYtDlpBinary } = await import('../lib/yt-dlp');
+  const ytDlpPath = await ensureYtDlpBinary();
+  log.info({ binaryPath: ytDlpPath }, 'Using yt-dlp binary at path');
+  
+  // Create youtube-dl-exec instance with explicit binary path
+  const youtubedlWithBinary = youtubedl.create(ytDlpPath);
+  
   try {
-    await youtubedl(youtubeUrl, {
+    await youtubedlWithBinary(youtubeUrl, {
       output: videoPath,
       format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
       noPlaylist: true,
