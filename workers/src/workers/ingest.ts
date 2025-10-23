@@ -215,22 +215,31 @@ async function processYouTube(
   const youtubedlWithBinary = youtubedl.create(ytDlpPath);
   
   try {
-    await youtubedlWithBinary(youtubeUrl, [
-      '-o', videoPath,
-      '-f', 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      '--no-playlist',
-      '--merge-output-format', 'mp4',
-      '--write-info-json',
-      '--no-part',
-      '--no-warnings',
-      '--prefer-free-formats',
-      '--extractor-args', 'youtube:player_client=android',
-      '--user-agent', 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
-      '--referer', 'https://www.youtube.com/',
-      '--retries', '3',
-      '--fragment-retries', '10',
-      '--no-check-certificates'
-    ] as any);
+    log.info({ youtubeUrl, ytDlpPath }, 'Starting yt-dlp download');
+    
+    await youtubedlWithBinary(youtubeUrl, {
+      output: videoPath,
+      format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      noPlaylist: true,
+      mergeOutputFormat: 'mp4',
+      writeInfoJson: true,
+      noPart: true,
+      noWarnings: true,
+      preferFreeFormats: true,
+      
+      // Simplified user agent without special characters
+      userAgent: 'Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36',
+      referer: 'https://www.youtube.com/',
+      
+      // Retry logic
+      retries: 3,
+      fragmentRetries: 10,
+      
+      // Skip certificate verification
+      noCheckCertificates: true,
+    } as any);
+    
+    log.info({ videoPath }, 'yt-dlp download completed successfully');
 
     await job.updateProgress(40);
     log.info({ videoPath }, 'YouTubeDownloadComplete');
