@@ -10,6 +10,7 @@ import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
 import { validateYouTubeVideo } from '../lib/youtube-api';
 import type { JobData, IngestResult, VideoInfo } from '../types/pipeline';
+import { createClient } from '@supabase/supabase-js';
 
 const log = pino({ name: 'ingest' });
 
@@ -202,9 +203,57 @@ async function processYouTube(
   youtubeUrl: string,
   job: Job
 ): Promise<{ videoPath: string; info: VideoInfo }> {
-  const apiKey = process.env.YOUTUBE_API_KEY;
+  // STEP 1: Try to get OAuth token from user
+  let oauthToken: string | null = null;
+  try {
+    const jobData = job.data as JobData;
+    const userId = jobData.meta?.userId;
+    
+    if (userId) {
+      const supabase = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+      
+      const { data: account } = await supabase
+        .from('youtube_accounts')
+        .select('access_token, expiry_date, refresh_token')
+        .eq('user_id', userId)
+        .single();
+      
+      if (account) {
+        const isExpired = new Date(account.expiry_date) <= new Date();
+        
+        if (isExpired && account.refresh_token) {
+          log.info({ userId }, 'Refreshing expired YouTube OAuth token');
+          const newToken = await refreshGoogleToken(
+            account.refresh_token,
+            process.env.GOOGLE_CLIENT_ID!,
+            process.env.GOOGLE_CLIENT_SECRET!
+          );
+          
+          await supabase
+            .from('youtube_accounts')
+            .update({
+              access_token: newToken.access_token,
+              expiry_date: new Date(Date.now() + newToken.expires_in * 1000).toISOString()
+            })
+            .eq('user_id', userId);
+          
+          oauthToken = newToken.access_token;
+          log.info({ userId }, 'OAuth token refreshed successfully');
+        } else if (!isExpired) {
+          oauthToken = account.access_token;
+          log.info({ userId }, 'Using existing valid OAuth token');
+        }
+      }
+    }
+  } catch (err: any) {
+    log.warn({ error: err.message }, 'Failed to get OAuth token, proceeding without auth');
+  }
   
-  // STEP 1: Validate video via YouTube Data API v3 (if configured)
+  // STEP 2: Validate video via YouTube Data API v3 (if configured)
+  const apiKey = process.env.YOUTUBE_API_KEY;
   if (apiKey) {
     try {
       log.info({ youtubeUrl }, 'Validating YouTube video via API');
@@ -233,17 +282,14 @@ async function processYouTube(
       
       await job.updateProgress(15);
     } catch (apiError: any) {
-      // Se o erro for de validação, propagar
       if (apiError.message?.startsWith('YOUTUBE_UNAVAILABLE')) {
         throw apiError;
       }
-      
-      // Se for erro de API, apenas logar e continuar com yt-dlp
       log.warn({ error: apiError.message }, 'YouTube API validation failed, proceeding with yt-dlp');
     }
   }
   
-  // STEP 2: Download video with yt-dlp
+  // STEP 3: Download video with yt-dlp
   const videoPath = join(tmpDir, 'video.mp4');
   const infoPath = `${videoPath}.info.json`;
   
@@ -257,30 +303,40 @@ async function processYouTube(
   // Create youtube-dl-exec instance with explicit binary path
   const youtubedlWithBinary = youtubedl.create(ytDlpPath);
   
+  const ytDlpOptions: any = {
+    output: videoPath,
+    format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    noPlaylist: true,
+    mergeOutputFormat: 'mp4',
+    writeInfoJson: true,
+    noPart: true,
+    noWarnings: true,
+    preferFreeFormats: true,
+    addHeader: [
+      'User-Agent:com.google.android.youtube/19.16.39 (Linux; U; Android 14) gzip',
+      'X-YouTube-Client-Name:3',
+      'X-YouTube-Client-Version:19.16.39'
+    ],
+    extractorArgs: 'youtube:player_client=android,web',
+    sleepRequests: 1,
+    retries: 3,
+    fragmentRetries: 10,
+    noCheckCertificates: true,
+    referer: 'https://www.youtube.com/'
+  };
+  
+  // Add OAuth authentication if available
+  if (oauthToken) {
+    ytDlpOptions.username = 'oauth2';
+    ytDlpOptions.password = '';
+    ytDlpOptions.addHeader.push(`Authorization:Bearer ${oauthToken}`);
+    log.info('Using OAuth authentication for yt-dlp');
+  }
+  
   try {
-    log.info({ youtubeUrl, ytDlpPath }, 'Starting yt-dlp download');
+    log.info({ youtubeUrl, ytDlpPath, hasOAuth: !!oauthToken }, 'Starting yt-dlp download');
     
-    await youtubedlWithBinary(youtubeUrl, {
-      output: videoPath,
-      format: 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      noPlaylist: true,
-      mergeOutputFormat: 'mp4',
-      writeInfoJson: true,
-      noPart: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      
-      // Simplified user agent without special characters
-      userAgent: 'Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36',
-      referer: 'https://www.youtube.com/',
-      
-      // Retry logic
-      retries: 3,
-      fragmentRetries: 10,
-      
-      // Skip certificate verification
-      noCheckCertificates: true,
-    } as any);
+    await youtubedlWithBinary(youtubeUrl, ytDlpOptions);
     
     log.info({ videoPath }, 'yt-dlp download completed successfully');
 
@@ -314,16 +370,57 @@ async function processYouTube(
       youtubeUrl, 
       error: error.message,
       stderr: error.stderr,
-      stack: error.stack 
+      hadOAuth: !!oauthToken
     }, 'YouTubeDownloadFailed');
     
-    // Mensagens de erro mais específicas e úteis
+    // If failed with OAuth, try without it
+    if (oauthToken) {
+      log.warn('OAuth download failed, retrying without authentication');
+      delete ytDlpOptions.username;
+      delete ytDlpOptions.password;
+      ytDlpOptions.addHeader = ytDlpOptions.addHeader.filter(
+        (h: string) => !h.startsWith('Authorization:')
+      );
+      
+      try {
+        await youtubedlWithBinary(youtubeUrl, ytDlpOptions);
+        log.info({ videoPath }, 'yt-dlp download succeeded without OAuth');
+        
+        await job.updateProgress(40);
+        log.info({ videoPath }, 'YouTubeDownloadComplete');
+        
+        const rawInfo = JSON.parse(await fs.readFile(infoPath, 'utf-8'));
+        
+        const info: VideoInfo = {
+          id: rawInfo.id,
+          title: rawInfo.title || 'YouTube Video',
+          duration: rawInfo.duration || 0,
+          width: rawInfo.width || 1920,
+          height: rawInfo.height || 1080,
+          webpage_url: rawInfo.webpage_url || youtubeUrl,
+          uploader: rawInfo.uploader || rawInfo.channel,
+          ext: rawInfo.ext || 'mp4'
+        };
+        
+        log.info({ 
+          title: info.title, 
+          duration: info.duration,
+          dimensions: `${info.width}x${info.height}` 
+        }, 'YouTubeDownloadComplete');
+        
+        return { videoPath, info };
+      } catch (retryError: any) {
+        // Continue to error handling below
+        error = retryError;
+      }
+    }
+    
     const errorMsg = error.message || '';
     const stderr = error.stderr || '';
     
     if (errorMsg.includes('Sign in to confirm') || stderr.includes('Sign in to confirm')) {
       throw new UnrecoverableError(
-        'YOUTUBE_BLOCKED: Este vídeo está temporariamente bloqueado pelo YouTube. Tente: (1) outro vídeo público, ou (2) faça upload do arquivo MP4 diretamente.'
+        'YOUTUBE_BLOCKED: Este vídeo está bloqueado pelo YouTube. Conecte sua conta do YouTube para melhorar a confiabilidade dos downloads.'
       );
     }
     
@@ -339,11 +436,41 @@ async function processYouTube(
       throw new UnrecoverableError('VIDEO_REMOVED: Vídeo foi removido');
     }
     
-    // Erro genérico mais útil
     throw new UnrecoverableError(
       `YOUTUBE_ERROR: Não foi possível baixar o vídeo. Tente fazer upload do arquivo MP4 diretamente. Erro: ${errorMsg}`
     );
   }
+}
+
+// ============================================
+// HELPER: REFRESH GOOGLE OAUTH TOKEN
+// ============================================
+
+async function refreshGoogleToken(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string
+): Promise<{ access_token: string; expires_in: number }> {
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: clientId,
+    client_secret: clientSecret
+  });
+  
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    log.error({ status: response.status, error: errorText }, 'Token refresh failed');
+    throw new Error(`Token refresh failed: ${response.status}`);
+  }
+  
+  return await response.json();
 }
 
 // ============================================

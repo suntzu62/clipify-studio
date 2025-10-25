@@ -1,8 +1,12 @@
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
-import { CheckCircle, Clock, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, Clock, AlertCircle, Loader2, Youtube, Upload } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useState, useEffect } from 'react';
 
 interface JobStep {
   id: string;
@@ -74,7 +78,7 @@ export function EnhancedJobProgress({
   error,
   className 
 }: EnhancedJobProgressProps) {
-  
+  const [hasYouTubeConnected] = useState(false);
   const steps = Object.values(STEP_MAPPING);
   
   // Calcular status de cada etapa
@@ -204,14 +208,48 @@ export function EnhancedJobProgress({
         </div>
 
         {/* Mensagem de erro */}
-        {error && (
+        {error && error.includes('YOUTUBE_BLOCKED') ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>YouTube bloqueou este vídeo</AlertTitle>
+            <AlertDescription className="space-y-3">
+              {!hasYouTubeConnected ? (
+                <>
+                  <p>O YouTube está impedindo downloads automatizados deste vídeo.</p>
+                  <p className="font-semibold">Solução: Conecte sua conta do YouTube para autenticar os downloads.</p>
+                  <Button 
+                    onClick={() => window.location.href = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/yt-oauth-start`}
+                    variant="default"
+                    className="mt-2"
+                  >
+                    <Youtube className="mr-2 h-4 w-4" />
+                    Conectar YouTube
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p>Mesmo com autenticação, este vídeo não pôde ser baixado.</p>
+                  <p className="font-semibold">Solução alternativa: Faça upload do arquivo MP4 diretamente.</p>
+                  <Button 
+                    onClick={() => window.location.href = '/projects'}
+                    variant="default"
+                    className="mt-2"
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    Criar Novo Projeto
+                  </Button>
+                </>
+              )}
+            </AlertDescription>
+          </Alert>
+        ) : error ? (
           <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
               <span className="text-sm text-destructive">{error}</span>
             </div>
           </div>
-        )}
+        ) : null}
       </CardContent>
     </Card>
   );
