@@ -8,6 +8,7 @@ import pino from 'pino';
 import { uploadFile, downloadToTemp } from '../lib/storage';
 import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
+import { validateYouTubeVideo } from '../lib/youtube-api';
 import type { JobData, IngestResult, VideoInfo } from '../types/pipeline';
 
 const log = pino({ name: 'ingest' });
@@ -197,10 +198,52 @@ export async function runIngest(job: Job): Promise<IngestResult> {
 // ============================================
 
 async function processYouTube(
-  tmpDir: string, 
-  youtubeUrl: string, 
+  tmpDir: string,
+  youtubeUrl: string,
   job: Job
 ): Promise<{ videoPath: string; info: VideoInfo }> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  
+  // STEP 1: Validate video via YouTube Data API v3 (if configured)
+  if (apiKey) {
+    try {
+      log.info({ youtubeUrl }, 'Validating YouTube video via API');
+      await job.updateProgress(10);
+      
+      const validation = await validateYouTubeVideo(youtubeUrl, apiKey);
+      
+      if (!validation.available && validation.errorCode && 
+          ['INVALID_URL', 'NOT_EMBEDDABLE', 'REGION_BLOCKED', 'REGION_RESTRICTED'].includes(validation.errorCode)) {
+        log.error({ 
+          youtubeUrl, 
+          errorCode: validation.errorCode, 
+          reason: validation.reason 
+        }, 'YouTube video unavailable');
+        
+        throw new Error(`YOUTUBE_UNAVAILABLE: ${validation.reason}`);
+      }
+      
+      if (validation.metadata) {
+        log.info({ 
+          title: validation.metadata.title,
+          duration: validation.metadata.durationSeconds,
+          channel: validation.metadata.channelTitle
+        }, 'YouTube video validated successfully');
+      }
+      
+      await job.updateProgress(15);
+    } catch (apiError: any) {
+      // Se o erro for de validação, propagar
+      if (apiError.message?.startsWith('YOUTUBE_UNAVAILABLE')) {
+        throw apiError;
+      }
+      
+      // Se for erro de API, apenas logar e continuar com yt-dlp
+      log.warn({ error: apiError.message }, 'YouTube API validation failed, proceeding with yt-dlp');
+    }
+  }
+  
+  // STEP 2: Download video with yt-dlp
   const videoPath = join(tmpDir, 'video.mp4');
   const infoPath = `${videoPath}.info.json`;
   
