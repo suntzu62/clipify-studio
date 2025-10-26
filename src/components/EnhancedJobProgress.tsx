@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { CheckCircle, Clock, AlertCircle, Loader2, Youtube, Upload } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useState, useEffect } from 'react';
+import { useUser } from '@clerk/clerk-react';
 
 interface JobStep {
   id: string;
@@ -78,7 +79,22 @@ export function EnhancedJobProgress({
   error,
   className 
 }: EnhancedJobProgressProps) {
-  const [hasYouTubeConnected] = useState(false);
+  const { user } = useUser();
+  const [hasYouTubeConnected, setHasYouTubeConnected] = useState(false);
+  
+  useEffect(() => {
+    const checkYouTubeConnection = async () => {
+      if (!user?.id) return;
+      const { data } = await (supabase as any)
+        .from('youtube_accounts')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+      setHasYouTubeConnected(!!data);
+    };
+    checkYouTubeConnection();
+  }, [user?.id]);
+  
   const steps = Object.values(STEP_MAPPING);
   
   // Calcular status de cada etapa
