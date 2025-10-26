@@ -11,6 +11,7 @@ import { QUEUES } from '../queues';
 import { validateYouTubeVideo } from '../lib/youtube-api';
 import type { JobData, IngestResult, VideoInfo } from '../types/pipeline';
 import { createClient } from '@supabase/supabase-js';
+import { decryptToken, encryptToken } from '../lib/crypto';
 
 const log = pino({ name: 'ingest' });
 
@@ -222,28 +223,39 @@ async function processYouTube(
         .single();
       
       if (account) {
+        // Descriptografar tokens
+        const decryptedAccessToken = account.access_token 
+          ? decryptToken(account.access_token) 
+          : null;
+        const decryptedRefreshToken = account.refresh_token 
+          ? decryptToken(account.refresh_token) 
+          : null;
+        
         const isExpired = new Date(account.expiry_date) <= new Date();
         
-        if (isExpired && account.refresh_token) {
+        if (isExpired && decryptedRefreshToken) {
           log.info({ userId }, 'Refreshing expired YouTube OAuth token');
           const newToken = await refreshGoogleToken(
-            account.refresh_token,
+            decryptedRefreshToken,
             process.env.GOOGLE_CLIENT_ID!,
             process.env.GOOGLE_CLIENT_SECRET!
           );
           
+          // Criptografar novo access_token antes de UPDATE
+          const encryptedNewAccessToken = encryptToken(newToken.access_token);
+          
           await supabase
             .from('youtube_accounts')
             .update({
-              access_token: newToken.access_token,
+              access_token: encryptedNewAccessToken,
               expiry_date: new Date(Date.now() + newToken.expires_in * 1000).toISOString()
             })
             .eq('user_id', userId);
           
-          oauthToken = newToken.access_token;
+          oauthToken = newToken.access_token; // usar em texto puro para yt-dlp
           log.info({ userId }, 'OAuth token refreshed successfully');
-        } else if (!isExpired) {
-          oauthToken = account.access_token;
+        } else if (!isExpired && decryptedAccessToken) {
+          oauthToken = decryptedAccessToken; // usar token descriptografado
           log.info({ userId }, 'Using existing valid OAuth token');
         }
       }

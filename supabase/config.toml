@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.enqueue-export]
 verify_jwt = false
 
+[functions.migrate-encrypt-tokens]
+verify_jwt = false
+
 # Custom functions that fazem auth com Clerk (requireUser)
 [functions.enqueue-pipeline]
 verify_jwt = false

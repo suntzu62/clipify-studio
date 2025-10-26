@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { encryptToken } from "../_shared/crypto.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -64,6 +65,15 @@ serve(async (req) => {
     const redirectUri = Deno.env.get("YT_REDIRECT_URI") ?? "";
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const encryptionKey = Deno.env.get("OAUTH_ENCRYPTION_KEY");
+    
+    if (!encryptionKey) {
+      return new Response(
+        JSON.stringify({ error: "oauth_encryption_not_configured" }), 
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+    
     if (!clientId || !clientSecret || !redirectUri || !supabaseUrl || !serviceKey) {
       return new Response(JSON.stringify({ error: "oauth_not_configured" }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
     }
@@ -89,11 +99,15 @@ serve(async (req) => {
       try { channel = await fetchChannelInfo(access_token); } catch {}
     }
 
-    // Upsert account
+    // Criptografar tokens antes de armazenar
+    const encryptedAccessToken = access_token ? await encryptToken(access_token) : null;
+    const encryptedRefreshToken = await encryptToken(refresh_token);
+
+    // Upsert account com tokens criptografados
     const upsertPayload: any = {
       user_id: state,
-      access_token: access_token ?? null,
-      refresh_token,
+      access_token: encryptedAccessToken,
+      refresh_token: encryptedRefreshToken,
       expiry_date,
       scope: scope ?? null,
       channel_id: channel?.channel_id ?? null,

@@ -5,6 +5,7 @@ import * as fssync from 'fs';
 import * as path from 'path';
 import { google } from 'googleapis';
 import { downloadToTemp, sbAdmin } from '../lib/storage';
+import { decryptToken } from '../lib/crypto';
 
 const log = pino({ name: 'export' });
 
@@ -98,7 +99,11 @@ export async function runExport(job: Job): Promise<any> {
   if (acctErr || !acct?.refresh_token) {
     throw new Error('youtube_account_not_connected');
   }
-  oauth2.setCredentials({ refresh_token: acct.refresh_token as string });
+  
+  // Descriptografar refresh_token
+  const decryptedRefreshToken = decryptToken(acct.refresh_token as string);
+  
+  oauth2.setCredentials({ refresh_token: decryptedRefreshToken });
   const youtube = google.youtube({ version: 'v3', auth: oauth2 });
 
   let exportId: string | null = null;
