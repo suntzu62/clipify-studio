@@ -13,41 +13,12 @@ serve(async (req) => {
   }
 
   try {
-    // Verificação adequada do service role
-    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    
-    if (!serviceRoleKey) {
-      console.error('[migrate-encrypt-tokens] SUPABASE_SERVICE_ROLE_KEY not configured');
+    // Verificar autenticação (apenas service role)
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader || !authHeader.includes('service_role')) {
       return new Response(
-        JSON.stringify({ 
-          error: 'configuration_error', 
-          message: 'Service role key not configured' 
-        }), 
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-          status: 500 
-        }
-      );
-    }
-    
-    // Comparar header exato com service role key (não apenas substring)
-    const expectedHeader = `Bearer ${serviceRoleKey}`;
-    if (!authHeader || authHeader !== expectedHeader) {
-      console.warn('[migrate-encrypt-tokens] Unauthorized access attempt', {
-        hasAuthHeader: !!authHeader,
-        headerMatches: authHeader === expectedHeader
-      });
-      
-      return new Response(
-        JSON.stringify({ 
-          error: 'unauthorized', 
-          message: 'Valid service role key required' 
-        }), 
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-          status: 401 
-        }
+        JSON.stringify({ error: 'unauthorized: service role key required' }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 

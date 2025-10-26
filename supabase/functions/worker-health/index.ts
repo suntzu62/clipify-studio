@@ -1,5 +1,4 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { requireUser } from '../_shared/auth.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,21 +9,6 @@ const corsHeaders = {
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
-  }
-
-  // Verificar autenticação
-  const auth = await requireUser(req);
-  if ('error' in auth) {
-    return new Response(
-      JSON.stringify({ 
-        error: auth.error,
-        message: 'Authentication required to access worker health status' 
-      }), 
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-        status: auth.status 
-      }
-    );
   }
 
   try {

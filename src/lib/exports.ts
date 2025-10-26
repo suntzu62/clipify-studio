@@ -1,7 +1,5 @@
 import { getAuthHeader } from './auth-token';
 
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
 export async function enqueueExport(
   rootId: string,
   clipId: string,
@@ -9,7 +7,7 @@ export async function enqueueExport(
 ): Promise<{ jobId: string }> {
   const headers = {
     'Content-Type': 'application/json',
-    apikey: SUPABASE_PUBLISHABLE_KEY || '',
+    apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
     ...(await getAuthHeader(getToken)),
   } as Record<string, string>;
 

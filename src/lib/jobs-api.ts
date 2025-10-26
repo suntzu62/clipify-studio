@@ -1,11 +1,5 @@
 import { getAuthHeader } from './auth-token';
 
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-if (!SUPABASE_PUBLISHABLE_KEY) {
-  console.error('[jobs-api] VITE_SUPABASE_PUBLISHABLE_KEY not configured');
-}
-
 export interface Job {
   id: string;
   status: 'queued' | 'active' | 'waiting-children' | 'completed' | 'failed';
@@ -108,7 +102,7 @@ export async function enqueueFromUrl(
     // Production: use Supabase functions
     const headers = {
       'Content-Type': 'application/json',
-      apikey: SUPABASE_PUBLISHABLE_KEY || '',
+      apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
@@ -202,7 +196,7 @@ export async function enqueuePipeline(
     // Production: use Supabase functions
     const headers = {
       'Content-Type': 'application/json',
-      apikey: SUPABASE_PUBLISHABLE_KEY || '',
+      apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
@@ -288,7 +282,7 @@ export async function getJobStatus(
     // Production: use Supabase functions
     const headers = {
       ...(await getAuthHeader(getToken)),
-      apikey: SUPABASE_PUBLISHABLE_KEY || '',
+      apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
     } as Record<string, string>;
     
     const response = await fetch(

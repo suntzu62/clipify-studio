@@ -1,8 +1,19 @@
 // Performance utilities for optimization
 
 export function preloadCriticalResources() {
-  // Resource hints are handled in addResourceHints()
-  // Removed invalid font preload implementation
+  // Preload critical fonts
+  const fontPreloads = [
+    'font-display: swap; font-family: system-ui, -apple-system, sans-serif;'
+  ];
+  
+  fontPreloads.forEach(font => {
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = 'font';
+    link.type = 'font/woff2';
+    link.crossOrigin = 'anonymous';
+    document.head.appendChild(link);
+  });
 }
 
 export function deferNonCriticalScripts() {
