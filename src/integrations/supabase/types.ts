@@ -47,6 +47,111 @@ export type Database = {
         }
         Relationships: []
       }
+      subscriptions: {
+        Row: {
+          clerk_user_id: string
+          created_at: string
+          current_period_end: string | null
+          email: string
+          id: string
+          plan: Database["public"]["Enums"]["plan_type"]
+          status: string
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          clerk_user_id: string
+          created_at?: string
+          current_period_end?: string | null
+          email: string
+          id?: string
+          plan?: Database["public"]["Enums"]["plan_type"]
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          clerk_user_id?: string
+          created_at?: string
+          current_period_end?: string | null
+          email?: string
+          id?: string
+          plan?: Database["public"]["Enums"]["plan_type"]
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      usage: {
+        Row: {
+          clerk_user_id: string
+          created_at: string
+          id: string
+          minutes_quota: number
+          minutes_used: number
+          period_end: string
+          period_start: string
+          shorts_quota: number
+          shorts_used: number
+          updated_at: string
+        }
+        Insert: {
+          clerk_user_id: string
+          created_at?: string
+          id?: string
+          minutes_quota?: number
+          minutes_used?: number
+          period_end: string
+          period_start: string
+          shorts_quota?: number
+          shorts_used?: number
+          updated_at?: string
+        }
+        Update: {
+          clerk_user_id?: string
+          created_at?: string
+          id?: string
+          minutes_quota?: number
+          minutes_used?: number
+          period_end?: string
+          period_start?: string
+          shorts_quota?: number
+          shorts_used?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      usage_events: {
+        Row: {
+          clerk_user_id: string
+          created_at: string
+          id: string
+          idempotency_key: string
+          minutes: number
+          shorts: number
+        }
+        Insert: {
+          clerk_user_id: string
+          created_at?: string
+          id?: string
+          idempotency_key: string
+          minutes?: number
+          shorts?: number
+        }
+        Update: {
+          clerk_user_id?: string
+          created_at?: string
+          id?: string
+          idempotency_key?: string
+          minutes?: number
+          shorts?: number
+        }
+        Relationships: []
+      }
       youtube_accounts: {
         Row: {
           access_token: string
@@ -91,7 +196,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      plan_type: "free" | "pro" | "scale"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -218,6 +323,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      plan_type: ["free", "pro", "scale"],
+    },
   },
 } as const

@@ -10,8 +10,8 @@ import { enqueueUnique } from '../lib/bullmq';
 import { QUEUES } from '../queues';
 import { validateYouTubeVideo } from '../lib/youtube-api';
 import type { JobData, IngestResult, VideoInfo } from '../types/pipeline';
-import { createClient } from '@supabase/supabase-js';
-import { decryptToken, encryptToken } from '../lib/crypto';
+import { createYtDlpOAuthCache, cleanupYtDlpOAuthCache } from '../lib/ytdlp-oauth-cache';
+import { ensureYtDlpOAuth2Plugin } from '../lib/ytdlp-plugin-installer';
 
 const log = pino({ name: 'ingest' });
 
@@ -204,64 +204,30 @@ async function processYouTube(
   youtubeUrl: string,
   job: Job
 ): Promise<{ videoPath: string; info: VideoInfo }> {
-  // STEP 1: Try to get OAuth token from user
-  let oauthToken: string | null = null;
+  // STEP 1: Setup OAuth2 cache for yt-dlp plugin
+  let oauthCacheFile: string | null = null;
+  let pluginDir: string | null = null;
+  
   try {
     const jobData = job.data as JobData;
     const userId = jobData.meta?.userId;
     
     if (userId) {
-      const supabase = createClient(
-        process.env.SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      );
+      // Instalar plugin OAuth2
+      pluginDir = await ensureYtDlpOAuth2Plugin('/tmp/yt-dlp-plugins');
+      log.info({ pluginDir }, 'yt-dlp OAuth2 plugin ready');
       
-      const { data: account } = await supabase
-        .from('youtube_accounts')
-        .select('access_token, expiry_date, refresh_token')
-        .eq('user_id', userId)
-        .single();
+      // Criar cache OAuth2
+      oauthCacheFile = await createYtDlpOAuthCache(userId, '/tmp/yt-dlp-cache');
       
-      if (account) {
-        // Descriptografar tokens
-        const decryptedAccessToken = account.access_token 
-          ? decryptToken(account.access_token) 
-          : null;
-        const decryptedRefreshToken = account.refresh_token 
-          ? decryptToken(account.refresh_token) 
-          : null;
-        
-        const isExpired = new Date(account.expiry_date) <= new Date();
-        
-        if (isExpired && decryptedRefreshToken) {
-          log.info({ userId }, 'Refreshing expired YouTube OAuth token');
-          const newToken = await refreshGoogleToken(
-            decryptedRefreshToken,
-            process.env.GOOGLE_CLIENT_ID!,
-            process.env.GOOGLE_CLIENT_SECRET!
-          );
-          
-          // Criptografar novo access_token antes de UPDATE
-          const encryptedNewAccessToken = encryptToken(newToken.access_token);
-          
-          await supabase
-            .from('youtube_accounts')
-            .update({
-              access_token: encryptedNewAccessToken,
-              expiry_date: new Date(Date.now() + newToken.expires_in * 1000).toISOString()
-            })
-            .eq('user_id', userId);
-          
-          oauthToken = newToken.access_token; // usar em texto puro para yt-dlp
-          log.info({ userId }, 'OAuth token refreshed successfully');
-        } else if (!isExpired && decryptedAccessToken) {
-          oauthToken = decryptedAccessToken; // usar token descriptografado
-          log.info({ userId }, 'Using existing valid OAuth token');
-        }
+      if (oauthCacheFile) {
+        log.info({ userId, oauthCacheFile }, 'OAuth2 cache created for yt-dlp plugin');
+      } else {
+        log.warn({ userId }, 'No YouTube account found, proceeding without OAuth');
       }
     }
   } catch (err: any) {
-    log.warn({ error: err.message }, 'Failed to get OAuth token, proceeding without auth');
+    log.warn({ error: err.message }, 'Failed to setup OAuth for yt-dlp, proceeding without auth');
   }
   
   // STEP 2: Validate video via YouTube Data API v3 (if configured)
@@ -337,16 +303,15 @@ async function processYouTube(
     referer: 'https://www.youtube.com/'
   };
   
-  // Add OAuth authentication if available
-  if (oauthToken) {
-    ytDlpOptions.username = 'oauth2';
-    ytDlpOptions.password = '';
-    ytDlpOptions.addHeader.push(`Authorization:Bearer ${oauthToken}`);
-    log.info('Using OAuth authentication for yt-dlp');
+  // Configurar plugin OAuth2 se disponível
+  if (pluginDir && oauthCacheFile) {
+    ytDlpOptions.paths = { 'home': pluginDir };
+    ytDlpOptions.cacheDir = '/tmp/yt-dlp-cache';
+    log.info({ pluginDir, cacheDir: '/tmp/yt-dlp-cache' }, 'Using yt-dlp OAuth2 plugin');
   }
   
   try {
-    log.info({ youtubeUrl, ytDlpPath, hasOAuth: !!oauthToken }, 'Starting yt-dlp download');
+    log.info({ youtubeUrl, ytDlpPath, hasOAuth: !!oauthCacheFile }, 'Starting yt-dlp download');
     
     await youtubedlWithBinary(youtubeUrl, ytDlpOptions);
     
@@ -382,50 +347,8 @@ async function processYouTube(
       youtubeUrl, 
       error: error.message,
       stderr: error.stderr,
-      hadOAuth: !!oauthToken
+      hadOAuth: !!oauthCacheFile
     }, 'YouTubeDownloadFailed');
-    
-    // If failed with OAuth, try without it
-    if (oauthToken) {
-      log.warn('OAuth download failed, retrying without authentication');
-      delete ytDlpOptions.username;
-      delete ytDlpOptions.password;
-      ytDlpOptions.addHeader = ytDlpOptions.addHeader.filter(
-        (h: string) => !h.startsWith('Authorization:')
-      );
-      
-      try {
-        await youtubedlWithBinary(youtubeUrl, ytDlpOptions);
-        log.info({ videoPath }, 'yt-dlp download succeeded without OAuth');
-        
-        await job.updateProgress(40);
-        log.info({ videoPath }, 'YouTubeDownloadComplete');
-        
-        const rawInfo = JSON.parse(await fs.readFile(infoPath, 'utf-8'));
-        
-        const info: VideoInfo = {
-          id: rawInfo.id,
-          title: rawInfo.title || 'YouTube Video',
-          duration: rawInfo.duration || 0,
-          width: rawInfo.width || 1920,
-          height: rawInfo.height || 1080,
-          webpage_url: rawInfo.webpage_url || youtubeUrl,
-          uploader: rawInfo.uploader || rawInfo.channel,
-          ext: rawInfo.ext || 'mp4'
-        };
-        
-        log.info({ 
-          title: info.title, 
-          duration: info.duration,
-          dimensions: `${info.width}x${info.height}` 
-        }, 'YouTubeDownloadComplete');
-        
-        return { videoPath, info };
-      } catch (retryError: any) {
-        // Continue to error handling below
-        error = retryError;
-      }
-    }
     
     const errorMsg = error.message || '';
     const stderr = error.stderr || '';
@@ -451,39 +374,20 @@ async function processYouTube(
     throw new UnrecoverableError(
       `YOUTUBE_ERROR: Não foi possível baixar o vídeo. Tente fazer upload do arquivo MP4 diretamente. Erro: ${errorMsg}`
     );
+  } finally {
+    // Garantir cleanup do cache OAuth
+    if (oauthCacheFile) {
+      await cleanupYtDlpOAuthCache(oauthCacheFile);
+      log.info({ oauthCacheFile }, 'Cleaned up OAuth cache in finally block');
+    }
   }
 }
 
 // ============================================
-// HELPER: REFRESH GOOGLE OAUTH TOKEN
+// NOTA: Token refresh agora é gerenciado pelo plugin OAuth2 do yt-dlp
+// O plugin automaticamente renova tokens expirados usando o refresh_token
+// armazenado no arquivo de cache (/tmp/yt-dlp-cache/oauth2-{userId}.json)
 // ============================================
-
-async function refreshGoogleToken(
-  refreshToken: string,
-  clientId: string,
-  clientSecret: string
-): Promise<{ access_token: string; expires_in: number }> {
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: clientId,
-    client_secret: clientSecret
-  });
-  
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
-  });
-  
-  if (!response.ok) {
-    const errorText = await response.text();
-    log.error({ status: response.status, error: errorText }, 'Token refresh failed');
-    throw new Error(`Token refresh failed: ${response.status}`);
-  }
-  
-  return await response.json();
-}
 
 // ============================================
 // PROCESSAMENTO UPLOAD
