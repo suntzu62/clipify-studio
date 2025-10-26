@@ -330,12 +330,6 @@ async function processYouTube(
     log.info({ videoPath }, 'yt-dlp download completed successfully');
 
     await job.updateProgress(40);
-    log.info({ videoPath }, 'YouTubeDownloadComplete');
-    
-    // Cleanup OAuth cache
-    if (oauthCacheFile) {
-      await cleanupYtDlpOAuthCache(oauthCacheFile);
-    }
     
     // Ler metadata
     const rawInfo = JSON.parse(await fs.readFile(infoPath, 'utf-8'));
@@ -360,11 +354,6 @@ async function processYouTube(
     return { videoPath, info };
     
   } catch (error: any) {
-    // Cleanup OAuth cache even on error
-    if (oauthCacheFile) {
-      await cleanupYtDlpOAuthCache(oauthCacheFile);
-    }
-    
     log.error({ 
       youtubeUrl, 
       error: error.message,
@@ -397,6 +386,12 @@ async function processYouTube(
     throw new UnrecoverableError(
       `YOUTUBE_ERROR: Não foi possível baixar o vídeo. Tente fazer upload do arquivo MP4 diretamente. Erro: ${errorMsg}`
     );
+  } finally {
+    // Garantir cleanup sempre, mesmo se houver erro
+    if (oauthCacheFile) {
+      await cleanupYtDlpOAuthCache(oauthCacheFile);
+      log.info({ oauthCacheFile }, 'Cleaned up OAuth cache in finally block');
+    }
   }
 }
 

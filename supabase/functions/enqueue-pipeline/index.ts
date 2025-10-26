@@ -1,12 +1,26 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireUser } from "../_shared/auth.ts";
+import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Schema de validação para URLs do YouTube
+const youtubeUrlSchema = z.string()
+  .url({ message: 'URL inválida' })
+  .max(2048, { message: 'URL muito longa (máximo 2048 caracteres)' })
+  .refine(
+    (url) => {
+      const normalized = url.toLowerCase();
+      return normalized.includes('youtube.com') || 
+             normalized.includes('youtu.be') ||
+             normalized.includes('m.youtube.com');
+    },
+    { message: 'URL deve ser do YouTube (youtube.com ou youtu.be)' }
+  );
 
 function normalizeYoutubeUrl(raw: string): string {
   const trimmed = raw.trim();
@@ -43,6 +57,55 @@ serve(async (req) => {
     
     let source: any;
     if (body.youtubeUrl) {
+      // Validar URL com zod
+      const urlValidation = youtubeUrlSchema.safeParse(body.youtubeUrl);
+      if (!urlValidation.success) {
+        const errors = urlValidation.error.errors.map(e => e.message).join(', ');
+        console.error('[enqueue-pipeline] URL validation failed:', {
+          url: body.youtubeUrl,
+          errors: urlValidation.error.errors
+        });
+        
+        return new Response(
+          JSON.stringify({ 
+            error: 'invalid_youtube_url',
+            message: `URL inválida: ${errors}`,
+            details: urlValidation.error.errors
+          }), 
+          { 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+            status: 400 
+          }
+        );
+      }
+      
+      // Validar outros parâmetros
+      if (body.neededMinutes && (typeof body.neededMinutes !== 'number' || body.neededMinutes < 1 || body.neededMinutes > 180)) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'invalid_needed_minutes',
+            message: 'neededMinutes deve ser um número entre 1 e 180'
+          }), 
+          { 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+            status: 400 
+          }
+        );
+      }
+
+      if (body.targetDuration && !['15', '30', '60', '90'].includes(String(body.targetDuration))) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'invalid_target_duration',
+            message: 'targetDuration deve ser 15, 30, 60 ou 90'
+          }), 
+          { 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+            status: 400 
+          }
+        );
+      }
+      
       source = { type: 'youtube', youtubeUrl: normalizeYoutubeUrl(body.youtubeUrl) };
     } else if (body.storagePath || body.upload) {
       const uploadData = body.upload || {};

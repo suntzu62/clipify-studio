@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { promises as fs, chmod } from 'fs';
 import { join } from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { decryptToken } from './crypto';
@@ -72,6 +72,18 @@ export async function createYtDlpOAuthCache(
       JSON.stringify(cacheData, null, 2),
       'utf-8'
     );
+    
+    // Aplicar permissões restritivas (apenas owner pode ler/escrever)
+    try {
+      await fs.chmod(cacheFilePath, 0o600);
+      log.info({ cacheFilePath, permissions: '0600' }, 'Applied restrictive permissions to OAuth cache');
+    } catch (chmodError: any) {
+      // Log warning mas não falha (algumas plataformas podem não suportar chmod)
+      log.warn({ 
+        cacheFilePath, 
+        error: chmodError.message 
+      }, 'Could not set restrictive permissions on OAuth cache (platform may not support chmod)');
+    }
     
     log.info({ userId, cacheFilePath }, 'Created yt-dlp OAuth2 cache file');
     

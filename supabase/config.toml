@@ -1,41 +1,51 @@
 project_id = "qibjqqucmbrtuirysexl"
 
+# Billing functions (mantém verify_jwt=false, usam verifyClerkToken customizado)
 [functions.create-checkout]
 verify_jwt = false
 
 [functions.customer-portal]
 verify_jwt = false
 
+# Webhooks públicos (corretamente sem JWT)
 [functions.stripe-webhook]
 verify_jwt = false
+# Justificativa: Valida assinaturas do Stripe via webhook signature
 
+[functions.yt-oauth-callback]
+verify_jwt = false
+# Justificativa: Callback do Google OAuth, valida code+state
+
+# Usage tracking (mantém verify_jwt=false, usam verifyClerkToken customizado)
 [functions.get-usage]
 verify_jwt = false
 
 [functions.increment-usage]
 verify_jwt = false
 
+# OAuth functions (habilitar JWT + manter requireUser como defesa em profundidade)
 [functions.yt-oauth-start]
-verify_jwt = false
+verify_jwt = true
 
-[functions.yt-oauth-callback]
-verify_jwt = false
-
+# Export function
 [functions.enqueue-export]
-verify_jwt = false
+verify_jwt = true
 
+# Admin/Migration functions
 [functions.migrate-encrypt-tokens]
 verify_jwt = false
+# Justificativa: Usa service role key verification
 
-# Custom functions that fazem auth com Clerk (requireUser)
+# Pipeline functions (habilitar JWT + manter requireUser como defesa em profundidade)
 [functions.enqueue-pipeline]
-verify_jwt = false
+verify_jwt = true
 
 [functions.job-status]
-verify_jwt = false
+verify_jwt = true
 
 [functions.job-stream]
-verify_jwt = false
+verify_jwt = true
 
+# Worker health (agora protegido com requireUser)
 [functions.worker-health]
-verify_jwt = false
+verify_jwt = true
