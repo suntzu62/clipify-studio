@@ -14,224 +14,71 @@ export type Database = {
   }
   public: {
     Tables: {
-      clip_exports: {
+      _prisma_migrations: {
         Row: {
-          clip_id: string
-          created_at: string | null
-          error: string | null
+          applied_steps_count: number
+          checksum: string
+          finished_at: string | null
           id: string
-          root_id: string
-          status: string
-          updated_at: string | null
-          user_id: string
-          youtube_url: string | null
-          youtube_video_id: string | null
+          logs: string | null
+          migration_name: string
+          rolled_back_at: string | null
+          started_at: string
         }
         Insert: {
-          clip_id: string
-          created_at?: string | null
-          error?: string | null
-          id?: string
-          root_id: string
-          status?: string
-          updated_at?: string | null
-          user_id: string
-          youtube_url?: string | null
-          youtube_video_id?: string | null
+          applied_steps_count?: number
+          checksum: string
+          finished_at?: string | null
+          id: string
+          logs?: string | null
+          migration_name: string
+          rolled_back_at?: string | null
+          started_at?: string
         }
         Update: {
-          clip_id?: string
-          created_at?: string | null
-          error?: string | null
+          applied_steps_count?: number
+          checksum?: string
+          finished_at?: string | null
           id?: string
-          root_id?: string
-          status?: string
-          updated_at?: string | null
-          user_id?: string
-          youtube_url?: string | null
-          youtube_video_id?: string | null
-        }
-        Relationships: []
-      }
-      subscriptions: {
-        Row: {
-          clerk_user_id: string
-          created_at: string
-          current_period_end: string | null
-          email: string
-          id: string
-          plan: Database["public"]["Enums"]["plan_type"]
-          status: string
-          stripe_customer_id: string | null
-          stripe_subscription_id: string | null
-          updated_at: string
-        }
-        Insert: {
-          clerk_user_id: string
-          created_at?: string
-          current_period_end?: string | null
-          email: string
-          id?: string
-          plan?: Database["public"]["Enums"]["plan_type"]
-          status?: string
-          stripe_customer_id?: string | null
-          stripe_subscription_id?: string | null
-          updated_at?: string
-        }
-        Update: {
-          clerk_user_id?: string
-          created_at?: string
-          current_period_end?: string | null
-          email?: string
-          id?: string
-          plan?: Database["public"]["Enums"]["plan_type"]
-          status?: string
-          stripe_customer_id?: string | null
-          stripe_subscription_id?: string | null
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      usage: {
-        Row: {
-          clerk_user_id: string
-          created_at: string
-          id: string
-          minutes_quota: number
-          minutes_used: number
-          period_end: string
-          period_start: string
-          shorts_quota: number
-          shorts_used: number
-          updated_at: string
-        }
-        Insert: {
-          clerk_user_id: string
-          created_at?: string
-          id?: string
-          minutes_quota?: number
-          minutes_used?: number
-          period_end: string
-          period_start: string
-          shorts_quota?: number
-          shorts_used?: number
-          updated_at?: string
-        }
-        Update: {
-          clerk_user_id?: string
-          created_at?: string
-          id?: string
-          minutes_quota?: number
-          minutes_used?: number
-          period_end?: string
-          period_start?: string
-          shorts_quota?: number
-          shorts_used?: number
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      usage_events: {
-        Row: {
-          clerk_user_id: string
-          created_at: string
-          id: string
-          idempotency_key: string
-          minutes: number
-          shorts: number
-        }
-        Insert: {
-          clerk_user_id: string
-          created_at?: string
-          id?: string
-          idempotency_key: string
-          minutes?: number
-          shorts?: number
-        }
-        Update: {
-          clerk_user_id?: string
-          created_at?: string
-          id?: string
-          idempotency_key?: string
-          minutes?: number
-          shorts?: number
-        }
-        Relationships: []
-      }
-      user_jobs: {
-        Row: {
-          created_at: string | null
-          file_name: string | null
-          file_size: number | null
-          id: string
-          progress: number | null
-          source: string | null
-          status: string
-          storage_path: string | null
-          updated_at: string | null
-          user_id: string
-          youtube_url: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          file_name?: string | null
-          file_size?: number | null
-          id: string
-          progress?: number | null
-          source?: string | null
-          status?: string
-          storage_path?: string | null
-          updated_at?: string | null
-          user_id: string
-          youtube_url?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          file_name?: string | null
-          file_size?: number | null
-          id?: string
-          progress?: number | null
-          source?: string | null
-          status?: string
-          storage_path?: string | null
-          updated_at?: string | null
-          user_id?: string
-          youtube_url?: string | null
+          logs?: string | null
+          migration_name?: string
+          rolled_back_at?: string | null
+          started_at?: string
         }
         Relationships: []
       }
       youtube_accounts: {
         Row: {
-          access_token: string | null
+          access_token: string
           channel_id: string | null
           channel_title: string | null
-          created_at: string | null
-          expiry_date: string | null
+          created_at: string
+          expiry_date: string
+          id: string
           refresh_token: string
-          scope: string | null
-          updated_at: string | null
+          updated_at: string
           user_id: string
         }
         Insert: {
-          access_token?: string | null
+          access_token: string
           channel_id?: string | null
           channel_title?: string | null
-          created_at?: string | null
-          expiry_date?: string | null
+          created_at?: string
+          expiry_date: string
+          id?: string
           refresh_token: string
-          scope?: string | null
-          updated_at?: string | null
+          updated_at?: string
           user_id: string
         }
         Update: {
-          access_token?: string | null
+          access_token?: string
           channel_id?: string | null
           channel_title?: string | null
-          created_at?: string | null
-          expiry_date?: string | null
+          created_at?: string
+          expiry_date?: string
+          id?: string
           refresh_token?: string
-          scope?: string | null
-          updated_at?: string | null
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
@@ -244,7 +91,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      plan_type: "free" | "pro" | "scale"
+      [_ in never]: never
     }
     CompositeTypes: {
       [_ in never]: never
@@ -371,8 +218,6 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {
-      plan_type: ["free", "pro", "scale"],
-    },
+    Enums: {},
   },
 } as const
