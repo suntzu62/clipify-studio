@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, Play, Youtube, AlertCircle } from 'lucide-react';
 import posthog from 'posthog-js';
-import { useAuth, useClerk, useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { enqueueFromUrl, type Job } from '@/lib/jobs-api';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
@@ -33,18 +33,16 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
   const [errorType, setErrorType] = useState<'quota' | 'private' | 'blocked' | 'age' | 'unknown' | null>(null);
   const submitBtnRef = useRef<HTMLButtonElement | null>(null);
   const navigate = useNavigate();
-  const { isSignedIn, getToken } = useAuth();
-  const { openSignIn } = useClerk();
-  const { user } = useUser();
+  const { user, getToken } = useAuth();
 
   useEffect(() => {
     // Retry after login
     const pending = localStorage.getItem('cortai:pendingHeroUrl');
-    if (isSignedIn && pending) {
+    if (user && pending) {
       localStorage.removeItem('cortai:pendingHeroUrl');
       void handleSubmitInternal(pending);
     }
-  }, [isSignedIn]);
+  }, [user]);
 
   useEffect(() => {
     if (prefillUrl && isValidYouTubeUrl(prefillUrl)) {
@@ -97,19 +95,15 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
     setSuccess(null);
     try { posthog.capture('hero submit', { source: 'landing' }); } catch {}
 
-    if (!isSignedIn) {
+    if (!user) {
       localStorage.setItem('cortai:pendingHeroUrl', value);
-      await openSignIn({
-        afterSignInUrl: window.location.pathname,
-        // @ts-ignore - openSignIn may accept modal option
-        modal: true,
-      });
+      navigate('/auth/login');
       return;
     }
 
     try {
       setLoading(true);
-      const tokenProvider = async () => await getToken({ template: 'supabase' });
+      const tokenProvider = async () => await getToken();
       const { jobId } = await enqueueFromUrl(normalizeYoutubeUrl(value), tokenProvider);
 
       // Get metadata for better project title

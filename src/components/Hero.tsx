@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect, useRef, FormEvent } from "react";
-import { useAuth, useClerk, useUser } from "@clerk/clerk-react";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
 import { enqueueFromUrl, type Job } from "@/lib/jobs-api";
@@ -54,27 +54,25 @@ export default function Hero() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { user, getToken } = useAuth();
   const navigate = useNavigate();
-  const { isSignedIn, getToken } = useAuth();
-  const { openSignIn } = useClerk();
-  const { user } = useUser();
   const pendingUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // If user just signed in from modal and there is a pending URL, enqueue
+    // If user just signed in and there is a pending URL, enqueue
     const pending = localStorage.getItem("cortai:pendingHeroUrl");
-    if (isSignedIn && pending) {
+    if (user && pending) {
       localStorage.removeItem("cortai:pendingHeroUrl");
       pendingUrlRef.current = pending;
       void submitUrl(pending);
     }
-  }, [isSignedIn]);
+  }, [user]);
 
   const submitUrl = async (raw: string) => {
     try {
       setLoading(true);
       const normalized = normalizeYoutubeUrl(raw.trim());
-      const tokenProvider = async () => await getToken({ template: 'supabase' });
+      const tokenProvider = async () => await getToken();
       const data = await enqueueFromUrl(normalized, tokenProvider);
       const jobId = data.jobId as string;
       if (!jobId) throw new Error("Resposta inválida do servidor");
@@ -114,16 +112,10 @@ export default function Hero() {
     setError(null);
     try { posthog.capture('hero submit', { hasUrl: true }); } catch {}
 
-    if (!isSignedIn) {
+    if (!user) {
       // Ask user to sign in, then retry automatically
       localStorage.setItem("cortai:pendingHeroUrl", value);
-      await openSignIn({
-        // After sign-in, the effect will detect it and continue
-        afterSignInUrl: window.location.pathname,
-        // Force it to open as modal if available
-        // @ts-ignore - openSignIn accepts object options
-        modal: true,
-      });
+      navigate('/auth/login');
       return;
     }
 

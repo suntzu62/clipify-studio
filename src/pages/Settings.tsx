@@ -1,13 +1,18 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { useUser, useClerk } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { Separator } from '@/components/ui/separator';
 import { LogOut, Play, Settings as SettingsIcon, User, Video, Cable } from 'lucide-react';
 
 const Settings = () => {
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/');
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -24,7 +29,7 @@ const Settings = () => {
             
             <div className="flex items-center space-x-4">
               <span className="text-sm text-muted-foreground">
-                {user?.emailAddresses[0]?.emailAddress}
+                {user?.email}
               </span>
             </div>
           </div>
@@ -96,7 +101,7 @@ const Settings = () => {
                       Email
                     </label>
                     <div className="mt-1 text-foreground">
-                      {user?.emailAddresses[0]?.emailAddress}
+                      {user?.email}
                     </div>
                   </div>
                   
@@ -105,7 +110,7 @@ const Settings = () => {
                       Data de cadastro
                     </label>
                     <div className="mt-1 text-foreground">
-                      {user?.createdAt ? new Date(user.createdAt).toLocaleDateString('pt-BR') : 'N/A'}
+                      {user?.created_at ? new Date(user.created_at).toLocaleDateString('pt-BR') : 'N/A'}
                     </div>
                   </div>
                 </CardContent>
@@ -137,7 +142,7 @@ const Settings = () => {
                 <CardContent>
                   <Button
                     variant="destructive"
-                    onClick={() => signOut({ redirectUrl: '/' })}
+                    onClick={handleSignOut}
                     className="flex items-center space-x-2"
                   >
                     <LogOut className="w-4 h-4" />

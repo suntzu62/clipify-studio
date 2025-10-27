@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Upload, FileVideo, AlertCircle, CheckCircle } from 'lucide-react';
-import { useAuth, useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -21,8 +21,7 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { getToken } = useAuth();
-  const { user } = useUser();
+  const { getToken, user } = useAuth();
 
   const uploadFile = useCallback(async (file: File) => {
     if (!user) return;
@@ -32,7 +31,7 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
     setUploadProgress(0);
 
     try {
-      const token = await getToken({ template: 'supabase' });
+      const token = await getToken();
       if (!token) {
         throw new Error('Authentication required');
       }

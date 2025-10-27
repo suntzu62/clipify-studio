@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LogOut, Play, Settings, Video, Plus } from 'lucide-react';
@@ -9,7 +9,7 @@ import { listProjects, type Project } from '@/services/projects';
 import { useToast } from '@/hooks/use-toast';
 
 const Projects = () => {
-  const { user } = useUser();
+  const { user } = useAuth();
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -46,7 +46,7 @@ const Projects = () => {
             
             <div className="flex items-center space-x-4">
               <span className="text-sm text-muted-foreground">
-                {user?.emailAddresses[0]?.emailAddress}
+                {user?.email}
               </span>
             </div>
           </div>

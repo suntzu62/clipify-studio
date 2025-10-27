@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogTrigger } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
-import { useUser, useAuth } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { LogOut, Play, Settings, Video, Plus } from 'lucide-react';
 import { ClipCard } from '@/components/ClipCard';
 import { NewProjectForm } from '@/components/NewProjectForm';
@@ -16,8 +16,7 @@ import { getAuthHeader } from '@/lib/auth-token';
 import { useToast } from '@/hooks/use-toast';
 
 const Dashboard = () => {
-  const { user } = useUser();
-  const { getToken } = useAuth();
+  const { user, getToken } = useAuth();
   const { toast } = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [usage, setUsage] = useState<UsageDTO | null>(null);
@@ -63,7 +62,7 @@ const Dashboard = () => {
       
       for (const job of activeJobs) {
         try {
-          const status = await getJobStatus(job.id, async (opts?: any) => getToken({ template: 'supabase', ...(opts||{}) }));
+          const status = await getJobStatus(job.id, getToken);
           if (status.status !== job.status || status.progress !== job.progress) {
             updateJobStatus(user!.id, job.id, {
               status: status.status,
@@ -91,7 +90,7 @@ const Dashboard = () => {
         youtubeUrl,
         neededMinutes,
         targetDuration,
-        async () => await getToken({ template: 'supabase' })
+        getToken
       );
       
       const newJob: Job = {
@@ -148,7 +147,7 @@ const Dashboard = () => {
             
             <div className="flex items-center space-x-4">
               <span className="text-sm text-muted-foreground">
-                {user?.emailAddresses[0]?.emailAddress}
+                {user?.email}
               </span>
             </div>
           </div>

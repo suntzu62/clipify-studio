@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { CheckCircle, Clock, AlertCircle, Loader2, Youtube, Upload } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useState, useEffect } from 'react';
-import { useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface JobStep {
   id: string;
@@ -79,7 +79,7 @@ export function EnhancedJobProgress({
   error,
   className 
 }: EnhancedJobProgressProps) {
-  const { user } = useUser();
+  const { user } = useAuth();
   const [hasYouTubeConnected, setHasYouTubeConnected] = useState(false);
   
   useEffect(() => {

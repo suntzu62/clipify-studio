@@ -8,7 +8,7 @@ import { Youtube, Lock, Play, CheckCircle } from 'lucide-react';
 import posthog from 'posthog-js';
 import DemoModal from '@/components/DemoModal';
 import SocialProofStrip from '@/components/SocialProofStrip';
-import { useAuth, useClerk, useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { enqueueFromUrl, type Job } from '@/lib/jobs-api';
 import { saveUserJob } from '@/lib/storage';
 import { toast } from '@/hooks/use-toast';
@@ -33,9 +33,7 @@ export default function HeroV2() {
   const [demoOpen, setDemoOpen] = useState(false);
   const submitBtnRef = useRef<HTMLButtonElement | null>(null);
   const navigate = useNavigate();
-  const { isSignedIn, getToken } = useAuth();
-  const { openSignIn, signOut } = useClerk();
-  const { user } = useUser();
+  const { user, getToken } = useAuth();
 
   useEffect(() => {
     try { posthog.capture('hero variant', { v: HERO_VARIANT }); } catch {}
@@ -43,11 +41,11 @@ export default function HeroV2() {
 
   useEffect(() => {
     const pending = localStorage.getItem('cortai:pendingHeroUrl');
-    if (isSignedIn && pending) {
+    if (user && pending) {
       localStorage.removeItem('cortai:pendingHeroUrl');
       void handleSubmitInternal(pending);
     }
-  }, [isSignedIn]);
+  }, [user]);
 
   const showSuccess = () => {
     setSuccess(true);
@@ -100,19 +98,15 @@ export default function HeroV2() {
     setError(null);
     try { posthog.capture('hero submit', { source: 'landing' }); } catch {}
 
-    if (!isSignedIn) {
+    if (!user) {
       localStorage.setItem('cortai:pendingHeroUrl', value);
-      await openSignIn({
-        afterSignInUrl: window.location.pathname,
-        // @ts-ignore
-        modal: true,
-      });
+      navigate('/auth/login');
       return;
     }
 
     try {
       setLoading(true);
-      const tokenProvider = async () => await getToken({ template: 'supabase' });
+      const tokenProvider = async () => await getToken();
       const { jobId } = await enqueueFromUrl(normalizeYoutubeUrl(value), tokenProvider);
 
       if (user?.id) {
@@ -138,7 +132,8 @@ export default function HeroV2() {
           description: 'Faça logout e login novamente para autorizar o YouTube com os novos scopes.',
           variant: 'default'
         });
-        setTimeout(() => signOut(), 2000);
+        // signOut já está disponível do useAuth na linha 36
+        navigate('/auth/login');
       } else {
         toast({ 
           title: 'Falha ao criar pipeline', 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "@/contexts/AuthContext";
 import { getAuthHeader } from "@/lib/auth-token";
 import { getUsage as getUsageClient, ensureQuota, incrementUsage } from "@/lib/usage";
 import { createCheckout, openPortal } from "@/lib/stripe";
@@ -21,14 +21,14 @@ import {
 } from "@/lib/billing";
 
 const Billing = () => {
-  const { getToken, isSignedIn } = useAuth();
+  const { user, getToken } = useAuth();
   const { toast } = useToast();
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState<string | null>(null);
 
   const loadUsage = async () => {
-    if (!isSignedIn) return;
+    if (!user) return;
     
     try {
       setLoading(true);
@@ -52,7 +52,7 @@ const Billing = () => {
   useEffect(() => {
     initPosthog();
     loadUsage();
-  }, [isSignedIn]);
+  }, [user]);
 
   // Exemplo de uso com novos helpers
   const onSubscribePro = async () => {
@@ -62,7 +62,7 @@ const Billing = () => {
   };
 
   const handleCheckout = async (plan: "pro" | "scale") => {
-    if (!isSignedIn) return;
+    if (!user) return;
     
     try {
       setCreating(plan);
@@ -91,7 +91,7 @@ const Billing = () => {
   };
 
   const handleCustomerPortal = async () => {
-    if (!isSignedIn) return;
+    if (!user) return;
     
     try {
       const token = await getToken();
