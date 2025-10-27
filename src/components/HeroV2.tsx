@@ -34,7 +34,7 @@ export default function HeroV2() {
   const submitBtnRef = useRef<HTMLButtonElement | null>(null);
   const navigate = useNavigate();
   const { isSignedIn, getToken } = useAuth();
-  const { openSignIn } = useClerk();
+  const { openSignIn, signOut } = useClerk();
   const { user } = useUser();
 
   useEffect(() => {
@@ -129,7 +129,23 @@ export default function HeroV2() {
 
       navigate(`/projects/${jobId}`);
     } catch (e: any) {
-      toast({ title: 'Falha ao criar pipeline', description: e?.message || String(e), variant: 'destructive' });
+      const errorMsg = e?.message || String(e);
+      
+      // Detectar erro de YouTube não conectado
+      if (errorMsg.includes('401') || errorMsg.includes('unauthorized') || errorMsg.includes('youtube')) {
+        toast({ 
+          title: '🔐 Reconecte sua conta do YouTube', 
+          description: 'Faça logout e login novamente para autorizar o YouTube com os novos scopes.',
+          variant: 'default'
+        });
+        setTimeout(() => signOut(), 2000);
+      } else {
+        toast({ 
+          title: 'Falha ao criar pipeline', 
+          description: errorMsg, 
+          variant: 'destructive' 
+        });
+      }
     } finally {
       setLoading(false);
     }
