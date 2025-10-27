@@ -47,6 +47,33 @@ export type Database = {
         }
         Relationships: []
       }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          email: string
+          full_name?: string | null
+          id: string
+          updated_at?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string
+          full_name?: string | null
+          id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       subscriptions: {
         Row: {
           clerk_user_id: string
@@ -59,6 +86,7 @@ export type Database = {
           stripe_customer_id: string | null
           stripe_subscription_id: string | null
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           clerk_user_id: string
@@ -71,6 +99,7 @@ export type Database = {
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           clerk_user_id?: string
@@ -83,6 +112,7 @@ export type Database = {
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -98,6 +128,7 @@ export type Database = {
           shorts_quota: number
           shorts_used: number
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           clerk_user_id: string
@@ -110,6 +141,7 @@ export type Database = {
           shorts_quota?: number
           shorts_used?: number
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           clerk_user_id?: string
@@ -122,6 +154,7 @@ export type Database = {
           shorts_quota?: number
           shorts_used?: number
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -133,6 +166,7 @@ export type Database = {
           idempotency_key: string
           minutes: number
           shorts: number
+          user_id: string | null
         }
         Insert: {
           clerk_user_id: string
@@ -141,6 +175,7 @@ export type Database = {
           idempotency_key: string
           minutes?: number
           shorts?: number
+          user_id?: string | null
         }
         Update: {
           clerk_user_id?: string
@@ -149,6 +184,7 @@ export type Database = {
           idempotency_key?: string
           minutes?: number
           shorts?: number
+          user_id?: string | null
         }
         Relationships: []
       }
