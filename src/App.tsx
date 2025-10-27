@@ -7,7 +7,6 @@ import { lazy, Suspense } from "react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { Skeleton } from "@/components/ui/skeleton";
 import PerformanceMonitor from "@/components/PerformanceMonitor";
-import { useSyncOAuth } from "@/hooks/useSyncOAuth";
 
 // Lazy load non-critical routes
 const Landing = lazy(() => import("./pages/Landing"));
@@ -36,8 +35,6 @@ const PageSkeleton = () => (
 const queryClient = new QueryClient();
 
 const App = () => {
-  useSyncOAuth();
-
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
