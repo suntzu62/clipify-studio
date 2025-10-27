@@ -11,7 +11,7 @@ services:
     envVars:
       # Redis Cloud
       - key: REDIS_URL
-        value: redis://default:c3NlSqpGqpWT2BPSrLwRTtMQqscGi2zuX@redis-14366.c256.us-east-1-2.ec2.reds.redis-cloud.com:14366
+        sync: false
       
       # Workers API
       - key: WORKERS_API_PORT
