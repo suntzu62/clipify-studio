@@ -13,7 +13,7 @@ interface EmptyStateProps {
 
 export const EmptyState = ({ 
   title = "Nenhum projeto encontrado",
-  description = "Crie seu primeiro projeto para começar a transformar vídeos do YouTube em clipes virais",
+  description = "Cole um link do YouTube acima para criar seu primeiro projeto e começar a gerar clipes virais",
   actionLabel = "Criar Primeiro Projeto",
   onAction,
   variant = 'default',

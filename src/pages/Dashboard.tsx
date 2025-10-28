@@ -1,26 +1,21 @@
 import { Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogTrigger } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogOut, Play, Settings, Video, Plus } from 'lucide-react';
+import { Play, Settings, Video } from 'lucide-react';
 import { ClipCard } from '@/components/ClipCard';
-import { NewProjectForm } from '@/components/NewProjectForm';
+import { QuickCreate } from '@/components/QuickCreate';
 import { EmptyState } from '@/components/EmptyState';
-import { enqueuePipeline, getJobStatus, Job } from '@/lib/jobs-api';
-import { getUserJobs, saveUserJob, updateJobStatus } from '@/lib/storage';
+import { getJobStatus, Job } from '@/lib/jobs-api';
+import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { getUsage, UsageDTO } from '@/lib/usage';
 import { getAuthHeader } from '@/lib/auth-token';
-import { useToast } from '@/hooks/use-toast';
 
 const Dashboard = () => {
   const { user, getToken } = useAuth();
-  const { toast } = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [usage, setUsage] = useState<UsageDTO | null>(null);
-  const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   // Load jobs and usage on mount
@@ -84,45 +79,18 @@ const Dashboard = () => {
     }
   };
 
-  const handleCreateProject = async (youtubeUrl: string, neededMinutes: number, targetDuration: string) => {
-    try {
-      const result = await enqueuePipeline(
-        youtubeUrl,
-        neededMinutes,
-        targetDuration,
-        getToken
-      );
-      
-      const newJob: Job = {
-        id: result.jobId || result.id,
-        youtubeUrl,
-        status: 'queued',
-        progress: 0,
-        createdAt: new Date().toISOString(),
-        neededMinutes,
-        targetDuration
-      };
-      
-      // Save to localStorage
-      saveUserJob(user!.id, newJob);
-      
-      // Update local state
-      setJobs(prev => [newJob, ...prev]);
-      
-      toast({
-        title: "Projeto criado",
-        description: "Seu projeto foi criado e está na fila de processamento"
-      });
-    } catch (error: any) {
-      console.error('Failed to create project:', error);
-      toast({
-        title: "Erro ao criar projeto",
-        description: error.message || "Tente novamente",
-        variant: "destructive"
-      });
-      throw error;
-    }
+  const handleProjectCreated = (jobId: string) => {
+    // Recarregar jobs do localStorage
+    const updatedJobs = getUserJobs(user!.id);
+    setJobs(updatedJobs);
   };
+
+  // Memoizar métricas
+  const metrics = useMemo(() => ({
+    totalProjects: jobs.length,
+    completedClips: jobs.filter(j => j.status === 'completed').length,
+    minutesProcessed: usage?.minutesUsed || 0
+  }), [jobs, usage]);
 
   if (isLoading) {
     return (
@@ -185,56 +153,18 @@ const Dashboard = () => {
 
           {/* Main Content */}
           <main className="flex-1">
+            {/* Header */}
             <div className="mb-8">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
-                <div>
-                  <h1 className="text-3xl font-bold text-foreground mb-2">
-                    Bem-vindo ao Cortaí!
-                  </h1>
-                  <p className="text-muted-foreground">
-                    Transforme seus vídeos do YouTube em clipes virais para redes sociais
-                  </p>
-                </div>
-                
-                <Dialog open={isNewProjectOpen} onOpenChange={setIsNewProjectOpen}>
-                  <DialogTrigger asChild>
-                    <Button className="gap-2">
-                      <Plus className="w-4 h-4" />
-                      Novo Projeto
-                    </Button>
-                  </DialogTrigger>
-                  <NewProjectForm 
-                    onSubmit={handleCreateProject}
-                    onClose={() => setIsNewProjectOpen(false)}
-                  />
-                </Dialog>
-              </div>
-              
-              {/* Usage Bar */}
-              {usage && (
-                <Card className="mb-6">
-                  <CardContent className="pt-6">
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-muted-foreground">Minutos Usados</span>
-                      <span className="font-medium">
-                        {usage.minutesUsed} / {usage.minutesQuota}
-                      </span>
-                    </div>
-                    <Progress 
-                      value={(usage.minutesUsed / usage.minutesQuota) * 100} 
-                      className="h-2 mb-2"
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Plano: {usage.plan}</span>
-                      <span>{usage.remaining} minutos restantes</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+              <h1 className="text-3xl font-bold text-foreground mb-2">
+                Bem-vindo ao Cortaí!
+              </h1>
+              <p className="text-muted-foreground">
+                Transforme seus vídeos do YouTube em clipes virais para redes sociais
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-              {/* Quick Stats */}
+            {/* Métricas - Movidas para cima */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -242,7 +172,7 @@ const Dashboard = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{jobs.length}</div>
+                  <div className="text-2xl font-bold">{metrics.totalProjects}</div>
                 </CardContent>
               </Card>
 
@@ -253,9 +183,7 @@ const Dashboard = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {jobs.filter(j => j.status === 'completed').length}
-                  </div>
+                  <div className="text-2xl font-bold">{metrics.completedClips}</div>
                 </CardContent>
               </Card>
 
@@ -266,18 +194,47 @@ const Dashboard = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {usage?.minutesUsed || 0}
-                  </div>
+                  <div className="text-2xl font-bold">{metrics.minutesProcessed}</div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Jobs List */}
+            {/* QuickCreate - Novo componente centralizado */}
+            <div className="mb-8">
+              <QuickCreate 
+                userId={user!.id}
+                getToken={getToken}
+                onProjectCreated={handleProjectCreated}
+              />
+            </div>
+
+            {/* Usage Bar - Movido para baixo do QuickCreate */}
+            {usage && (
+              <Card className="mb-8">
+                <CardContent className="pt-6">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-muted-foreground">Minutos Usados</span>
+                    <span className="font-medium">
+                      {usage.minutesUsed} / {usage.minutesQuota}
+                    </span>
+                  </div>
+                  <Progress 
+                    value={(usage.minutesUsed / usage.minutesQuota) * 100} 
+                    className="h-2 mb-2"
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Plano: {usage.plan}</span>
+                    <span>{usage.remaining} minutos restantes</span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Meus Projetos - Movido para baixo */}
             <div>
               <h2 className="text-xl font-semibold mb-4">Meus Projetos</h2>
               {jobs.length === 0 ? (
-                <EmptyState onAction={() => setIsNewProjectOpen(true)} />
+                <EmptyState />
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {jobs.map((job) => (
