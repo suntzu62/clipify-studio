@@ -1,9 +1,6 @@
-import { jwtVerify, createRemoteJWKSet } from "npm:jose";
+import { jwtVerify } from "npm:jose";
 
-const jwksUrl = Deno.env.get("CLERK_JWKS_URL");
-const issuer = Deno.env.get("CLERK_ISSUER");
-// Use remote JWKS so keys are fetched from Clerk correctly.
-const JWKS = jwksUrl ? createRemoteJWKSet(new URL(jwksUrl)) : null;
+const supabaseJwtSecret = Deno.env.get("SUPABASE_JWT_SECRET");
 
 export async function requireUser(req: Request): Promise<
   | { userId: string; email?: string }
@@ -23,13 +20,18 @@ export async function requireUser(req: Request): Promise<
     }
 
     if (!token) return { error: "missing token", status: 401 };
-    if (!JWKS || !issuer) return { error: "auth_not_configured", status: 500 };
+    if (!supabaseJwtSecret) return { error: "auth_not_configured", status: 500 };
 
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer,
-      algorithms: ["RS256"],
+    // Verify Supabase JWT (uses HS256 algorithm)
+    const secretKey = new TextEncoder().encode(supabaseJwtSecret);
+    const { payload } = await jwtVerify(token, secretKey, {
+      algorithms: ["HS256"],
     });
-    return { userId: payload.sub as string, email: (payload as any).email as string | undefined };
+    
+    return { 
+      userId: payload.sub as string, 
+      email: (payload as any).email as string | undefined 
+    };
   } catch (err: any) {
     return { error: "invalid_token", status: 401 };
   }

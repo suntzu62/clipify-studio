@@ -123,8 +123,9 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: dbErr.message }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
     }
 
-    // Redirect back to app with flag
-    const appUrl = new URL(Deno.env.get("APP_URL") || "https://clipify-studio.lovable.app");
+    // Redirect back to app integrations page with success flag
+    const appUrl = new URL(Deno.env.get("APP_URL") || "https://id-preview--caba0bdd-ca42-4ab6-bde6-1b07c71f0157.lovable.app");
+    appUrl.pathname = '/integrations';
     appUrl.searchParams.set("connected", "youtube");
     return new Response(null, { status: 302, headers: { ...corsHeaders, Location: appUrl.toString() } });
   } catch (err) {
