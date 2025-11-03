@@ -1,0 +1,333 @@
+import { promises as fs } from 'fs';
+import { join } from 'path';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
+import { createLogger } from '../config/logger.js';
+import type { HighlightSegment, Transcript, Clip } from '../types/index.js';
+
+const logger = createLogger('rendering');
+
+// Set ffmpeg path
+if (ffmpegStatic) {
+  ffmpeg.setFfmpegPath(ffmpegStatic);
+}
+
+interface RenderOptions {
+  format?: '9:16' | '16:9' | '1:1'; // Aspect ratio
+  resolution?: { width: number; height: number };
+  addSubtitles?: boolean;
+  font?: string;
+  preset?: 'ultrafast' | 'superfast' | 'veryfast' | 'fast' | 'medium';
+}
+
+interface RenderResult {
+  clips: RenderedClip[];
+  outputDir: string;
+}
+
+interface RenderedClip {
+  id: string;
+  videoPath: string;
+  thumbnailPath: string;
+  duration: number;
+  segment: HighlightSegment;
+}
+
+/**
+ * Renderiza múltiplos clipes a partir dos highlights
+ */
+export async function renderClips(
+  videoPath: string,
+  segments: HighlightSegment[],
+  transcript: Transcript,
+  options: RenderOptions = {}
+): Promise<RenderResult> {
+  const {
+    format = '9:16',
+    resolution = getResolutionForFormat(format),
+    addSubtitles = true,
+    font = 'Inter',
+    preset = 'ultrafast',
+  } = options;
+
+  logger.info(
+    {
+      videoPath,
+      segmentCount: segments.length,
+      format,
+      resolution,
+      addSubtitles
+    },
+    'Starting clip rendering'
+  );
+
+  const outputDir = join('/tmp', `render-${Date.now()}`);
+  await fs.mkdir(outputDir, { recursive: true });
+
+  const renderedClips: RenderedClip[] = [];
+
+  try {
+    // Render all clips in parallel for maximum speed
+    logger.info({ totalClips: segments.length }, 'Rendering all clips in parallel');
+
+    const renderedResults = await Promise.all(
+      segments.map((segment, idx) =>
+        renderSingleClip(
+          videoPath,
+          segment,
+          transcript,
+          outputDir,
+          `clip-${idx}`,
+          {
+            resolution,
+            format,
+            addSubtitles,
+            font,
+            preset,
+          }
+        )
+      )
+    );
+
+    renderedClips.push(...renderedResults);
+
+    logger.info(
+      { renderedCount: renderedClips.length, outputDir },
+      'Clip rendering completed'
+    );
+
+    return { clips: renderedClips, outputDir };
+  } catch (error: any) {
+    logger.error({ error: error.message, outputDir }, 'Clip rendering failed');
+    throw new Error(`Rendering failed: ${error.message}`);
+  }
+}
+
+/**
+ * Renderiza um único clipe
+ */
+async function renderSingleClip(
+  videoPath: string,
+  segment: HighlightSegment,
+  transcript: Transcript,
+  outputDir: string,
+  clipId: string,
+  options: Required<RenderOptions>
+): Promise<RenderedClip> {
+  const { start, end } = segment;
+  const duration = end - start;
+
+  const videoOutputPath = join(outputDir, `${clipId}.mp4`);
+  const thumbnailOutputPath = join(outputDir, `${clipId}.jpg`);
+
+  logger.info({ clipId, start, end, duration }, 'Rendering clip');
+
+  try {
+    // Build FFmpeg filters
+    const { width, height } = options.resolution;
+    const vfFilters: string[] = [];
+
+    // Crop and scale to target aspect ratio
+    if (options.format === '9:16') {
+      // Vertical format (1080x1920)
+      vfFilters.push(
+        `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`
+      );
+    } else if (options.format === '1:1') {
+      // Square format
+      vfFilters.push(
+        `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`
+      );
+    } else {
+      // Keep original 16:9
+      vfFilters.push(`scale=${width}:${height}`);
+    }
+
+    // Add subtitles if requested
+    if (options.addSubtitles) {
+      const subtitlesFilter = await buildSubtitlesFilter(
+        transcript,
+        start,
+        end,
+        outputDir,
+        clipId,
+        options.font
+      );
+      if (subtitlesFilter) {
+        vfFilters.push(subtitlesFilter);
+      }
+    }
+
+    // Add FPS
+    vfFilters.push('fps=30');
+
+    const vf = vfFilters.join(',');
+
+    // Audio normalization
+    const af = 'loudnorm=I=-14:LRA=11:TP=-1.5';
+
+    // Render video
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg(videoPath)
+        .setStartTime(start)
+        .setDuration(duration)
+        .outputOptions([
+          '-map', '0:v:0',
+          '-map', '0:a:0',
+          '-vf', vf,
+          '-af', af,
+          '-c:v', 'libx264',
+          '-preset', options.preset,
+          '-tune', 'zerolatency',
+          '-profile:v', 'high',
+          '-level', '4.1',
+          '-pix_fmt', 'yuv420p',
+          '-b:v', '4M',
+          '-maxrate', '6M',
+          '-bufsize', '8M',
+          '-g', '30',
+          '-keyint_min', '30',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ac', '2',
+          '-ar', '48000',
+          '-movflags', '+faststart',
+        ])
+        .output(videoOutputPath)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
+        .run();
+    });
+
+    // Generate thumbnail
+    await generateThumbnail(videoOutputPath, thumbnailOutputPath, duration);
+
+    logger.info({ clipId, videoOutputPath }, 'Clip rendered successfully');
+
+    return {
+      id: clipId,
+      videoPath: videoOutputPath,
+      thumbnailPath: thumbnailOutputPath,
+      duration,
+      segment,
+    };
+  } catch (error: any) {
+    logger.error({ clipId, error: error.message }, 'Clip rendering failed');
+    throw error;
+  }
+}
+
+/**
+ * Constrói filtro de legendas para FFmpeg
+ */
+async function buildSubtitlesFilter(
+  transcript: Transcript,
+  start: number,
+  end: number,
+  outputDir: string,
+  clipId: string,
+  font: string
+): Promise<string | null> {
+  // Get relevant segments for this clip
+  const clipSegments = transcript.segments.filter(
+    (seg) => seg.start < end && seg.end > start
+  );
+
+  if (clipSegments.length === 0) {
+    return null;
+  }
+
+  // Generate SRT file
+  const srtPath = join(outputDir, `${clipId}.srt`);
+  const srtContent = generateSRT(clipSegments, start);
+
+  await fs.writeFile(srtPath, srtContent);
+
+  // Escape path for FFmpeg
+  const escapedPath = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+
+  // Build subtitles filter with styling
+  return `subtitles=${escapedPath}:force_style='Alignment=2,FontName=${font},FontSize=24,Bold=1,Outline=2,Shadow=0,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,MarginV=40'`;
+}
+
+/**
+ * Gera conteúdo SRT a partir dos segmentos
+ */
+function generateSRT(segments: any[], startOffset: number): string {
+  return segments
+    .map((seg, idx) => {
+      const start = Math.max(0, seg.start - startOffset);
+      const end = Math.max(0, seg.end - startOffset);
+
+      return [
+        idx + 1,
+        `${formatSRTTime(start)} --> ${formatSRTTime(end)}`,
+        seg.text.trim(),
+        '',
+      ].join('\n');
+    })
+    .join('\n');
+}
+
+/**
+ * Formata tempo para SRT (HH:MM:SS,mmm)
+ */
+function formatSRTTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+}
+
+/**
+ * Gera thumbnail do clipe
+ */
+function generateThumbnail(
+  videoPath: string,
+  thumbnailPath: string,
+  duration: number
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timestamp = Math.min(2, duration / 2);
+
+    ffmpeg(videoPath)
+      .seekInput(timestamp)
+      .frames(1)
+      .outputOptions(['-q:v', '3'])
+      .output(thumbnailPath)
+      .on('end', () => resolve())
+      .on('error', (err) => reject(err))
+      .run();
+  });
+}
+
+/**
+ * Obtém resolução baseada no formato
+ */
+function getResolutionForFormat(format: '9:16' | '16:9' | '1:1'): { width: number; height: number } {
+  switch (format) {
+    case '9:16':
+      return { width: 1080, height: 1920 };
+    case '1:1':
+      return { width: 1080, height: 1080 };
+    case '16:9':
+    default:
+      return { width: 1920, height: 1080 };
+  }
+}
+
+/**
+ * Cleanup: remove diretório de renderização
+ */
+export async function cleanupRenderDir(outputDir: string): Promise<void> {
+  try {
+    await fs.rm(outputDir, { recursive: true, force: true });
+    logger.info({ outputDir }, 'Render directory cleaned up');
+  } catch (error: any) {
+    logger.warn({ error: error.message, outputDir }, 'Render directory cleanup failed');
+  }
+}

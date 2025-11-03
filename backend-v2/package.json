@@ -1,0 +1,50 @@
+{
+  "name": "clipify-backend-v2",
+  "version": "2.0.0",
+  "description": "Backend simplificado e confiável para ClipifyStudio",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "video",
+    "clips",
+    "ai",
+    "youtube"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@distube/ytdl-core": "^4.14.4",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/websocket": "^10.0.1",
+    "@supabase/supabase-js": "^2.39.0",
+    "bullmq": "^5.4.0",
+    "dotenv": "^16.4.1",
+    "fastify": "^4.26.0",
+    "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "ioredis": "^5.3.2",
+    "openai": "^4.104.0",
+    "pino": "^8.19.0",
+    "pino-pretty": "^10.3.1",
+    "youtube-dl-exec": "^2.4.17",
+    "yt-dlp-wrap": "^2.3.12",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.28",
+    "@types/node": "^20.11.16",
+    "@ybd-project/ytdl-core": "^6.0.8",
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

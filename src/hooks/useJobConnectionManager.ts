@@ -1,4 +1,4 @@
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { JobStatus } from './useJobStream';
 import { getJobStatus } from '@/lib/jobs-api';
 

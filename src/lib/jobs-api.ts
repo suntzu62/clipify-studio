@@ -1,5 +1,28 @@
 import { getAuthHeader } from './auth-token';
 
+// Helper function to generate job ID (matching edge function)
+async function generateJobId(sourceIdentifier: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(sourceIdentifier);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return `job_${hashHex.substring(0, 16)}`;
+}
+
+function normalizeYoutubeUrl(raw: string): string {
+  const trimmed = raw.trim();
+  const idMatch = trimmed.match(/(?:youtu\.be\/|v=)([A-Za-z0-9_-]{11})/);
+  if (idMatch && idMatch[1]) {
+    return `https://www.youtube.com/watch?v=${idMatch[1]}`;
+  }
+  const firstUrl = trimmed.match(/https?:\/\/[^\s]+/);
+  if (firstUrl) {
+    return firstUrl[0];
+  }
+  return trimmed.split(/\s+/)[0];
+}
+
 export interface Job {
   id: string;
   status: 'queued' | 'active' | 'waiting-children' | 'completed' | 'failed';
@@ -74,26 +97,46 @@ export async function enqueueFromUrl(
   url: string,
   getToken?: () => Promise<string | null>
 ) {
-  // Use local workers API only in development with explicit envs
+  // Use backend-v2 API in development
   const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY);
-  
+    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+
   if (useLocalAPI) {
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_WORKERS_API_KEY,
+      'x-api-key': import.meta.env.VITE_API_KEY,
     } as Record<string, string>;
 
-    const resp = await fetch(`${import.meta.env.VITE_WORKERS_API_URL}/api/jobs/pipeline`, {
+    // Get user ID from token if available
+    let userId = 'dev-user';
+    if (getToken) {
+      const token = await getToken();
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          userId = payload.sub || 'dev-user';
+        } catch {}
+      }
+    }
+
+    const jobData = {
+      sourceType: 'youtube',
+      youtubeUrl: normalizeYoutubeUrl(url),
+      userId,
+      targetDuration: 60,
+      clipCount: 5,
+    };
+
+    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ youtubeUrl: url, neededMinutes: 10 }),
+      body: JSON.stringify(jobData),
     });
 
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to enqueue pipeline';
-      throw new Error(`enqueue-pipeline failed: ${resp.status} ${resp.statusText} - ${msg}`);
+      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to create job';
+      throw new Error(`create-job failed: ${resp.status} ${resp.statusText} - ${msg}`);
     }
     // Normalize return shape to { jobId }
     const jobId = (data as any)?.jobId || (data as any)?.id;
@@ -124,40 +167,54 @@ export async function enqueueFromUrl(
 }
 
 export async function enqueuePipeline(
-  youtubeUrl: string, 
+  youtubeUrl: string,
   neededMinutes: number,
   targetDuration: string,
   getToken?: () => Promise<string | null>
 ) {
-  // Edge function transforma entrada no novo formato JobData
-  // Use local workers API only in development with explicit envs
+  // Use backend-v2 API in development
   const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY);
-  
+    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+
   if (useLocalAPI) {
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_WORKERS_API_KEY,
+      'x-api-key': import.meta.env.VITE_API_KEY,
     } as Record<string, string>;
+
+    // Get user ID from token if available
+    let userId = 'dev-user';
+    if (getToken) {
+      const token = await getToken();
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          userId = payload.sub || 'dev-user';
+        } catch {}
+      }
+    }
+
+    const jobData = {
+      sourceType: 'youtube',
+      youtubeUrl: normalizeYoutubeUrl(youtubeUrl),
+      userId,
+      targetDuration: parseInt(targetDuration),
+      clipCount: 5,
+    };
 
     let retryCount = 0;
     const maxRetries = 3;
 
     while (retryCount <= maxRetries) {
       try {
-        const resp = await fetch(`${import.meta.env.VITE_WORKERS_API_URL}/api/jobs/pipeline`, {
+        const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({
-            youtubeUrl,
-            neededMinutes,
-            targetDuration,
-            meta: { targetDuration }
-          }),
+          body: JSON.stringify(jobData),
         });
 
         const data = await resp.json().catch(() => ({}));
-        
+
         if (resp.ok) {
           return data;
         }
@@ -165,14 +222,9 @@ export async function enqueuePipeline(
         // Handle 429 errors with exponential backoff
         if (resp.status === 429) {
           if (retryCount === maxRetries) {
-            const isUserLimit = (data as any)?.error === 'user_rate_limit_exceeded';
-            const msg = isUserLimit 
-              ? 'Você atingiu o limite de 10 projetos por hora. Tente novamente em alguns minutos.'
-              : 'Sistema temporariamente sobrecarregado. Tente novamente em alguns minutos.';
-            throw new Error(msg);
+            throw new Error('Sistema temporariamente sobrecarregado. Tente novamente em alguns minutos.');
           }
-          
-          // Exponential backoff: 2s, 6s, 18s
+
           const delay = Math.pow(3, retryCount) * 2000;
           await new Promise(resolve => setTimeout(resolve, delay));
           retryCount++;
@@ -180,9 +232,9 @@ export async function enqueuePipeline(
         }
 
         // For other errors, throw immediately
-        const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to enqueue pipeline';
-        throw new Error(`enqueue-pipeline failed: ${resp.status} ${resp.statusText} - ${msg}`);
-        
+        const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to create job';
+        throw new Error(`create-job failed: ${resp.status} ${resp.statusText} - ${msg}`);
+
       } catch (error) {
         if (retryCount === maxRetries || !(error instanceof Error && error.message.includes('429'))) {
           throw error;
@@ -258,17 +310,17 @@ export async function getJobStatus(
   jobId: string,
   getToken?: () => Promise<string | null>
 ): Promise<Job> {
-  // Use local workers API only in development with explicit envs
+  // Use backend-v2 API in development
   const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_WORKERS_API_URL && import.meta.env.VITE_WORKERS_API_KEY);
-  
+    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+
   if (useLocalAPI) {
     const headers = {
-      'x-api-key': import.meta.env.VITE_WORKERS_API_KEY,
+      'x-api-key': import.meta.env.VITE_API_KEY,
     } as Record<string, string>;
-    
+
     const response = await fetch(
-      `${import.meta.env.VITE_WORKERS_API_URL}/api/jobs/${jobId}/status`,
+      `${import.meta.env.VITE_BACKEND_URL}/jobs/${jobId}`,
       { headers }
     );
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { useJobConnectionManager } from './useJobConnectionManager';
 import { JobStatus } from './useJobStream';
 import { getJobStatus, type Job } from '@/lib/jobs-api';
@@ -19,16 +19,11 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
   const [stallStartAt, setStallStartAt] = useState<number | null>(null);
   const [stalled, setStalled] = useState(false);
   
-  const getSupabaseToken = useCallback(async (opts?: any) => {
+  const getSupabaseToken = useCallback(async () => {
     if (!getToken) return null;
 
-    const options = { ...(opts || {}) };
-    if (!options.template) {
-      options.template = 'supabase';
-    }
-
     try {
-      return await getToken(options);
+      return await getToken();
     } catch {
       return null;
     }

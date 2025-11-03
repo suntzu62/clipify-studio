@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 // @deprecated Use useJobStatus instead for better performance and intelligent fallback
 // This hook is kept for backward compatibility but causes excessive network requests
