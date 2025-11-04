@@ -19,6 +19,20 @@ export const ClipCard = ({ clip, index }: ClipCardProps) => {
   const [showPlayer, setShowPlayer] = useState(false);
   const { toast } = useToast();
 
+  // Debug: Log clip data when opening player
+  const handleOpenPlayer = () => {
+    console.log('[ClipCard] Opening player with clip:', {
+      id: clip.id,
+      title: clip.title,
+      previewUrl: clip.previewUrl,
+      downloadUrl: clip.downloadUrl,
+      thumbnailUrl: clip.thumbnailUrl,
+      hasPreviewUrl: !!clip.previewUrl,
+      hasDownloadUrl: !!clip.downloadUrl,
+    });
+    setShowPlayer(true);
+  };
+
   const copyToClipboard = async (text: string, type: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -54,6 +68,13 @@ export const ClipCard = ({ clip, index }: ClipCardProps) => {
     });
   };
 
+  const handleTikTokExport = () => {
+    toast({
+      title: "Em breve no TikTok! 🎵",
+      description: "Integração com TikTok em desenvolvimento"
+    });
+  };
+
   if (clip.status === 'processing') {
     return (
       <Card className="overflow-hidden bg-gradient-card border-2 border-dashed border-primary/20">
@@ -84,9 +105,9 @@ export const ClipCard = ({ clip, index }: ClipCardProps) => {
         <CardContent className="p-0">
           <AspectRatio ratio={9/16} className="relative">
             {/* Video thumbnail/preview */}
-            <div 
+            <div
               className="bg-gradient-to-br from-primary/20 to-primary/5 h-full flex items-center justify-center cursor-pointer group relative overflow-hidden"
-              onClick={() => setShowPlayer(true)}
+              onClick={handleOpenPlayer}
             >
               {clip.thumbnailUrl ? (
                 <img 
@@ -139,26 +160,37 @@ export const ClipCard = ({ clip, index }: ClipCardProps) => {
               </div>
             )}
             
-            {/* Action buttons */}
+            {/* Primary action button */}
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleDownload}
+              className="w-full text-xs gap-1"
+            >
+              <Download className="w-3 h-3" />
+              Baixar Vídeo
+            </Button>
+
+            {/* Export buttons */}
             <div className="grid grid-cols-2 gap-2">
-              <Button 
-                variant="default" 
-                size="sm" 
-                onClick={handleDownload}
-                className="text-xs gap-1"
-              >
-                <Download className="w-3 h-3" />
-                Baixar
-              </Button>
-              
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleYouTubeExport}
                 className="text-xs gap-1"
               >
                 <Upload className="w-3 h-3" />
                 YouTube
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTikTokExport}
+                className="text-xs gap-1"
+              >
+                <Upload className="w-3 h-3" />
+                TikTok
               </Button>
             </div>
             
@@ -205,8 +237,14 @@ export const ClipCard = ({ clip, index }: ClipCardProps) => {
             <DialogTitle className="text-lg">{clip.title}</DialogTitle>
           </DialogHeader>
           <AspectRatio ratio={9/16}>
-            {clip.previewUrl && (
+            {clip.previewUrl ? (
               <Player url={clip.previewUrl} title={clip.title} />
+            ) : clip.downloadUrl ? (
+              <Player url={clip.downloadUrl} title={clip.title} />
+            ) : (
+              <div className="flex items-center justify-center h-full bg-gradient-to-br from-primary/10 to-primary/5">
+                <p className="text-sm text-muted-foreground">Vídeo não disponível</p>
+              </div>
             )}
           </AspectRatio>
         </DialogContent>

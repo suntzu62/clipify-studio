@@ -3,6 +3,8 @@ import { randomUUID } from 'crypto';
 import { CreateJobSchema, type JobData } from '../types/index.js';
 import { addVideoJob, getJobStatus, cancelJob, getQueueHealth } from '../jobs/queue.js';
 import { createLogger } from '../config/logger.js';
+import { createClient } from '@supabase/supabase-js';
+import { env } from '../config/env.js';
 
 const logger = createLogger('routes');
 
@@ -92,11 +94,38 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
+    // Transform result to match frontend expectations
+    let result = status.returnvalue;
+    if (result && result.clips && Array.isArray(result.clips)) {
+      result = {
+        ...result,
+        clips: result.clips.map((clip: any) => {
+          // Use proxy URL instead of direct Supabase URL (workaround for private buckets)
+          const proxyUrl = `http://localhost:3001/clips/${jobId}/${clip.id}.mp4`;
+
+          return {
+            id: clip.id,
+            title: clip.title,
+            description: clip.transcript || clip.reason || 'Descrição gerada automaticamente',
+            hashtags: clip.keywords || [],
+            previewUrl: proxyUrl,
+            downloadUrl: clip.storagePath || proxyUrl,
+            thumbnailUrl: clip.thumbnail,
+            duration: clip.duration,
+            status: 'ready',
+            start: clip.start,
+            end: clip.end,
+            score: clip.score,
+          };
+        }),
+      };
+    }
+
     return {
       jobId: status.id,
       state: status.state,
       progress: status.progress,
-      result: status.returnvalue,
+      result,
       error: status.failedReason,
       finishedAt: status.finishedOn ? new Date(status.finishedOn).toISOString() : null,
     };
@@ -129,5 +158,52 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.get('/queue/stats', async () => {
     return await getQueueHealth();
+  });
+
+  // ============================================
+  // PROXY VIDEO FILES (Temporary workaround for private buckets)
+  // ============================================
+  app.get('/clips/:jobId/:filename', async (request, reply) => {
+    const { jobId, filename } = request.params as { jobId: string; filename: string };
+
+    try {
+      const supabase = createClient(
+        env.supabase.url,
+        env.supabase.serviceKey
+      );
+
+      const filePath = `clips/${jobId}/${filename}`;
+
+      logger.info({ filePath }, 'Proxying video file');
+
+      const { data, error } = await supabase.storage
+        .from('raw')
+        .download(filePath);
+
+      if (error || !data) {
+        logger.error({ error, filePath }, 'File not found in storage');
+        return reply.status(404).send({
+          error: 'FILE_NOT_FOUND',
+          message: `File not found: ${filePath}`,
+        });
+      }
+
+      // Set proper headers for video streaming
+      reply.header('Content-Type', 'video/mp4');
+      reply.header('Accept-Ranges', 'bytes');
+      reply.header('Cache-Control', 'public, max-age=31536000');
+      reply.header('Access-Control-Allow-Origin', '*');
+
+      const buffer = Buffer.from(await data.arrayBuffer());
+      logger.info({ filePath, size: buffer.length }, 'Video file sent successfully');
+
+      return reply.send(buffer);
+    } catch (error: any) {
+      logger.error({ error: error.message, jobId, filename }, 'Failed to proxy video file');
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to retrieve video file',
+      });
+    }
   });
 }

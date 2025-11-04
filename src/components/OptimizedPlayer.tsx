@@ -18,6 +18,38 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
     window.open(url, '_blank');
   };
 
+  // Debug: Log when player is rendered
+  console.log('[OptimizedPlayer] Rendering with:', { url, title, hasUrl: !!url });
+
+  // Test URL accessibility
+  if (url) {
+    fetch(url, { method: 'HEAD' })
+      .then(response => {
+        console.log('[OptimizedPlayer] URL accessibility test:', {
+          url,
+          status: response.status,
+          ok: response.ok,
+          headers: Object.fromEntries(response.headers.entries()),
+        });
+      })
+      .catch(error => {
+        console.error('[OptimizedPlayer] URL fetch test failed:', { url, error });
+      });
+  }
+
+  if (!url) {
+    return (
+      <Card className={`overflow-hidden ${className}`}>
+        <div className="relative bg-gradient-to-br from-red-500/20 to-red-700/20 h-[300px] flex items-center justify-center">
+          <div className="text-center text-white">
+            <p className="text-lg font-semibold mb-2">URL do vídeo não encontrada</p>
+            <p className="text-sm text-gray-300">Entre em contato com o suporte</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card className={`overflow-hidden ${className}`}>
       <div className="relative bg-black">
@@ -31,6 +63,17 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
           playsInline
           className="w-full h-full"
           style={{ maxHeight: '80vh' }}
+          onError={(e) => {
+            console.error('[OptimizedPlayer] Video load error:', {
+              url,
+              error: e,
+              currentTarget: e.currentTarget,
+              networkState: e.currentTarget.networkState,
+              readyState: e.currentTarget.readyState,
+            });
+          }}
+          onLoadStart={() => console.log('[OptimizedPlayer] Video load started:', url)}
+          onLoadedData={() => console.log('[OptimizedPlayer] Video data loaded:', url)}
         >
           Seu navegador não suporta reprodução de vídeo.
         </video>
