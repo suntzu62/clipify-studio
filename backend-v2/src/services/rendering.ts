@@ -3,7 +3,9 @@ import { join } from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import { createLogger } from '../config/logger.js';
-import type { HighlightSegment, Transcript, Clip } from '../types/index.js';
+import type { HighlightSegment, Transcript, Clip, SubtitlePreferences } from '../types/index.js';
+import { DEFAULT_SUBTITLE_PREFERENCES } from '../types/index.js';
+import { generateASS, adjustFontSize } from '../utils/subtitle-optimizer.js';
 
 const logger = createLogger('rendering');
 
@@ -18,6 +20,7 @@ interface RenderOptions {
   addSubtitles?: boolean;
   font?: string;
   preset?: 'ultrafast' | 'superfast' | 'veryfast' | 'fast' | 'medium';
+  subtitlePreferences?: SubtitlePreferences;
 }
 
 interface RenderResult {
@@ -48,6 +51,7 @@ export async function renderClips(
     addSubtitles = true,
     font = 'Inter',
     preset = 'ultrafast',
+    subtitlePreferences = DEFAULT_SUBTITLE_PREFERENCES,
   } = options;
 
   logger.info(
@@ -84,6 +88,7 @@ export async function renderClips(
             addSubtitles,
             font,
             preset,
+            subtitlePreferences,
           }
         )
       )
@@ -147,13 +152,14 @@ async function renderSingleClip(
 
     // Add subtitles if requested
     if (options.addSubtitles) {
+      const subtitlePrefs = options.subtitlePreferences || DEFAULT_SUBTITLE_PREFERENCES;
       const subtitlesFilter = await buildSubtitlesFilter(
         transcript,
         start,
         end,
         outputDir,
         clipId,
-        options.font
+        subtitlePrefs
       );
       if (subtitlesFilter) {
         vfFilters.push(subtitlesFilter);
@@ -228,7 +234,7 @@ async function buildSubtitlesFilter(
   end: number,
   outputDir: string,
   clipId: string,
-  font: string
+  subtitlePreferences: SubtitlePreferences
 ): Promise<string | null> {
   // Get relevant segments for this clip
   const clipSegments = transcript.segments.filter(
@@ -239,17 +245,27 @@ async function buildSubtitlesFilter(
     return null;
   }
 
-  // Generate SRT file
-  const srtPath = join(outputDir, `${clipId}.srt`);
-  const srtContent = generateSRT(clipSegments, start);
+  // Adjust font size based on content and duration
+  const totalText = clipSegments.map((s) => s.text).join(' ');
+  const duration = end - start;
+  const adjustedFontSize = adjustFontSize(totalText, duration, subtitlePreferences.fontSize);
 
-  await fs.writeFile(srtPath, srtContent);
+  const adjustedPreferences = {
+    ...subtitlePreferences,
+    fontSize: adjustedFontSize,
+  };
+
+  // Generate ASS file with custom styling
+  const assPath = join(outputDir, `${clipId}.ass`);
+  const assContent = generateASS(clipSegments, start, adjustedPreferences);
+
+  await fs.writeFile(assPath, assContent);
 
   // Escape path for FFmpeg
-  const escapedPath = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+  const escapedPath = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
 
-  // Build subtitles filter with styling
-  return `subtitles=${escapedPath}:force_style='Alignment=2,FontName=${font},FontSize=24,Bold=1,Outline=2,Shadow=0,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,MarginV=40'`;
+  // Use ASS filter (no force_style needed, all styling is in the ASS file)
+  return `ass=${escapedPath}`;
 }
 
 /**

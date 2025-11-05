@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
-import { CreateJobSchema, type JobData } from '../types/index.js';
+import { CreateJobSchema, type JobData, SubtitlePreferencesSchema } from '../types/index.js';
 import { addVideoJob, getJobStatus, cancelJob, getQueueHealth } from '../jobs/queue.js';
 import { createLogger } from '../config/logger.js';
 import { createClient } from '@supabase/supabase-js';
 import { env } from '../config/env.js';
+import { redis } from '../config/redis.js';
 
 const logger = createLogger('routes');
 
@@ -158,6 +159,78 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.get('/queue/stats', async () => {
     return await getQueueHealth();
+  });
+
+  // ============================================
+  // SUBTITLE PREFERENCES
+  // ============================================
+
+  // Save subtitle preferences for a specific clip
+  app.patch('/jobs/:jobId/clips/:clipId/subtitle-settings', async (request, reply) => {
+    const { jobId, clipId } = request.params as { jobId: string; clipId: string };
+
+    const parsed = SubtitlePreferencesSchema.safeParse(request.body);
+
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'INVALID_INPUT',
+        message: 'Invalid subtitle preferences',
+        details: parsed.error.format(),
+      });
+    }
+
+    const preferences = parsed.data;
+    const key = `subtitle:${jobId}:${clipId}`;
+
+    try {
+      await redis.set(key, JSON.stringify(preferences), 'EX', 60 * 60 * 24 * 7); // 7 days
+
+      logger.info({ jobId, clipId }, 'Subtitle preferences saved');
+
+      return {
+        jobId,
+        clipId,
+        preferences,
+        message: 'Subtitle preferences saved successfully',
+      };
+    } catch (error: any) {
+      logger.error({ error: error.message, jobId, clipId }, 'Failed to save subtitle preferences');
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to save subtitle preferences',
+      });
+    }
+  });
+
+  // Get subtitle preferences for a specific clip
+  app.get('/jobs/:jobId/clips/:clipId/subtitle-settings', async (request, reply) => {
+    const { jobId, clipId } = request.params as { jobId: string; clipId: string };
+    const key = `subtitle:${jobId}:${clipId}`;
+
+    try {
+      const data = await redis.get(key);
+
+      if (!data) {
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Subtitle preferences not found',
+        });
+      }
+
+      const preferences = JSON.parse(data);
+
+      return {
+        jobId,
+        clipId,
+        preferences,
+      };
+    } catch (error: any) {
+      logger.error({ error: error.message, jobId, clipId }, 'Failed to get subtitle preferences');
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to retrieve subtitle preferences',
+      });
+    }
   });
 
   // ============================================
