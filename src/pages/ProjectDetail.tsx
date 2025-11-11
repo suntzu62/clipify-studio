@@ -11,13 +11,16 @@ import { useTimeline } from '@/hooks/useTimeline';
 import { useClipList } from '@/hooks/useClipList';
 import { ProgressHeader } from '@/components/progress/ProgressHeader';
 import { TimelineStep } from '@/components/timeline/TimelineStep';
-import { ClipCard } from '@/components/clips/ClipCard';
+import { ClipCardEnhanced as ClipCard } from '@/components/clips/ClipCardEnhanced';
 import { SocialProof } from '@/components/social/SocialProof';
 import { VideoDebugPanel } from '@/components/debug/VideoDebugPanel';
 import { ClipDebugPanel } from '@/components/debug/ClipDebugPanel';
 import { WorkerDiagnosticPanel } from '@/components/WorkerDiagnosticPanel';
 import { EnhancedJobProgress } from '@/components/EnhancedJobProgress';
+import { ProcessingPipeline } from '@/components/ProcessingPipeline';
+import { SubtitleSettingsWarning } from '@/components/SubtitleSettingsWarning';
 import { EmptyState } from '@/components/EmptyState';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { getUserJobs, updateJobStatus } from '@/lib/storage';
 import { Job } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
@@ -57,22 +60,66 @@ export default function ProjectDetail() {
 
   useEffect(() => {
     if (!id || !user?.id) return;
-    
-    // Load job from localStorage
-    const jobs = getUserJobs(user.id);
-    const foundJob = jobs.find(j => j.id === id);
-    
-    if (!foundJob) {
+
+    const loadJob = async () => {
+      // First, try to load job from localStorage
+      const jobs = getUserJobs(user.id);
+      const foundJob = jobs.find(j => j.id === id);
+
+      if (foundJob) {
+        setJob(foundJob);
+        return;
+      }
+
+      // If not found in localStorage, wait a bit and try fetching from backend
+      // This handles the case where the job was just created
+      console.log('Job not found in localStorage, waiting and checking backend...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      try {
+        // Try to fetch job status from backend
+        const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+        const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
+
+        const response = await fetch(`${baseUrl}/jobs/${id}`, {
+          headers: {
+            'X-API-Key': apiKey,
+          },
+        });
+
+        if (response.ok) {
+          const jobData = await response.json();
+
+          // Create a minimal job object for localStorage
+          const newJob: Job = {
+            id: jobData.jobId || id,
+            youtubeUrl: '', // Will be updated when we get full status
+            status: jobData.state || 'queued',
+            progress: jobData.progress || 0,
+            createdAt: new Date().toISOString(),
+            neededMinutes: 10,
+          };
+
+          // Save to localStorage for future
+          saveUserJob(user.id, newJob);
+          setJob(newJob);
+          console.log('Job found on backend and saved to localStorage');
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to fetch job from backend:', error);
+      }
+
+      // If still not found, show error
       toast({
         title: "Projeto não encontrado",
-        description: "O projeto solicitado não foi encontrado",
+        description: "O projeto solicitado não foi encontrado. Tente novamente.",
         variant: "destructive"
       });
       navigate('/dashboard');
-      return;
-    }
-    
-    setJob(foundJob);
+    };
+
+    loadJob();
   }, [id, user?.id, navigate, toast]);
 
   useEffect(() => {
@@ -174,7 +221,8 @@ export default function ProjectDetail() {
     if (m.toLowerCase().includes('timeout') || m.toLowerCase().includes('network')) {
       return 'Conexão instável. Verificando status automaticamente... 🔄';
     }
-    return 'Ops! Algo deu errado, mas vamos resolver rapidinho 💪';
+    // Don't show generic error messages - return null to hide the error banner
+    return null;
   }
 
   const getProjectDisplayTitle = () => {
@@ -289,13 +337,6 @@ export default function ProjectDetail() {
           </CardContent>
         </Card>
 
-        {/* Worker Diagnostic Panel */}
-        <WorkerDiagnosticPanel
-          jobId={id || ''}
-          jobStatus={jobStatus?.status}
-          workerHealth={jobStatus?.workerHealth}
-          onRefresh={reconnect}
-        />
 
         {/* Enhanced diagnostics for stalled or problematic processing */}
         {(stalled || jobStatus?.pipelineStatus?.isStalled) && (
@@ -347,28 +388,14 @@ export default function ProjectDetail() {
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Debug Panel - Only in development */}
-            {process.env.NODE_ENV === 'development' && (
-              <VideoDebugPanel 
-                jobStatus={jobStatus}
-                clipDebugInfo={debugInfo}
-                connectionInfo={{
-                  isConnected,
-                  connectionType,
-                  error
-                }}
-                onRefresh={() => window.location.reload()}
-              />
-            )}
-            
             <Tabs defaultValue="progress" className="space-y-6">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="progress" className="gap-2">
                   <TrendingUp className="w-4 h-4" />
                   Progresso
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="results" 
+                <TabsTrigger
+                  value="results"
                   disabled={job?.status === 'queued' && clips.length === 0}
                   className="gap-2"
                 >
@@ -376,69 +403,61 @@ export default function ProjectDetail() {
                   Resultados {readyCount > 0 ? `(${readyCount})` : clips.length > 0 ? `(${clips.length})` : ''}
                 </TabsTrigger>
               </TabsList>
-              
+
               <TabsContent value="progress" className="space-y-6">
-                {/* Enhanced Progress Tracking */}
-                <EnhancedJobProgress
+                {/* Dynamic Processing Pipeline */}
+                <ProcessingPipeline
                   currentStep={jobStatus?.currentStep}
                   jobStatus={job.status as any}
                   progress={overallProgress}
                   error={friendlyError(job?.error || error)}
+                  estimatedTime={getEstimatedTime()}
+                  clipCount={clips.length}
                 />
 
-                {/* Fallback: Original Timeline for debugging */}
+                {/* Debug Panels - Collapsible */}
                 {process.env.NODE_ENV === 'development' && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5 text-primary" />
-                        Timeline Original (Debug)
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                      {steps.map((step, index) => (
-                        <TimelineStep 
-                          key={step.id} 
-                          step={step} 
-                          index={index} 
-                          total={steps.length} 
+                  <Accordion type="single" collapsible className="w-full">
+                    <AccordionItem value="diagnostics">
+                      <AccordionTrigger className="text-sm">
+                        🔧 Diagnósticos e Debug
+                      </AccordionTrigger>
+                      <AccordionContent className="space-y-4">
+                        <WorkerDiagnosticPanel
+                          jobId={id || ''}
+                          jobStatus={jobStatus?.status}
+                          workerHealth={jobStatus?.workerHealth}
+                          onRefresh={reconnect}
                         />
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Current Status Card */}
-                {job.status === 'active' && activeStep && (
-                  <Card className="bg-primary/5 border-primary/20">
-                    <CardContent className="p-6 text-center">
-                      <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <TrendingUp className="w-8 h-8 text-primary animate-pulse" />
-                      </div>
-                      <h3 className="text-lg font-semibold mb-2">
-                        {activeStep.label} em Andamento
-                      </h3>
-                      <p className="text-muted-foreground mb-4">
-                        Estamos na etapa mais importante: criar conteúdo que vai fazer você brilhar! ✨
-                      </p>
-                      <div className="text-sm text-primary font-medium">
-                        Primeiro clipe pronto em ~{Math.max(1, 5 - completedCount)} minutos
-                      </div>
-                    </CardContent>
-                  </Card>
+                        <VideoDebugPanel
+                          jobStatus={jobStatus}
+                          clipDebugInfo={debugInfo}
+                          connectionInfo={{
+                            isConnected,
+                            connectionType,
+                            error
+                          }}
+                          onRefresh={() => window.location.reload()}
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
                 )}
               </TabsContent>
               
               <TabsContent value="results" className="space-y-6">
+                {/* Subtitle Settings Warning */}
+                <SubtitleSettingsWarning jobStatus={job.status as any} />
+
                 {/* Debug Panel in Development */}
                 {process.env.NODE_ENV === 'development' && (
-                  <ClipDebugPanel 
+                  <ClipDebugPanel
                     jobResult={jobStatus || job}
                     clipDebugInfo={debugInfo}
                     onRefresh={handleRefreshClips}
                   />
                 )}
-                
+
                 {readyCount > 0 ? (
                   <>
                     {/* Results Header */}
@@ -456,7 +475,13 @@ export default function ProjectDetail() {
                     {/* Enhanced Clips Grid with Editor Integration */}
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       {clips.map((clip, index) => (
-                        <ClipCard key={clip.id} clip={clip} index={index} />
+                        <ClipCard
+                          key={clip.id}
+                          clip={clip}
+                          index={index}
+                          jobId={id}
+                          apiKey="93560857g"
+                        />
                       ))}
                     </div>
 
@@ -506,7 +531,13 @@ export default function ProjectDetail() {
                     {clips.length > 0 && clips.some(clip => clip.status !== 'failed') && (
                       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         {clips.filter(clip => clip.status !== 'failed').map((clip, index) => (
-                          <ClipCard key={clip.id} clip={clip} index={index} />
+                          <ClipCard
+                            key={clip.id}
+                            clip={clip}
+                            index={index}
+                            jobId={id}
+                            apiKey="93560857g"
+                          />
                         ))}
                       </div>
                     )}

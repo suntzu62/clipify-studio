@@ -7,14 +7,12 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Zap, Loader2, CheckCircle2, XCircle, Sparkles, Captions, Scissors, Upload as UploadIcon } from 'lucide-react';
 import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
-import { enqueueFromUrl } from '@/lib/jobs-api';
-import { saveUserJob } from '@/lib/storage';
-import { Job } from '@/lib/jobs-api';
+import { createTempConfig } from '@/lib/jobs-api';
 
 interface QuickCreateProps {
   userId: string;
   getToken: () => Promise<string | null>;
-  onProjectCreated?: (jobId: string) => void;
+  onProjectCreated?: (tempId: string) => void;
 }
 
 export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateProps) => {
@@ -69,34 +67,23 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
 
     try {
       const normalizedUrl = normalizeYoutubeUrl(url);
-      const { jobId } = await enqueueFromUrl(normalizedUrl, getToken);
-
-      // Salvar job no localStorage
-      const newJob: Job = {
-        id: jobId,
-        youtubeUrl: normalizedUrl,
-        status: 'queued',
-        progress: 0,
-        createdAt: new Date().toISOString(),
-        neededMinutes: 10
-      };
-      saveUserJob(userId, newJob);
+      const { tempId } = await createTempConfig(normalizedUrl, getToken);
 
       toast({
-        title: "✨ Projeto criado com sucesso!",
-        description: "Gerando clipes inteligentes... Acompanhe o progresso.",
+        title: "✨ Link validado com sucesso!",
+        description: "Agora personalize suas configurações antes de processar.",
       });
 
       // Resetar form
       setUrl('');
       setIsValid(null);
 
-      // Callback ou navegação
+      // Callback ou navegação para a página de configuração
       if (onProjectCreated) {
-        onProjectCreated(jobId);
-      } else {
-        navigate(`/projects/${jobId}`);
+        onProjectCreated(tempId);
       }
+      // Sempre navegar para a página de configuração
+      navigate(`/projects/configure/${tempId}`);
     } catch (error: any) {
       console.error('Error creating project:', error);
       
@@ -149,7 +136,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
             <h3 className="text-2xl font-bold text-foreground">Criar novo projeto</h3>
           </div>
           <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
-            Economize tempo criando 8–12 shorts prontos para TikTok, Reels e Shorts com IA
+            Cole o link do YouTube e configure legendas, duração e estilo antes de gerar seus clipes
           </p>
         </div>
         
@@ -191,12 +178,12 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Criando...
+                  Validando...
                 </>
               ) : (
                 <>
                   <Zap className="w-5 h-5" />
-                  Gerar clipes em 1 click
+                  Configurar Clipes
                 </>
               )}
             </Button>

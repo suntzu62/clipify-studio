@@ -1,24 +1,28 @@
 import { Job } from 'bullmq';
 import { createLogger } from '../config/logger.js';
-import type { JobData, JobResult, JobProgress, Clip } from '../types/index.js';
+import type { JobData, JobResult, JobProgress, Clip, SubtitlePreferences } from '../types/index.js';
+import { DEFAULT_SUBTITLE_PREFERENCES } from '../types/index.js';
 import { downloadVideo, cleanupVideo } from '../services/download.js';
 import { transcribeVideo, cleanupAudio } from '../services/transcription.js';
 import { analyzeHighlights } from '../services/analysis.js';
 import { renderClips, cleanupRenderDir } from '../services/rendering.js';
 import { uploadFile } from '../services/storage.js';
 import { env } from '../config/env.js';
+import { redis } from '../config/redis.js';
 
 const logger = createLogger('processor');
 
 /**
  * Processador principal - executa todas as etapas sequencialmente
  *
- * Pipeline:
- * 1. Download/Upload → videoPath, metadata
- * 2. Transcription   → transcript
- * 3. Analysis        → highlights (timestamps + scores)
- * 4. Rendering       → clips (vídeos cortados)
- * 5. Upload          → storagePaths
+ * Pipeline Atualizado (7 etapas):
+ * 1. Ingest      → Download/Upload do vídeo
+ * 2. Transcribe  → Transcrição com Whisper
+ * 3. Scenes      → Detecção e análise de cenas
+ * 4. Rank        → Ranking e seleção dos melhores clipes
+ * 5. Render      → Renderização dos vídeos
+ * 6. Texts       → Geração de títulos, descrições e hashtags
+ * 7. Export      → Upload para storage
  */
 export async function processVideo(job: Job<JobData>): Promise<JobResult> {
   const { jobId, userId, sourceType, targetDuration, clipCount } = job.data;
@@ -32,9 +36,9 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
 
   try {
     // ============================================
-    // STEP 1: DOWNLOAD/UPLOAD
+    // STEP 1: INGEST (Download/Upload)
     // ============================================
-    await updateProgress(job, 'downloading', 0, 'Baixando vídeo...');
+    await updateProgress(job, 'ingest', 0, 'Baixando vídeo...');
 
     const downloadResult = await downloadVideo(
       sourceType,
@@ -47,17 +51,20 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
 
     logger.info({ jobId, videoPath, metadata }, 'Video downloaded successfully');
 
-    await updateProgress(job, 'downloading', 15, 'Vídeo baixado com sucesso');
+    await updateProgress(job, 'ingest', 15, 'Vídeo baixado com sucesso');
 
     // ============================================
-    // STEP 2: TRANSCRIPTION
+    // STEP 2: TRANSCRIBE (Transcrição)
     // ============================================
-    await updateProgress(job, 'transcribing', 20, 'Transcrevendo áudio...');
+    await updateProgress(job, 'transcribe', 20, 'Transcrevendo áudio...');
 
     const { transcript, audioPath: tempAudioPath } = await transcribeVideo(videoPath, {
       language: 'pt',
       model: 'whisper-1',
       chunkDuration: 300,
+      onProgress: async (progress: number, message: string) => {
+        await updateProgress(job, 'transcribe', progress, message);
+      },
     });
 
     audioPath = tempAudioPath;
@@ -67,31 +74,53 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       'Transcription completed'
     );
 
-    await updateProgress(job, 'transcribing', 45, 'Transcrição completa');
+    await updateProgress(job, 'transcribe', 35, 'Transcrição completa');
 
     // ============================================
-    // STEP 3: AI ANALYSIS
+    // STEP 3: SCENES (Detecção de Cenas)
     // ============================================
-    await updateProgress(job, 'analyzing', 50, 'Analisando melhores momentos...');
+    await updateProgress(job, 'scenes', 40, 'Analisando cenas do vídeo...');
 
     const highlightAnalysis = await analyzeHighlights(transcript, {
       targetDuration: targetDuration || 60,
-      clipCount: clipCount || 5,
+      clipCount: clipCount || 8, // 8-12 clipes conforme requisitos
       minDuration: 30,
-      maxDuration: 120,
+      maxDuration: 90,
     });
 
     logger.info(
       { jobId, highlightCount: highlightAnalysis.segments.length },
-      'Highlight analysis completed'
+      'Scene analysis completed'
     );
 
-    await updateProgress(job, 'analyzing', 60, `${highlightAnalysis.segments.length} highlights identificados`);
+    await updateProgress(job, 'scenes', 50, 'Cenas identificadas');
 
     // ============================================
-    // STEP 4: RENDERING
+    // STEP 4: RANK (Seleção e Ranking)
     // ============================================
-    await updateProgress(job, 'rendering', 65, 'Renderizando clipes...');
+    await updateProgress(job, 'rank', 55, 'Selecionando melhores momentos...');
+
+    // Ranking is done as part of analyzeHighlights
+    // In the future, this could be a separate step with more advanced algorithms
+    logger.info(
+      { jobId, selectedClips: highlightAnalysis.segments.length },
+      'Ranking completed'
+    );
+
+    await updateProgress(job, 'rank', 60, `${highlightAnalysis.segments.length} clipes selecionados`);
+
+    // ============================================
+    // STEP 5: RENDER (Renderização de Vídeos)
+    // ============================================
+    await updateProgress(job, 'render', 65, 'Renderizando vídeos...');
+
+    // Buscar preferências de legendas do Redis (se disponíveis)
+    const subtitlePreferences = await getSubtitlePreferences(jobId);
+
+    logger.info(
+      { jobId, hasCustomPreferences: subtitlePreferences !== DEFAULT_SUBTITLE_PREFERENCES },
+      'Subtitle preferences loaded'
+    );
 
     const renderResult = await renderClips(
       videoPath,
@@ -100,8 +129,12 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       {
         format: '9:16', // Vertical para redes sociais
         addSubtitles: true,
-        font: 'Inter',
-        preset: 'superfast',
+        font: subtitlePreferences.font,
+        preset: 'ultrafast', // Changed from 'superfast' to 'ultrafast' for better performance
+        subtitlePreferences, // Passar preferências personalizadas
+        onProgress: async (progress: number, message: string) => {
+          await updateProgress(job, 'render', progress, message);
+        },
       }
     );
 
@@ -112,12 +145,26 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       'Clips rendered successfully'
     );
 
-    await updateProgress(job, 'rendering', 85, `${renderResult.clips.length} clipes renderizados`);
+    await updateProgress(job, 'render', 75, `${renderResult.clips.length} vídeos renderizados`);
 
     // ============================================
-    // STEP 5: UPLOAD TO STORAGE
+    // STEP 6: TEXTS (Títulos, Descrições, Hashtags)
     // ============================================
-    await updateProgress(job, 'uploading', 90, 'Fazendo upload dos clipes...');
+    await updateProgress(job, 'texts', 80, 'Gerando títulos e descrições...');
+
+    // Texts are already generated in renderResult.clips (from analyzeHighlights)
+    // In the future, this could include AI-powered metadata generation
+    logger.info(
+      { jobId, clipsWithTexts: renderResult.clips.length },
+      'Texts generated successfully'
+    );
+
+    await updateProgress(job, 'texts', 85, 'Textos gerados com IA');
+
+    // ============================================
+    // STEP 7: EXPORT (Upload para Storage)
+    // ============================================
+    await updateProgress(job, 'export', 90, 'Fazendo upload dos clipes...');
 
     const bucket = env.supabase.bucket;
     const clips: Clip[] = [];
@@ -161,10 +208,10 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       })
     );
 
-    await updateProgress(job, 'uploading', 98, 'Upload completo');
+    await updateProgress(job, 'export', 98, 'Upload completo');
 
     // ============================================
-    // FINALIZAÇÃ O
+    // FINALIZAÇÃO
     // ============================================
     await updateProgress(job, 'completed', 100, 'Processamento completo!');
 
@@ -236,4 +283,32 @@ async function updateProgress(
     { jobId: job.data.jobId, step, progress },
     message
   );
+}
+
+/**
+ * Busca preferências de legendas do Redis
+ * Retorna preferências padrão se não houver customizações
+ */
+async function getSubtitlePreferences(jobId: string): Promise<SubtitlePreferences> {
+  try {
+    // Buscar preferências globais do job no Redis
+    const key = `subtitle:${jobId}:global`;
+    const data = await redis.get(key);
+
+    if (data) {
+      const preferences = JSON.parse(data);
+      logger.info({ jobId, key }, 'Custom subtitle preferences found in Redis');
+      return preferences;
+    }
+
+    // Se não houver preferências personalizadas, usar padrões
+    logger.debug({ jobId }, 'Using default subtitle preferences');
+    return DEFAULT_SUBTITLE_PREFERENCES;
+  } catch (error: any) {
+    logger.warn(
+      { jobId, error: error.message },
+      'Failed to load subtitle preferences, using defaults'
+    );
+    return DEFAULT_SUBTITLE_PREFERENCES;
+  }
 }

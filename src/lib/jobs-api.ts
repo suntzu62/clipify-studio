@@ -306,6 +306,78 @@ export async function enqueuePipeline(
   }
 }
 
+/**
+ * Create a temporary configuration before processing
+ * Returns a tempId that expires in 1 hour
+ */
+export async function createTempConfig(
+  youtubeUrl: string,
+  getToken?: () => Promise<string | null>
+): Promise<{ tempId: string }> {
+  const useLocalAPI = import.meta.env.DEV &&
+    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+
+  if (useLocalAPI) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': import.meta.env.VITE_API_KEY,
+    } as Record<string, string>;
+
+    // Get user ID from token if available
+    let userId = 'dev-user';
+    if (getToken) {
+      const token = await getToken();
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          userId = payload.sub || 'dev-user';
+        } catch {}
+      }
+    }
+
+    const tempConfigData = {
+      youtubeUrl: normalizeYoutubeUrl(youtubeUrl),
+      userId,
+      sourceType: 'youtube',
+    };
+
+    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs/temp`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(tempConfigData),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to create temporary configuration';
+      throw new Error(`create-temp-config failed: ${resp.status} ${resp.statusText} - ${msg}`);
+    }
+
+    return { tempId: (data as any).tempId };
+  } else {
+    // Production: similar to dev, but adjust endpoint
+    const headers = {
+      'Content-Type': 'application/json',
+      apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
+      ...(await getAuthHeader(getToken)),
+    } as Record<string, string>;
+
+    const resp = await fetch('https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/create-temp-config', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ youtubeUrl }),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to create temporary configuration';
+      throw new Error(`create-temp-config failed: ${resp.status} ${resp.statusText} - ${msg}`);
+    }
+
+    return { tempId: (data as any).tempId };
+  }
+}
+
 export async function getJobStatus(
   jobId: string,
   getToken?: () => Promise<string | null>

@@ -30,11 +30,11 @@ export const ProgressHeader = ({
         subtitle: 'Agora é só baixar e arrasar nas redes sociais'
       };
     }
-    
+
     if (status === 'failed') {
       return {
-        title: '⚠️ Ops, algo deu errado',
-        subtitle: 'Não se preocupe, vamos resolver isso rapidinho'
+        title: '⏸️ Processamento pausado',
+        subtitle: 'Aguarde enquanto verificamos o status'
       };
     }
 

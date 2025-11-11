@@ -9,8 +9,7 @@ import posthog from 'posthog-js';
 import DemoModal from '@/components/DemoModal';
 import SocialProofStrip from '@/components/SocialProofStrip';
 import { useAuth } from '@/contexts/AuthContext';
-import { enqueueFromUrl, type Job } from '@/lib/jobs-api';
-import { saveUserJob } from '@/lib/storage';
+import { createTempConfig } from '@/lib/jobs-api';
 import { toast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
@@ -107,21 +106,10 @@ export default function HeroV2() {
     try {
       setLoading(true);
       const tokenProvider = async () => await getToken();
-      const { jobId } = await enqueueFromUrl(normalizeYoutubeUrl(value), tokenProvider);
+      const { tempId } = await createTempConfig(normalizeYoutubeUrl(value), tokenProvider);
 
-      if (user?.id) {
-        const job: Job = {
-          id: jobId,
-          youtubeUrl: normalizeYoutubeUrl(value),
-          status: 'queued',
-          progress: 0,
-          createdAt: new Date().toISOString(),
-          neededMinutes: 10,
-        };
-        saveUserJob(user.id, job);
-      }
-
-      navigate(`/projects/${jobId}`);
+      // Navigate to configuration page instead of direct processing
+      navigate(`/projects/configure/${tempId}`);
     } catch (e: any) {
       const errorMsg = e?.message || String(e);
       

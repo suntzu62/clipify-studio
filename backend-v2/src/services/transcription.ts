@@ -33,9 +33,10 @@ export async function transcribeVideo(
     language?: string;
     model?: 'whisper-1';
     chunkDuration?: number; // seconds per chunk
+    onProgress?: (progress: number, message: string) => Promise<void>; // Progress callback
   } = {}
 ): Promise<TranscriptionResult> {
-  const { language = 'pt', model = 'whisper-1', chunkDuration = 300 } = options;
+  const { language = 'pt', model = 'whisper-1', chunkDuration = 300, onProgress } = options;
 
   logger.info({ videoPath, language, model }, 'Starting video transcription');
 
@@ -63,12 +64,24 @@ export async function transcribeVideo(
     logger.info({ totalChunks: chunkFiles.length }, 'Transcribing audio chunks');
 
     const allSegments: TranscriptSegment[] = [];
-    const batchSize = 4; // Process 4 chunks at a time
+    const batchSize = 8; // Increased from 4 to 8 for better performance
 
     for (let i = 0; i < chunkFiles.length; i += batchSize) {
       const batch = chunkFiles.slice(i, i + batchSize);
       const batchNumber = Math.floor(i / batchSize) + 1;
       const totalBatches = Math.ceil(chunkFiles.length / batchSize);
+
+      // Report progress: 20% to 35% range for transcription step
+      const transcribeProgress = 20 + Math.floor((15 * i) / chunkFiles.length);
+      const chunksProcessed = i;
+      const totalChunksCount = chunkFiles.length;
+
+      if (onProgress) {
+        await onProgress(
+          transcribeProgress,
+          `Transcrevendo parte ${chunksProcessed + 1} de ${totalChunksCount}...`
+        );
+      }
 
       logger.info({ batch: batchNumber, totalBatches, chunksInBatch: batch.length }, 'Processing batch');
 

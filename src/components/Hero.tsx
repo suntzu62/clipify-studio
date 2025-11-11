@@ -7,8 +7,7 @@ import { useState, useEffect, useRef, FormEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
-import { enqueueFromUrl, type Job } from "@/lib/jobs-api";
-import { saveUserJob } from "@/lib/storage";
+import { createTempConfig } from "@/lib/jobs-api";
 import posthog from "posthog-js";
 import { Loader2, Youtube, Cloud, Video, Upload } from "lucide-react";
 
@@ -73,28 +72,15 @@ export default function Hero() {
       setLoading(true);
       const normalized = normalizeYoutubeUrl(raw.trim());
       const tokenProvider = async () => await getToken();
-      const data = await enqueueFromUrl(normalized, tokenProvider);
-      const jobId = data.jobId as string;
-      if (!jobId) throw new Error("Resposta inválida do servidor");
+      const { tempId } = await createTempConfig(normalized, tokenProvider);
+      if (!tempId) throw new Error("Resposta inválida do servidor");
 
-      try { posthog.capture('pipeline started', { source: 'landing' }); } catch {}
+      try { posthog.capture('temp config created', { source: 'landing' }); } catch {}
 
-      // Save minimal job info for ProjectDetail header
-      if (user?.id) {
-        const job: Job = {
-          id: jobId,
-          youtubeUrl: normalized,
-          status: 'queued',
-          progress: 0,
-          createdAt: new Date().toISOString(),
-          neededMinutes: 10,
-        };
-        saveUserJob(user.id, job);
-      }
-
-      navigate(`/projects/${jobId}`);
+      // Navigate to configuration page instead of direct processing
+      navigate(`/projects/configure/${tempId}`);
     } catch (e: any) {
-      toast({ title: 'Falha ao criar pipeline', description: e?.message || String(e), variant: 'destructive' });
+      toast({ title: 'Falha ao criar configuração', description: e?.message || String(e), variant: 'destructive' });
     } finally {
       setLoading(false);
     }

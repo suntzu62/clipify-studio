@@ -37,6 +37,72 @@ export const SubtitlePreferencesSchema = z.object({
 export type SubtitlePreferencesInput = z.infer<typeof SubtitlePreferencesSchema>;
 
 // ============================================
+// TEMPORARY CONFIGURATION TYPES (OpusClip-style workflow)
+// ============================================
+
+export const ClipSettingsSchema = z.object({
+  aiClipping: z.boolean(),
+  model: z.enum(['ClipAnything', 'Smart', 'Fast']),
+  targetDuration: z.number().min(30).max(90),
+  minDuration: z.number().min(15).max(60),
+  maxDuration: z.number().min(60).max(120),
+  clipCount: z.number().min(3).max(15),
+});
+
+export type ClipSettings = z.infer<typeof ClipSettingsSchema>;
+
+export const TimeframeConfigSchema = z.object({
+  startTime: z.number().min(0),
+  endTime: z.number().min(0),
+  duration: z.number().min(30),
+});
+
+export type TimeframeConfig = z.infer<typeof TimeframeConfigSchema>;
+
+export const ProjectConfigSchema = z.object({
+  tempId: z.string(),
+  youtubeUrl: z.string().url(),
+  userId: z.string(),
+  sourceType: z.enum(['youtube', 'upload']),
+  clipSettings: ClipSettingsSchema,
+  subtitlePreferences: SubtitlePreferencesSchema,
+  timeframe: TimeframeConfigSchema.optional(),
+  genre: z.string().optional(),
+  specificMoments: z.string().optional(),
+  createdAt: z.date(),
+  expiresAt: z.date(),
+});
+
+export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
+
+export const CreateTempConfigSchema = z.object({
+  youtubeUrl: z.string().url(),
+  userId: z.string(),
+  sourceType: z.enum(['youtube', 'upload']),
+});
+
+export type CreateTempConfigInput = z.infer<typeof CreateTempConfigSchema>;
+
+export const StartJobFromTempSchema = z.object({
+  clipSettings: ClipSettingsSchema,
+  subtitlePreferences: SubtitlePreferencesSchema,
+  timeframe: TimeframeConfigSchema.optional(),
+  genre: z.string().optional(),
+  specificMoments: z.string().optional(),
+});
+
+export type StartJobFromTempInput = z.infer<typeof StartJobFromTempSchema>;
+
+export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
+  aiClipping: true,
+  model: 'ClipAnything',
+  targetDuration: 60,
+  minDuration: 30,
+  maxDuration: 90,
+  clipCount: 8,
+};
+
+// ============================================
 // JOB DATA TYPES
 // ============================================
 
@@ -61,11 +127,13 @@ export interface JobProgress {
 
 export type JobStep =
   | 'queued'
-  | 'downloading'
-  | 'transcribing'
-  | 'analyzing'
-  | 'rendering'
-  | 'uploading'
+  | 'ingest'        // Download/upload do vídeo
+  | 'transcribe'    // Transcrição com Whisper
+  | 'scenes'        // Análise de cenas
+  | 'rank'          // Ranking e seleção dos melhores clipes
+  | 'render'        // Renderização dos vídeos
+  | 'texts'         // Geração de títulos, descrições e hashtags
+  | 'export'        // Upload final para storage
   | 'completed'
   | 'failed';
 
@@ -132,22 +200,22 @@ export interface SubtitlePreferences {
 }
 
 export const DEFAULT_SUBTITLE_PREFERENCES: SubtitlePreferences = {
-  position: 'center',
+  position: 'bottom',  // Inferior para estilo Shorts/Reels/TikTok
   format: 'multi-line',
   font: 'Inter',
-  fontSize: 24,
+  fontSize: 32,  // AUMENTADO de 20 para 32px - muito mais legível!
   fontColor: '#FFFFFF',
   backgroundColor: '#000000',
-  backgroundOpacity: 0.7,
+  backgroundOpacity: 0.85,  // Mais opaco para máximo contraste
   bold: true,
   italic: false,
   outline: true,
   outlineColor: '#000000',
-  outlineWidth: 2,
-  shadow: false,
+  outlineWidth: 3,  // Aumentado de 2 para 3px - contorno mais visível
+  shadow: true,  // Ativado para melhor legibilidade
   shadowColor: '#000000',
-  maxCharsPerLine: 40,
-  marginVertical: 40,
+  maxCharsPerLine: 28,  // Reduzido para 28 - linhas mais curtas e fáceis de ler
+  marginVertical: 80,  // Aumentado para 80px - mais espaço da borda
 };
 
 export interface Clip {

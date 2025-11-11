@@ -32,13 +32,13 @@ interface ConnectionMetrics {
 
 class JobConnectionManager {
   private connections = new Map<string, ConnectionState>();
-  private readonly DEBOUNCE_DELAY = 5000; // INCREASED: 5 seconds minimum between reconnects  
+  private readonly DEBOUNCE_DELAY = 2000; // 2 seconds minimum between reconnects (more responsive)
   private readonly MAX_CONNECTIONS_GLOBAL = 1; // Strict: only 1 SSE connection total
-  private readonly CIRCUIT_BREAKER_FAILURES = 2; // Aggressive: 2 failures trigger circuit breaker
-  private readonly CIRCUIT_BREAKER_COOLDOWN = 60000; // INCREASED: 60 seconds cooldown
-  private readonly HEARTBEAT_INTERVAL = 30000; // INCREASED: 30 seconds heartbeat check
-  private readonly ZOMBIE_TIMEOUT = 90000; // INCREASED: 90 seconds without heartbeat = zombie
-  private readonly MAX_CONNECTION_ATTEMPTS = 2; // DECREASED: Max 2 attempts before permanent fallback
+  private readonly CIRCUIT_BREAKER_FAILURES = 5; // Relaxed: 5 failures before circuit breaker (was 2)
+  private readonly CIRCUIT_BREAKER_COOLDOWN = 30000; // 30 seconds cooldown (was 60s)
+  private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds heartbeat check
+  private readonly ZOMBIE_TIMEOUT = 90000; // 90 seconds without heartbeat = zombie
+  private readonly MAX_CONNECTION_ATTEMPTS = 5; // Max 5 attempts before permanent fallback (was 2)
   private metrics: ConnectionMetrics = {
     totalConnections: 0,
     activeSSEConnections: 0,
@@ -415,10 +415,10 @@ class JobConnectionManager {
         
         if (!this.isJobTerminal(status as JobStatus) && !conn.isCleaningUp && !abortController.signal.aborted) {
           // Exponential backoff polling
-          const baseInterval = 10000; // Start with 10 seconds
+          const baseInterval = 5000; // Start with 5 seconds (was 10s) for more responsive updates
           const backoffMultiplier = Math.min(Math.pow(1.5, conn.consecutiveFailures), 6); // Max 6x backoff
           const interval = baseInterval * backoffMultiplier;
-          
+
           conn.pollingTimeoutId = window.setTimeout(poll, interval);
         }
       } catch (err: any) {

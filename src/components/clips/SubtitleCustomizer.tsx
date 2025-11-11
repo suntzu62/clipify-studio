@@ -28,22 +28,22 @@ export interface SubtitlePreferences {
 }
 
 const DEFAULT_PREFERENCES: SubtitlePreferences = {
-  position: 'center',
+  position: 'bottom',  // Inferior para estilo Shorts/Reels/TikTok
   format: 'multi-line',
   font: 'Inter',
-  fontSize: 24,
+  fontSize: 32,  // AUMENTADO para 32px - MUITO mais legível!
   fontColor: '#FFFFFF',
   backgroundColor: '#000000',
-  backgroundOpacity: 0.7,
+  backgroundOpacity: 0.85,  // Mais opaco para máximo contraste
   bold: true,
   italic: false,
   outline: true,
   outlineColor: '#000000',
-  outlineWidth: 2,
-  shadow: false,
+  outlineWidth: 3,  // Contorno mais visível (3px)
+  shadow: true,  // ATIVADO para melhor legibilidade
   shadowColor: '#000000',
-  maxCharsPerLine: 40,
-  marginVertical: 40,
+  maxCharsPerLine: 28,  // Linhas mais curtas (28 caracteres)
+  marginVertical: 80,  // Mais espaço da borda (80px)
 };
 
 interface SubtitleCustomizerProps {

@@ -5,10 +5,9 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Play, Youtube, AlertCircle } from 'lucide-react';
 import posthog from 'posthog-js';
 import { useAuth } from '@/contexts/AuthContext';
-import { enqueueFromUrl, type Job } from '@/lib/jobs-api';
+import { createTempConfig } from '@/lib/jobs-api';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
-import { saveUserJob } from '@/lib/storage';
 import { FileUploadZone } from '@/components/FileUploadZone';
 import { getYouTubeMetadata, createProjectTitle } from '@/lib/youtube-metadata';
 import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
@@ -104,34 +103,10 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
     try {
       setLoading(true);
       const tokenProvider = async () => await getToken();
-      const { jobId } = await enqueueFromUrl(normalizeYoutubeUrl(value), tokenProvider);
+      const { tempId } = await createTempConfig(normalizeYoutubeUrl(value), tokenProvider);
 
-      // Get metadata for better project title
-      const metadata = await getYouTubeMetadata(normalizeYoutubeUrl(value));
-      const projectTitle = createProjectTitle(normalizeYoutubeUrl(value), metadata);
-
-      // Save job with enhanced metadata
-      if (user?.id) {
-        const job: Job = {
-          id: jobId,
-          youtubeUrl: normalizeYoutubeUrl(value),
-          status: 'queued',
-          progress: 0,
-          createdAt: new Date().toISOString(),
-          neededMinutes: 10,
-          // Store metadata for display purposes
-          result: {
-            metadata: {
-              title: projectTitle,
-              thumbnail: metadata.thumbnailUrl,
-              channel: metadata.channelName
-            }
-          }
-        };
-        saveUserJob(user.id, job);
-      }
-
-      navigate(`/projects/${jobId}`);
+      // Navigate to configuration page instead of direct processing
+      navigate(`/projects/configure/${tempId}`);
       setRetryCount(0); // Reset retry count on success
     } catch (e: any) {
       console.error('Pipeline enqueue failed:', e);

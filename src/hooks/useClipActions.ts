@@ -50,8 +50,29 @@ export const useClipActions = ({
 
     setIsDownloading(true);
     try {
-      // Open in new tab for download
-      window.open(downloadUrl, '_blank');
+      // Fetch the video file as blob
+      const response = await fetch(downloadUrl);
+      if (!response.ok) throw new Error('Failed to fetch video');
+
+      const blob = await response.blob();
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+
+      // Extract filename from URL or use default
+      const urlPath = new URL(downloadUrl).pathname;
+      const filename = urlPath.split('/').pop() || `clip-${clipId}.mp4`;
+      link.download = filename;
+
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+
+      // Cleanup
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
 
       toast({
         title: 'Download iniciado!',

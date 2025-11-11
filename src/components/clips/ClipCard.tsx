@@ -232,10 +232,13 @@ export const ClipCard = ({ clip, index }: ClipCardProps) => {
 
       {/* Player Modal */}
       <Dialog open={showPlayer} onOpenChange={setShowPlayer}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md" aria-describedby="player-description">
           <DialogHeader>
             <DialogTitle className="text-lg">{clip.title}</DialogTitle>
           </DialogHeader>
+          <div id="player-description" className="sr-only">
+            Reproduzindo vídeo: {clip.title}. {clip.description}
+          </div>
           <AspectRatio ratio={9/16}>
             {clip.previewUrl ? (
               <Player url={clip.previewUrl} title={clip.title} />

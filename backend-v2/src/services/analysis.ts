@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { createLogger } from '../config/logger.js';
 import type { Transcript, HighlightAnalysis, HighlightSegment } from '../types/index.js';
+import { detectScenes } from './scene-detection.js';
 
 const logger = createLogger('analysis');
 
@@ -17,6 +18,7 @@ interface AnalysisOptions {
 
 /**
  * Analisa a transcrição e identifica os melhores highlights para clips
+ * Agora usa detecção inteligente de cenas combinando silêncios, pontuação e mudanças semânticas
  */
 export async function analyzeHighlights(
   transcript: Transcript,
@@ -24,9 +26,9 @@ export async function analyzeHighlights(
 ): Promise<HighlightAnalysis> {
   const {
     targetDuration = 60,
-    clipCount = 5,
+    clipCount = 8,
     minDuration = 30,
-    maxDuration = 120,
+    maxDuration = 90,
   } = options;
 
   logger.info(
@@ -40,20 +42,55 @@ export async function analyzeHighlights(
   );
 
   try {
-    // Prepare transcript text with timestamps
-    const transcriptText = formatTranscriptForAnalysis(transcript);
+    // STEP 1: Detect scenes using multiple criteria (silences, semantic changes, punctuation)
+    logger.info('Detecting scenes using multi-criteria analysis');
 
-    // Call Claude to analyze
-    const prompt = buildAnalysisPrompt(
-      transcriptText,
+    const detectedScenes = await detectScenes(transcript, {
+      minSilenceDuration: 1.0,
+      minSceneDuration: minDuration,
+      maxSceneDuration: maxDuration,
+      padding: 0.4, // 400ms padding for smooth transitions
+      targetSceneCount: Math.max(clipCount * 2, 12), // Detect more scenes than needed for ranking
+    });
+
+    logger.info(
+      {
+        detectedScenes: detectedScenes.length,
+        avgDuration: detectedScenes.reduce((sum, s) => sum + s.duration, 0) / detectedScenes.length,
+      },
+      'Scene detection completed'
+    );
+
+    // STEP 2: If we don't have enough scenes, fall back to AI-based analysis
+    if (detectedScenes.length < clipCount) {
+      logger.warn(
+        { detectedScenes: detectedScenes.length, required: clipCount },
+        'Not enough scenes detected, using fallback AI analysis'
+      );
+      return await fallbackAIAnalysis(transcript, options);
+    }
+
+    // STEP 3: Prepare scenes for AI ranking
+    const scenesText = detectedScenes
+      .map((scene, idx) => {
+        const startTime = formatTimestamp(scene.start);
+        const endTime = formatTimestamp(scene.end);
+        const duration = Math.round(scene.duration);
+        const boundaryInfo = scene.boundaryTypes.join(', ');
+        return `Scene ${idx + 1} [${startTime} - ${endTime}] (${duration}s, boundaries: ${boundaryInfo}):\n${scene.text}\n`;
+      })
+      .join('\n---\n');
+
+    // STEP 4: Call AI to rank and generate metadata for scenes
+    const prompt = buildRankingPrompt(
+      scenesText,
       transcript.duration,
       targetDuration,
       clipCount,
-      minDuration,
-      maxDuration
+      detectedScenes.length
     );
 
-    logger.debug('Sending request to OpenAI API');
+    logger.debug('Sending scenes to OpenAI for ranking and metadata generation');
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -74,14 +111,33 @@ export async function analyzeHighlights(
 
     // Parse response
     const responseText = completion.choices[0]?.message?.content || '';
-
     logger.debug({ responseLength: responseText.length }, 'Received response from OpenAI');
 
-    const analysis = parseAIResponse(responseText);
+    const analysis = parseRankingResponse(responseText);
+
+    // STEP 5: Map AI response back to detected scenes
+    const enrichedSegments: HighlightSegment[] = analysis.rankings.map((ranking) => {
+      const sceneIndex = ranking.sceneIndex - 1; // Convert 1-based to 0-based
+      const scene = detectedScenes[sceneIndex];
+
+      if (!scene) {
+        logger.warn({ sceneIndex, ranking }, 'Scene index out of bounds, skipping');
+        return null;
+      }
+
+      return {
+        start: scene.start,
+        end: scene.end,
+        score: ranking.score,
+        title: ranking.title,
+        reason: ranking.reason,
+        keywords: ranking.keywords,
+      };
+    }).filter((seg): seg is HighlightSegment => seg !== null);
 
     // Validate and adjust segments
     const validatedSegments = validateSegments(
-      analysis.segments,
+      enrichedSegments,
       transcript.duration,
       minDuration,
       maxDuration
@@ -89,10 +145,11 @@ export async function analyzeHighlights(
 
     logger.info(
       {
-        originalCount: analysis.segments.length,
-        validatedCount: validatedSegments.length
+        detectedScenes: detectedScenes.length,
+        rankedScenes: analysis.rankings.length,
+        finalClips: validatedSegments.length,
       },
-      'Highlight analysis completed'
+      'Highlight analysis completed with scene detection'
     );
 
     return {
@@ -100,9 +157,64 @@ export async function analyzeHighlights(
       reasoning: analysis.reasoning,
     };
   } catch (error: any) {
-    logger.error({ error: error.message }, 'Highlight analysis failed');
-    throw new Error(`Analysis failed: ${error.message}`);
+    logger.error({ error: error.message, stack: error.stack }, 'Highlight analysis failed');
+
+    // Fallback to traditional analysis on error
+    logger.warn('Falling back to traditional AI analysis due to error');
+    return await fallbackAIAnalysis(transcript, options);
   }
+}
+
+/**
+ * Fallback AI analysis when scene detection doesn't produce enough results
+ */
+async function fallbackAIAnalysis(
+  transcript: Transcript,
+  options: AnalysisOptions
+): Promise<HighlightAnalysis> {
+  const {
+    targetDuration = 60,
+    clipCount = 8,
+    minDuration = 30,
+    maxDuration = 90,
+  } = options;
+
+  logger.info('Using fallback AI-based analysis');
+
+  const transcriptText = formatTranscriptForAnalysis(transcript);
+  const prompt = buildAnalysisPrompt(
+    transcriptText,
+    transcript.duration,
+    targetDuration,
+    clipCount,
+    minDuration,
+    maxDuration
+  );
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    max_tokens: 4096,
+    temperature: 0.7,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: 'Você é um especialista em análise de conteúdo de vídeo para redes sociais. Sempre responda em formato JSON válido.',
+      },
+      {
+        role: 'user',
+        content: prompt,
+      },
+    ],
+  });
+
+  const responseText = completion.choices[0]?.message?.content || '';
+  const analysis = parseAIResponse(responseText);
+
+  return {
+    segments: validateSegments(analysis.segments, transcript.duration, minDuration, maxDuration),
+    reasoning: analysis.reasoning,
+  };
 }
 
 /**
@@ -128,7 +240,59 @@ function formatTimestamp(seconds: number): string {
 }
 
 /**
- * Constrói o prompt para análise
+ * Constrói o prompt para ranking de cenas já detectadas
+ */
+function buildRankingPrompt(
+  scenesText: string,
+  totalDuration: number,
+  targetDuration: number,
+  clipCount: number,
+  totalScenes: number
+): string {
+  return `Você é um especialista em análise de conteúdo de vídeo para redes sociais (TikTok, Instagram Reels, YouTube Shorts).
+
+Analise as ${totalScenes} cenas detectadas abaixo e RANQUEIE as ${clipCount} MELHORES para criar clipes virais.
+
+CENAS DETECTADAS (já otimizadas com padding para transições suaves):
+${scenesText}
+
+CRITÉRIOS DE RANKING (ordem de importância):
+1. **Gancho Forte no Início** (0-5s): Frase de impacto, pergunta, número, afirmação polêmica
+2. **Densidade de Conteúdo**: Palavras por segundo, informação valiosa, sem pausas longas
+3. **História Completa**: Começo, meio e fim autocontidos (não precisa de contexto)
+4. **Pico Emocional**: Momentos engraçados, surpreendentes, inspiradores ou polêmicos
+5. **Diversidade Temática**: Evite selecionar múltiplas cenas sobre o mesmo assunto
+6. **Clareza**: Sem cortes no meio de frases, ideias completas
+7. **Presença de Gatilhos**: Números, perguntas, listas, "você sabia?", "atenção"
+
+IMPORTANTE:
+- Score deve ser 0.0-1.0 (1.0 = viral garantido)
+- Penalize cenas com pausas longas (>3s) ou clareza ruim
+- Prefira cenas de 30-60s (ideal para Shorts/Reels)
+- Diversifique os temas selecionados
+- Retorne EXATAMENTE ${clipCount} cenas
+
+Responda APENAS com um JSON válido neste formato:
+{
+  "rankings": [
+    {
+      "sceneIndex": 1,
+      "score": 0.95,
+      "title": "Título viral e chamativo (máx 60 chars)",
+      "reason": "Por que este clipe vai viralizar (gancho + conteúdo + emoção)",
+      "keywords": ["palavra1", "palavra2", "palavra3"]
+    }
+  ],
+  "reasoning": "Análise geral: critérios usados, diversidade dos clipes, estratégia de seleção"
+}
+
+Duração total do vídeo: ${Math.floor(totalDuration / 60)}min ${Math.floor(totalDuration % 60)}s
+
+Retorne APENAS o JSON, sem texto adicional.`;
+}
+
+/**
+ * Constrói o prompt para análise tradicional (fallback)
  */
 function buildAnalysisPrompt(
   transcriptText: string,
@@ -148,14 +312,16 @@ ${transcriptText}
 CRITÉRIOS IMPORTANTES:
 - Cada clipe deve ter entre ${minDuration}-${maxDuration} segundos (idealmente ~${targetDuration}s)
 - Procure momentos com:
-  * Ganchos fortes no início
+  * Ganchos fortes no início (perguntas, números, afirmações polêmicas)
   * Histórias completas e autocontidas
+  * Alta densidade de informação (evite pausas longas)
   * Picos emocionais ou revelações
   * Frases de impacto ou polêmicas
   * Informações valiosas e práticas
   * Momentos engraçados ou surpreendentes
 - Evite cortes no meio de frases ou ideias
 - Os clipes devem fazer sentido sozinhos (sem contexto do vídeo completo)
+- Diversifique os temas selecionados
 
 IMPORTANTE: Você DEVE retornar EXATAMENTE ${clipCount} clipes no formato JSON abaixo.
 
@@ -180,7 +346,53 @@ Retorne APENAS o JSON, sem nenhum texto adicional antes ou depois.`;
 }
 
 /**
- * Parse da resposta da IA (OpenAI GPT-4)
+ * Parse da resposta de ranking da IA
+ */
+function parseRankingResponse(responseText: string): {
+  rankings: Array<{
+    sceneIndex: number;
+    score: number;
+    title: string;
+    reason: string;
+    keywords: string[];
+  }>;
+  reasoning: string;
+} {
+  try {
+    // Remove markdown code blocks if present
+    let jsonText = responseText.trim();
+
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+
+    const parsed = JSON.parse(jsonText);
+
+    // Validate structure
+    if (!parsed.rankings || !Array.isArray(parsed.rankings)) {
+      throw new Error('Invalid response structure: missing rankings array');
+    }
+
+    return {
+      rankings: parsed.rankings.map((rank: any) => ({
+        sceneIndex: Number(rank.sceneIndex),
+        score: Number(rank.score) || 0.5,
+        title: String(rank.title || 'Clip sem título'),
+        reason: String(rank.reason || ''),
+        keywords: Array.isArray(rank.keywords) ? rank.keywords : [],
+      })),
+      reasoning: String(parsed.reasoning || ''),
+    };
+  } catch (error: any) {
+    logger.error({ error: error.message, responseText }, 'Failed to parse ranking response');
+    throw new Error(`Failed to parse ranking response: ${error.message}`);
+  }
+}
+
+/**
+ * Parse da resposta da IA (OpenAI GPT-4) - fallback tradicional
  */
 function parseAIResponse(responseText: string): HighlightAnalysis {
   try {
@@ -244,12 +456,11 @@ function validateSegments(
     }
 
     if (duration > maxDuration) {
-      // Truncate to max duration (centered)
-      const midpoint = (seg.start + seg.end) / 2;
+      // Truncate to max duration (keep the beginning - where the hook is)
       const adjustedSeg = {
         ...seg,
-        start: Math.max(0, midpoint - maxDuration / 2),
-        end: Math.min(videoDuration, midpoint + maxDuration / 2),
+        start: seg.start,
+        end: Math.min(seg.start + maxDuration, videoDuration),
       };
       logger.info({ original: seg, adjusted: adjustedSeg }, 'Segment truncated to max duration');
       validated.push(adjustedSeg);

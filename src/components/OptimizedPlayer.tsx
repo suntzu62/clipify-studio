@@ -1,6 +1,3 @@
-import { Card } from '@/components/ui/card';
-import { ExternalLink } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { memo } from 'react';
 
 interface OptimizedPlayerProps {
@@ -14,10 +11,6 @@ interface OptimizedPlayerProps {
 }
 
 const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = false, muted = false, controls = true }: OptimizedPlayerProps) => {
-  const handleOpenVideo = () => {
-    window.open(url, '_blank');
-  };
-
   // Debug: Log when player is rendered
   console.log('[OptimizedPlayer] Rendering with:', { url, title, hasUrl: !!url });
 
@@ -39,21 +32,21 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
 
   if (!url) {
     return (
-      <Card className={`overflow-hidden ${className}`}>
+      <div className={`overflow-hidden ${className}`}>
         <div className="relative bg-gradient-to-br from-red-500/20 to-red-700/20 h-[300px] flex items-center justify-center">
           <div className="text-center text-white">
             <p className="text-lg font-semibold mb-2">URL do vídeo não encontrada</p>
             <p className="text-sm text-gray-300">Entre em contato com o suporte</p>
           </div>
         </div>
-      </Card>
+      </div>
     );
   }
 
   return (
-    <Card className={`overflow-hidden ${className}`}>
-      <div className="relative bg-black">
-        {/* HTML5 Video Player */}
+    <div className={`w-full h-full overflow-hidden ${className}`}>
+      <div className="relative w-full h-full bg-black video-player-container">
+        {/* HTML5 Video Player com controles customizados - fullscreen com object-fit cover */}
         <video
           src={url}
           controls={controls}
@@ -61,8 +54,7 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
           loop={loop}
           muted={muted}
           playsInline
-          className="w-full h-full"
-          style={{ maxHeight: '80vh' }}
+          className="w-full h-full video-enhanced-controls object-cover"
           onError={(e) => {
             console.error('[OptimizedPlayer] Video load error:', {
               url,
@@ -78,19 +70,42 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
           Seu navegador não suporta reprodução de vídeo.
         </video>
 
-        {/* External link button */}
-        <div className="absolute top-2 right-2">
-          <Button
-            onClick={handleOpenVideo}
-            size="sm"
-            variant="secondary"
-            className="bg-black/50 hover:bg-black/70 text-white backdrop-blur-sm"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </Button>
-        </div>
+        {/* Estilos inline para garantir que o vídeo não receba blur */}
+        <style>{`
+          /* Remover qualquer overlay ou escurecimento no hover */
+          .video-player-container::before,
+          .video-player-container::after {
+            display: none !important;
+          }
+
+          .video-enhanced-controls::before,
+          .video-enhanced-controls::after {
+            display: none !important;
+          }
+
+          /* Desabilitar qualquer efeito de hover no container e no vídeo */
+          .video-player-container:hover::before,
+          .video-player-container:hover::after,
+          .video-enhanced-controls:hover::before,
+          .video-enhanced-controls:hover::after {
+            display: none !important;
+            opacity: 0 !important;
+          }
+
+          .video-enhanced-controls,
+          .video-player-container video {
+            filter: none !important;
+            backdrop-filter: none !important;
+            -webkit-filter: none !important;
+          }
+
+          .video-enhanced-controls::-webkit-media-controls-panel,
+          .video-enhanced-controls::-moz-media-control-panel {
+            background: linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0.25), transparent);
+          }
+        `}</style>
       </div>
-    </Card>
+    </div>
   );
 });
 

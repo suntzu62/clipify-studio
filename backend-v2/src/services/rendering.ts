@@ -21,6 +21,7 @@ interface RenderOptions {
   font?: string;
   preset?: 'ultrafast' | 'superfast' | 'veryfast' | 'fast' | 'medium';
   subtitlePreferences?: SubtitlePreferences;
+  onProgress?: (progress: number, message: string) => Promise<void>; // Progress callback
 }
 
 interface RenderResult {
@@ -52,6 +53,7 @@ export async function renderClips(
     font = 'Inter',
     preset = 'ultrafast',
     subtitlePreferences = DEFAULT_SUBTITLE_PREFERENCES,
+    onProgress,
   } = options;
 
   logger.info(
@@ -71,30 +73,48 @@ export async function renderClips(
   const renderedClips: RenderedClip[] = [];
 
   try {
-    // Render all clips in parallel for maximum speed
-    logger.info({ totalClips: segments.length }, 'Rendering all clips in parallel');
+    // Render clips with controlled concurrency (4 at a time) to avoid overloading CPU
+    const concurrency = 4;
+    logger.info({ totalClips: segments.length, concurrency }, 'Rendering clips with controlled concurrency');
 
-    const renderedResults = await Promise.all(
-      segments.map((segment, idx) =>
-        renderSingleClip(
-          videoPath,
-          segment,
-          transcript,
-          outputDir,
-          `clip-${idx}`,
-          {
-            resolution,
-            format,
-            addSubtitles,
-            font,
-            preset,
-            subtitlePreferences,
-          }
+    for (let i = 0; i < segments.length; i += concurrency) {
+      const batch = segments.slice(i, Math.min(i + concurrency, segments.length));
+
+      // Report progress: 65% to 75% range for rendering step
+      const renderProgress = 65 + Math.floor((10 * i) / segments.length);
+      const clipsRendered = i;
+      const totalClips = segments.length;
+
+      if (onProgress) {
+        await onProgress(
+          renderProgress,
+          `Renderizando clipe ${clipsRendered + 1} de ${totalClips}...`
+        );
+      }
+
+      // Render batch in parallel
+      const batchResults = await Promise.all(
+        batch.map((segment, batchIdx) =>
+          renderSingleClip(
+            videoPath,
+            segment,
+            transcript,
+            outputDir,
+            `clip-${i + batchIdx}`,
+            {
+              resolution,
+              format,
+              addSubtitles,
+              font,
+              preset,
+              subtitlePreferences,
+            }
+          )
         )
-      )
-    );
+      );
 
-    renderedClips.push(...renderedResults);
+      renderedClips.push(...batchResults);
+    }
 
     logger.info(
       { renderedCount: renderedClips.length, outputDir },
@@ -187,6 +207,7 @@ async function renderSingleClip(
           '-c:v', 'libx264',
           '-preset', options.preset,
           '-tune', 'zerolatency',
+          '-threads', '4', // Explicit thread control for better performance
           '-profile:v', 'high',
           '-level', '4.1',
           '-pix_fmt', 'yuv420p',

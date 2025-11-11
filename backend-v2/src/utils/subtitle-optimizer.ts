@@ -178,16 +178,17 @@ export function adjustFontSize(
   const charCount = text.length;
   const charsPerSecond = charCount / duration;
 
-  // Se muito texto em pouco tempo, reduzir fonte
-  if (charsPerSecond > 15) {
-    return Math.max(16, baseFontSize - 4);
+  // Se muito texto em pouco tempo, reduzir fonte LEVEMENTE
+  if (charsPerSecond > 20) {
+    return Math.max(26, baseFontSize - 2);  // Mínimo 26px, reduz apenas 2px
   }
 
   // Se pouco texto, pode aumentar um pouco
   if (charsPerSecond < 5) {
-    return Math.min(48, baseFontSize + 2);
+    return Math.min(40, baseFontSize + 4);  // Máximo 40px
   }
 
+  // Na maioria dos casos, manter o tamanho base
   return baseFontSize;
 }
 
