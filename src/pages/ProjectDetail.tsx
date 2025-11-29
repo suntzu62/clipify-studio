@@ -12,6 +12,7 @@ import { useClipList } from '@/hooks/useClipList';
 import { ProgressHeader } from '@/components/progress/ProgressHeader';
 import { TimelineStep } from '@/components/timeline/TimelineStep';
 import { ClipCardEnhanced as ClipCard } from '@/components/clips/ClipCardEnhanced';
+import { ClipCardPro } from '@/components/clips/ClipCardPro';
 import { SocialProof } from '@/components/social/SocialProof';
 import { VideoDebugPanel } from '@/components/debug/VideoDebugPanel';
 import { ClipDebugPanel } from '@/components/debug/ClipDebugPanel';
@@ -21,19 +22,23 @@ import { ProcessingPipeline } from '@/components/ProcessingPipeline';
 import { SubtitleSettingsWarning } from '@/components/SubtitleSettingsWarning';
 import { EmptyState } from '@/components/EmptyState';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { getUserJobs, updateJobStatus } from '@/lib/storage';
-import { Job } from '@/lib/jobs-api';
+import { getUserJobs, updateJobStatus, saveUserJob } from '@/lib/storage';
+import { Job, createTempConfig } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
 import { enqueueExport } from '@/lib/exports';
 import { createProjectTitle } from '@/lib/youtube-metadata';
 import posthog from 'posthog-js';
+import { isValidYouTubeUrl } from '@/lib/youtube';
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, getToken } = useAuth();
   const { toast } = useToast();
   const [job, setJob] = useState<Job | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [activeTab, setActiveTab] = useState<'progress' | 'results'>('progress');
+  const [sortBy, setSortBy] = useState<'original' | 'viral'>('original');
   const telemetryFired = useRef<'none' | 'completed' | 'failed'>('none');
   
   // Use unified job status hook with intelligent SSE/polling fallback
@@ -57,6 +62,21 @@ export default function ProjectDetail() {
       setEstimatedClipCount(texts.titles.length);
     }
   }, [jobStatus, job, setEstimatedClipCount]);
+
+  // Auto-switch to Results tab when clips are ready (Results-First UX)
+  useEffect(() => {
+    if (readyCount > 0 && activeTab === 'progress') {
+      // Pequeno delay para transição suave
+      const timer = setTimeout(() => {
+        setActiveTab('results');
+        toast({
+          title: "🎉 Seus clips estão prontos!",
+          description: `${readyCount} clips foram gerados com sucesso`,
+        });
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [readyCount, activeTab, toast]);
 
   useEffect(() => {
     if (!id || !user?.id) return;
@@ -177,6 +197,45 @@ export default function ProjectDetail() {
     }
   };
 
+  const handleRetry = async () => {
+    const youtubeUrl = job?.youtubeUrl || jobStatus?.result?.metadata?.url;
+
+    if (!youtubeUrl || !isValidYouTubeUrl(youtubeUrl)) {
+      toast({
+        title: "Não é possível tentar novamente",
+        description: "URL do YouTube não disponível. Crie um novo projeto.",
+        variant: "destructive"
+      });
+      navigate('/dashboard');
+      return;
+    }
+
+    setIsRetrying(true);
+
+    try {
+      posthog.capture('job retry', { jobId: id });
+
+      // Create new temp config and navigate to configure page
+      const { tempId } = await createTempConfig(youtubeUrl, getToken);
+
+      toast({
+        title: "Novo processamento criado!",
+        description: "Revise as configurações e tente novamente."
+      });
+
+      navigate(`/projects/configure/${tempId}`);
+    } catch (error: any) {
+      console.error('Retry failed:', error);
+      toast({
+        title: "Erro ao tentar novamente",
+        description: error.message || "Tente criar um novo projeto",
+        variant: "destructive"
+      });
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'queued': return 'secondary';
@@ -238,13 +297,25 @@ export default function ProjectDetail() {
 
   const getEstimatedTime = () => {
     if (!job || !jobStatus) return '3-5 min';
-    
+
     if (jobStatus.status === 'completed') return 'Concluído';
     if (jobStatus.status === 'failed') return 'Pausado';
-    
+
     const remaining = Math.max(0, 5 - Math.floor(overallProgress / 20));
     return remaining > 0 ? `~${remaining} min` : 'Quase pronto!';
   };
+
+  // Função para ordenar clips
+  const getSortedClips = () => {
+    if (sortBy === 'viral') {
+      return [...clips].sort((a, b) =>
+        (b.viralIntel?.overallScore || 0) - (a.viralIntel?.overallScore || 0)
+      );
+    }
+    return clips;
+  };
+
+  const sortedClips = getSortedClips();
 
   if (!job) {
     return (
@@ -388,7 +459,7 @@ export default function ProjectDetail() {
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            <Tabs defaultValue="progress" className="space-y-6">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'progress' | 'results')} className="space-y-6">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="progress" className="gap-2">
                   <TrendingUp className="w-4 h-4" />
@@ -460,27 +531,50 @@ export default function ProjectDetail() {
 
                 {readyCount > 0 ? (
                   <>
-                    {/* Results Header */}
-                    <Card className="bg-gradient-primary text-primary-foreground">
-                      <CardContent className="p-6 text-center">
-                        <h2 className="text-2xl font-bold mb-2">
-                          🎉 {readyCount} Shorts Prontos para Viralizar!
+                    {/* Results Header with Sort Controls */}
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                      <div>
+                        <h2 className="text-3xl font-bold mb-2 flex items-center gap-2">
+                          <Sparkles className="w-8 h-8 text-primary" />
+                          {readyCount} Shorts com Inteligência Viral
                         </h2>
-                        <p className="text-primary-foreground/90">
-                          Cada clipe foi criado para maximizar engajamento e alcance
+                        <p className="text-muted-foreground">
+                          Cada clipe analisado com previsões específicas por plataforma
                         </p>
-                      </CardContent>
-                    </Card>
+                      </div>
 
-                    {/* Enhanced Clips Grid with Editor Integration */}
+                      {/* Sort Controls */}
+                      <div className="flex gap-2">
+                        <Button
+                          variant={sortBy === 'original' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setSortBy('original')}
+                          className="gap-2"
+                        >
+                          Original
+                        </Button>
+                        <Button
+                          variant={sortBy === 'viral' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setSortBy('viral')}
+                          className="gap-2"
+                        >
+                          <TrendingUp className="w-4 h-4" />
+                          Por Score
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Enhanced Clips Grid with ClipCardPro */}
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                      {clips.map((clip, index) => (
-                        <ClipCard
+                      {sortedClips.map((clip, index) => (
+                        <ClipCardPro
                           key={clip.id}
                           clip={clip}
                           index={index}
                           jobId={id}
                           apiKey="93560857g"
+                          totalClips={clips.length}
                         />
                       ))}
                     </div>
@@ -510,10 +604,7 @@ export default function ProjectDetail() {
                       <EmptyState
                         variant="error"
                         error={jobStatus?.error || job?.error || "Erro desconhecido"}
-                        onAction={() => {
-                          // Implementar lógica de retry se necessário
-                          window.location.reload();
-                        }}
+                        onAction={handleRetry}
                       />
                     )}
                     
@@ -547,7 +638,7 @@ export default function ProjectDetail() {
                       <EmptyState
                         variant="error"
                         error={clips[0]?.description || "Erro ao processar clipes"}
-                        onAction={() => window.location.reload()}
+                        onAction={handleRetry}
                       />
                     )}
                     

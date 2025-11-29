@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { saveUserJob } from '@/lib/storage';
-import { Job } from '@/lib/jobs-api';
+import { Job, createJobFromUpload } from '@/lib/jobs-api';
 
 interface FileUploadZoneProps {
   className?: string;
@@ -24,8 +24,16 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
   const { getToken, user } = useAuth();
 
   const uploadFile = useCallback(async (file: File) => {
-    if (!user) return;
-    
+    if (!user) {
+      setError('Faça login para fazer upload');
+      toast({
+        title: 'Login necessário',
+        description: 'Você precisa estar logado para fazer upload de vídeos',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setUploading(true);
     setError(null);
     setUploadProgress(0);
@@ -72,9 +80,17 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       xhr.send(formData);
 
-      const { jobId, storagePath } = await uploadPromise;
-      
+      const { storagePath } = await uploadPromise;
+
       setUploadProgress(100);
+
+      // Now create the job in the backend to start processing
+      const { jobId } = await createJobFromUpload(
+        user.id,
+        storagePath,
+        file.name,
+        getToken
+      );
 
       // Save job to local storage
       const job: Job = {
@@ -93,7 +109,7 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
         }
       };
       saveUserJob(user.id, job);
-      
+
       toast({
         title: 'Upload concluído! ✨',
         description: 'Processando seu vídeo...'

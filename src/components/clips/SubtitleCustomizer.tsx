@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Type, Palette, AlignVerticalSpaceAround, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SubtitlePreview } from './SubtitlePreview';
 
 export interface SubtitlePreferences {
   position: 'top' | 'center' | 'bottom';
@@ -43,12 +44,13 @@ const DEFAULT_PREFERENCES: SubtitlePreferences = {
   shadow: true,  // ATIVADO para melhor legibilidade
   shadowColor: '#000000',
   maxCharsPerLine: 28,  // Linhas mais curtas (28 caracteres)
-  marginVertical: 80,  // Mais espaço da borda (80px)
+  marginVertical: 260,  // 260px da borda inferior - legendas mais altas para não serem cobertas pelo nome no YouTube
 };
 
 interface SubtitleCustomizerProps {
   initialPreferences?: Partial<SubtitlePreferences>;
   onSave: (preferences: SubtitlePreferences) => void;
+  onSaveAndReprocess?: (preferences: SubtitlePreferences) => void;
   onCancel?: () => void;
   clipId?: string;
 }
@@ -56,40 +58,79 @@ interface SubtitleCustomizerProps {
 export const SubtitleCustomizer = ({
   initialPreferences,
   onSave,
+  onSaveAndReprocess,
   onCancel,
   clipId,
 }: SubtitleCustomizerProps) => {
-  const [preferences, setPreferences] = useState<SubtitlePreferences>({
+  // Salva as preferências iniciais (do servidor) para poder resetar
+  const savedPreferences: SubtitlePreferences = {
     ...DEFAULT_PREFERENCES,
     ...initialPreferences,
+  };
+
+  console.log('[SubtitleCustomizer] Inicializando com:', {
+    clipId,
+    initialPreferences,
+    savedPreferences,
   });
+
+  const [preferences, setPreferences] = useState<SubtitlePreferences>(savedPreferences);
 
   const updatePreference = <K extends keyof SubtitlePreferences>(
     key: K,
     value: SubtitlePreferences[K]
   ) => {
-    setPreferences((prev) => ({ ...prev, [key]: value }));
+    console.log('[SubtitleCustomizer] Atualizando preferência:', { key, value });
+    setPreferences((prev) => {
+      const updated = { ...prev, [key]: value };
+      console.log('[SubtitleCustomizer] Estado atualizado:', updated);
+      return updated;
+    });
   };
 
   const handleSave = () => {
+    console.log('[SubtitleCustomizer] Aplicar Legendas clicado:', preferences);
     onSave(preferences);
   };
 
+  const handleSaveAndReprocess = () => {
+    console.log('[SubtitleCustomizer] Aplicar e Reprocessar clicado:', preferences);
+    if (onSaveAndReprocess) {
+      onSaveAndReprocess(preferences);
+    }
+  };
+
   const handleReset = () => {
-    setPreferences(DEFAULT_PREFERENCES);
+    console.log('[SubtitleCustomizer] Reset clicado, voltando para:', savedPreferences);
+    // Reseta para as preferências salvas no servidor (não para DEFAULT)
+    setPreferences(savedPreferences);
   };
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Preview Section */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-primary" />
-          Personalizar Legendas
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Position */}
-        <div className="space-y-2">
+          Preview em Tempo Real
+        </h3>
+        <SubtitlePreview
+          preferences={preferences}
+          sampleText="Este é um exemplo de legenda. Ajuste as configurações ao lado para ver as mudanças em tempo real!"
+        />
+      </div>
+
+      {/* Settings Section */}
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Type className="w-5 h-5 text-primary" />
+            Configurações
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Position */}
+          <div className="space-y-2">
           <Label className="flex items-center gap-2">
             <AlignVerticalSpaceAround className="w-4 h-4" />
             Posicionamento
@@ -328,27 +369,35 @@ export const SubtitleCustomizer = ({
               value={[preferences.marginVertical]}
               onValueChange={([value]) => updatePreference('marginVertical', value)}
               min={20}
-              max={100}
+              max={300}
               step={10}
             />
           </div>
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2 pt-4">
-          <Button onClick={handleSave} className="flex-1">
-            Aplicar Legendas
-          </Button>
-          <Button onClick={handleReset} variant="outline">
-            Resetar
-          </Button>
-          {onCancel && (
-            <Button onClick={onCancel} variant="ghost">
-              Cancelar
+        <div className="flex flex-col gap-2 pt-4">
+          {onSaveAndReprocess && (
+            <Button onClick={handleSaveAndReprocess} className="w-full" size="lg">
+              ⚡ Aplicar e Reprocessar (5s)
             </Button>
           )}
+          <Button onClick={handleSave} variant={onSaveAndReprocess ? "outline" : "default"} className="w-full">
+            {onSaveAndReprocess ? 'Salvar Sem Reprocessar' : 'Aplicar Legendas'}
+          </Button>
+          <div className="flex gap-2">
+            <Button onClick={handleReset} variant="outline" className="flex-1">
+              Resetar
+            </Button>
+            {onCancel && (
+              <Button onClick={onCancel} variant="ghost" className="flex-1">
+                Cancelar
+              </Button>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>
+    </div>
   );
 };

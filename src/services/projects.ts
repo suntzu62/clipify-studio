@@ -40,76 +40,95 @@ function jobToProject(job: Job, userId: string): Project {
 }
 
 export async function listProjects() {
-  // Get authenticated user
+  // Get authenticated user from Supabase (para obter email/userId mesmo sem usar o banco)
   const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError) {
-    console.error('[listProjects] Auth error:', authError);
-    throw authError;
+
+  // Se não tiver usuário no Supabase Auth, usar userId fixo de desenvolvimento
+  const userId = user?.id || 'dev-user';
+
+  console.log('[listProjects] Fetching projects for user:', userId);
+
+  try {
+    // Buscar jobs do backend PostgreSQL via API
+    const response = await fetch('http://localhost:3001/jobs', {
+      headers: {
+        'x-api-key': import.meta.env.VITE_API_KEY || '93560857g',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('[listProjects] Found projects from API:', data.length);
+
+    // Mapear os dados do backend para o formato Project
+    return data.map((job: any): Project => ({
+      id: job.id,
+      user_id: job.user_id,
+      youtube_url: job.youtube_url,
+      title: job.title,
+      status: job.status,
+      progress: job.progress,
+      source: job.source_type,
+      storage_path: job.upload_path || job.video_path,
+      file_name: null,
+      created_at: job.created_at,
+      updated_at: job.updated_at,
+    }));
+  } catch (error) {
+    console.error('[listProjects] API error, falling back to localStorage:', error);
+
+    // Fallback to localStorage if API fails
+    const localJobs = getUserJobs(userId);
+    console.log('[listProjects] Found projects in localStorage:', localJobs.length);
+
+    return localJobs.map(job => jobToProject(job, userId));
   }
-  if (!user) {
-    console.error('[listProjects] No authenticated user');
-    throw new Error('Not authenticated');
-  }
-
-  console.log('[listProjects] Fetching projects for user:', user.id);
-
-  // Try to fetch from database first
-  const { data, error } = await supabase
-    .from("user_jobs")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-
-  // If database query succeeds and has data, return it
-  if (!error && data && data.length > 0) {
-    console.log('[listProjects] Found projects in database:', data.length);
-    return data as unknown as Project[];
-  }
-
-  // Fallback to localStorage if database is empty or has errors
-  console.warn('[listProjects] Database error or empty, falling back to localStorage:', error);
-  const localJobs = getUserJobs(user.id);
-  console.log('[listProjects] Found projects in localStorage:', localJobs.length);
-
-  return localJobs.map(job => jobToProject(job, user.id));
 }
 
 export async function createProject(input: CreateProjectInput) {
-  // Get authenticated session
-  const { data: { session }, error: authError } = await supabase.auth.getSession();
-  if (authError) {
-    console.error('[createProject] Auth error:', authError);
-    throw authError;
-  }
-  if (!session?.access_token) {
-    console.error('[createProject] No authenticated session');
-    throw new Error('Not authenticated');
-  }
+  // Get authenticated user from Supabase (para obter email/userId mesmo sem usar o banco)
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  console.log('[createProject] Creating project via enqueue-pipeline for user:', session.user.id);
+  // Se não tiver usuário no Supabase Auth, usar userId fixo de desenvolvimento
+  const userId = user?.id || 'dev-user';
 
-  // Call the enqueue-pipeline edge function to properly queue the job
-  const { data, error } = await supabase.functions.invoke('enqueue-pipeline', {
-    body: {
+  console.log('[createProject] Creating project via local API for user:', userId);
+
+  // Call the local backend API to create the job
+  const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+  const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
+
+  const response = await fetch(`${baseUrl}/jobs`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      userId: userId,
+      sourceType: 'youtube',
       youtubeUrl: input.youtube_url.trim(),
-      neededMinutes: 10,
-      meta: {
-        targetDuration: '60'
-      }
-    }
+      targetDuration: 60,
+      clipCount: 8,
+    }),
   });
 
-  if (error) {
-    console.error('[createProject] Edge function error:', error);
-    throw new Error(error.message || 'Failed to create project');
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    console.error('[createProject] API error:', errorData);
+    throw new Error(errorData.message || 'Failed to create project');
   }
 
-  console.log('[createProject] Project created:', data?.jobId);
+  const data = await response.json();
+  console.log('[createProject] Project created:', data.jobId);
 
   // Create project object
   const project: Project = {
     id: data.jobId,
-    user_id: session.user.id,
+    user_id: userId,
     youtube_url: input.youtube_url,
     title: input.title ?? null,
     status: 'queued',
@@ -143,11 +162,41 @@ export async function createProject(input: CreateProjectInput) {
   return project;
 }
 
+export async function updateProject(id: string, updates: { title?: string }) {
+  const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+  const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
+
+  const response = await fetch(`${baseUrl}/jobs/${id}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+    },
+    body: JSON.stringify(updates),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || 'Failed to update project');
+  }
+
+  return response.json();
+}
+
 export async function deleteProject(id: string) {
-  const { error } = await supabase
-    .from("user_jobs")
-    .delete()
-    .eq("id", id as any);
-  if (error) throw error;
+  const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+  const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
+
+  const response = await fetch(`${baseUrl}/jobs/${id}`, {
+    method: 'DELETE',
+    headers: {
+      'x-api-key': apiKey,
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || 'Failed to delete project');
+  }
 }
 

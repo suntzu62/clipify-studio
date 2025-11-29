@@ -177,3 +177,26 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Ajustes globais para legendas de vídeo */
+/* Move as legendas para cima para não serem cobertas pelos controles do player */
+video::-webkit-media-text-track-container {
+  bottom: 80px !important;
+  position: relative !important;
+}
+
+video::-webkit-media-text-track-display {
+  bottom: 80px !important;
+  position: relative !important;
+}
+
+video::cue {
+  line-height: 1.4 !important;
+  font-size: 1.1em !important;
+}
+
+/* Firefox */
+video::-moz-media-text-track-display {
+  bottom: 80px !important;
+  position: relative !important;
+}

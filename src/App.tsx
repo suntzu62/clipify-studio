@@ -14,11 +14,13 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Projects = lazy(() => import("./pages/Projects"));
 const ProjectConfigure = lazy(() => import("./pages/ProjectConfigure"));
 const ProjectDetail = lazy(() => import("./pages/ProjectDetail"));
+const ClipLab = lazy(() => import("./pages/ClipLab"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Billing = lazy(() => import("./pages/Billing"));
 const Integrations = lazy(() => import("./pages/Integrations"));
 const Login = lazy(() => import("./pages/auth/Login"));
 const Register = lazy(() => import("./pages/auth/Register"));
+const Callback = lazy(() => import("./pages/auth/Callback"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Privacy = lazy(() => import("./pages/Privacy"));
 const Help = lazy(() => import("./pages/Help"));
@@ -53,7 +55,9 @@ const App = () => {
               <Route path="/" element={<Landing />} />
               <Route path="/auth/login" element={<Login />} />
               <Route path="/auth/register" element={<Register />} />
+              <Route path="/auth/callback" element={<Callback />} />
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/clip-lab" element={<ProtectedRoute><ClipLab /></ProtectedRoute>} />
               <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
               <Route path="/projects/configure/:tempId" element={<ProtectedRoute><ProjectConfigure /></ProtectedRoute>} />
               <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />

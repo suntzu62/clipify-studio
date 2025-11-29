@@ -1,11 +1,14 @@
 import { promises as fs } from 'fs';
+import { join, dirname } from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { createLogger } from '../config/logger.js';
 import { env } from '../config/env.js';
 
 const logger = createLogger('storage');
 
-const supabase = createClient(env.supabase.url, env.supabase.serviceKey);
+const supabase = env.supabase.url && env.supabase.serviceKey
+  ? createClient(env.supabase.url, env.supabase.serviceKey)
+  : null;
 
 interface UploadResult {
   path: string;
@@ -13,7 +16,7 @@ interface UploadResult {
 }
 
 /**
- * Faz upload de um arquivo para o Supabase Storage
+ * Faz upload de um arquivo para o Supabase Storage ou armazenamento local
  */
 export async function uploadFile(
   bucket: string,
@@ -21,6 +24,11 @@ export async function uploadFile(
   filePath: string,
   contentType: string
 ): Promise<UploadResult> {
+  // Se Supabase não estiver configurado, usar armazenamento local
+  if (!supabase) {
+    return uploadToLocalStorage(path, filePath);
+  }
+
   logger.info({ bucket, path, filePath, contentType }, 'Uploading file to storage');
 
   try {
@@ -186,5 +194,42 @@ export async function fileExists(bucket: string, path: string): Promise<boolean>
     return Boolean(data);
   } catch {
     return false;
+  }
+}
+
+/**
+ * Faz upload para armazenamento local quando Supabase não está configurado
+ */
+async function uploadToLocalStorage(
+  path: string,
+  sourceFilePath: string
+): Promise<UploadResult> {
+  logger.info({ path, sourceFilePath }, 'Uploading file to local storage');
+
+  try {
+    // Caminho de destino: ./uploads/{path}
+    const storagePath = env.localStoragePath || './uploads';
+    const destPath = join(storagePath, path);
+
+    // Criar diretórios se não existirem
+    await fs.mkdir(dirname(destPath), { recursive: true });
+
+    // Copiar arquivo
+    await fs.copyFile(sourceFilePath, destPath);
+
+    // URL pública para servir o arquivo
+    // O servidor deve ter uma rota para servir arquivos de /clips/*
+    const baseUrl = env.baseUrl || `http://localhost:${env.port}`;
+    const publicUrl = `${baseUrl}/${path}`;
+
+    logger.info({ path, publicUrl, destPath }, 'File uploaded to local storage successfully');
+
+    return {
+      path: destPath,
+      publicUrl,
+    };
+  } catch (error: any) {
+    logger.error({ error: error.message, path }, 'Local file upload failed');
+    throw new Error(`Local upload failed: ${error.message}`);
   }
 }

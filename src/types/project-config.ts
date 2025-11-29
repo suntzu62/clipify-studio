@@ -61,7 +61,7 @@ export interface SubtitlePreferences {
   shadow: boolean;
   shadowColor: string; // hex
   maxCharsPerLine: number; // 20-60
-  marginVertical: number; // 20-100
+  marginVertical: number; // 20-300
 }
 
 export interface TimeframeConfig {
@@ -107,7 +107,7 @@ export const DEFAULT_SUBTITLE_PREFERENCES: SubtitlePreferences = {
   shadow: true,
   shadowColor: '#000000',
   maxCharsPerLine: 28,
-  marginVertical: 80,
+  marginVertical: 260,
 };
 
 export const GENRE_OPTIONS: { value: GenreType; label: string; icon: string }[] = [

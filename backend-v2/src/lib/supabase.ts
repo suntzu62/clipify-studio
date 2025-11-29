@@ -1,20 +1,23 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { env } from '../config/env.js';
 import { createLogger } from '../config/logger.js';
 
 const logger = createLogger('supabase');
 
-// Cliente com service role (bypass RLS)
-export const supabase = createClient(
-  env.supabase.url,
-  env.supabase.serviceKey,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
+// Cliente com service role (bypass RLS) - apenas se configurado
+export const supabase: SupabaseClient | null =
+  env.supabase.url && env.supabase.serviceKey
+    ? createClient(
+        env.supabase.url,
+        env.supabase.serviceKey,
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        }
+      )
+    : null;
 
 // Upload de arquivo para storage
 export async function uploadFile(
@@ -23,6 +26,10 @@ export async function uploadFile(
   file: Buffer | string,
   contentType: string
 ): Promise<string> {
+  if (!supabase) {
+    throw new Error('Supabase not configured. Use local storage instead.');
+  }
+
   logger.info({ bucket, path, contentType }, 'Uploading file to storage');
 
   const { data, error } = await supabase.storage
@@ -46,6 +53,10 @@ export async function downloadFile(
   bucket: string,
   path: string
 ): Promise<Blob> {
+  if (!supabase) {
+    throw new Error('Supabase not configured. Use local storage instead.');
+  }
+
   logger.info({ bucket, path }, 'Downloading file from storage');
 
   const { data, error } = await supabase.storage.from(bucket).download(path);
@@ -61,6 +72,9 @@ export async function downloadFile(
 
 // Get public URL
 export function getPublicUrl(bucket: string, path: string): string {
+  if (!supabase) {
+    throw new Error('Supabase not configured. Use local storage instead.');
+  }
   const { data } = supabase.storage.from(bucket).getPublicUrl(path);
   return data.publicUrl;
 }

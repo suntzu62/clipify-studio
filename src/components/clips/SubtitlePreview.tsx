@@ -13,6 +13,7 @@ export const SubtitlePreview = ({
   sampleText = 'Esta é uma prévia das suas legendas personalizadas',
   thumbnailUrl,
 }: SubtitlePreviewProps) => {
+  console.log('[SubtitlePreview] Renderizando com preferências:', preferences);
   const getVerticalPosition = () => {
     switch (preferences.position) {
       case 'top':

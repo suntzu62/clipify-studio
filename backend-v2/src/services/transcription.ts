@@ -6,6 +6,7 @@ import ffmpegStatic from 'ffmpeg-static';
 import { OpenAI } from 'openai';
 import { toFile } from 'openai/uploads';
 import { createLogger } from '../config/logger.js';
+import { env } from '../config/env.js';
 import type { Transcript, TranscriptSegment, TranscriptionError } from '../types/index.js';
 
 const logger = createLogger('transcription');
@@ -16,8 +17,43 @@ if (ffmpegStatic) {
 }
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: env.openai.apiKey,
 });
+
+/**
+ * Retry helper with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  initialDelay = 1000
+): Promise<T> {
+  let lastError: any;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+
+      // Don't retry on authentication errors or invalid request errors
+      if (error.status === 401 || error.status === 400) {
+        throw error;
+      }
+
+      if (attempt < maxRetries) {
+        const delay = initialDelay * Math.pow(2, attempt);
+        logger.warn(
+          { attempt: attempt + 1, maxRetries: maxRetries + 1, delay, error: error.message },
+          'Retrying after error'
+        );
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
 
 interface TranscriptionResult {
   transcript: Transcript;
@@ -64,7 +100,7 @@ export async function transcribeVideo(
     logger.info({ totalChunks: chunkFiles.length }, 'Transcribing audio chunks');
 
     const allSegments: TranscriptSegment[] = [];
-    const batchSize = 8; // Increased from 4 to 8 for better performance
+    const batchSize = 3; // Reduced to avoid rate limiting
 
     for (let i = 0; i < chunkFiles.length; i += batchSize) {
       const batch = chunkFiles.slice(i, i + batchSize);
@@ -92,23 +128,39 @@ export async function transcribeVideo(
 
           logger.info({ chunk: chunkIndex + 1, total: chunkFiles.length }, 'Transcribing chunk');
 
-          const fileBuf = await fs.readFile(chunkPath);
-          const fileStream = await toFile(fileBuf, chunkFile);
+          try {
+            const fileBuf = await fs.readFile(chunkPath);
+            const fileStream = await toFile(fileBuf, chunkFile);
 
-          const transcription = await openai.audio.transcriptions.create({
-            file: fileStream,
-            model,
-            response_format: 'verbose_json',
-            language,
-          });
+            const transcription = await retryWithBackoff(async () => {
+              return await openai.audio.transcriptions.create({
+                file: fileStream,
+                model,
+                response_format: 'verbose_json',
+                language,
+              });
+            }, 3, 2000); // 3 retries with 2s initial delay
 
-          logger.info({ chunk: chunkIndex + 1, total: chunkFiles.length, segmentsCount: transcription.segments?.length || 0 }, 'Chunk transcription completed');
+            logger.info({ chunk: chunkIndex + 1, total: chunkFiles.length, segmentsCount: transcription.segments?.length || 0 }, 'Chunk transcription completed');
 
-          return {
-            chunkIndex,
-            segments: transcription.segments || [],
-            text: transcription.text,
-          };
+            return {
+              chunkIndex,
+              segments: transcription.segments || [],
+              text: transcription.text,
+            };
+          } catch (error: any) {
+            logger.error({
+              chunk: chunkIndex + 1,
+              total: chunkFiles.length,
+              errorMessage: error.message,
+              errorType: error.constructor?.name,
+              errorCode: error.code,
+              errorStatus: error.status,
+              errorResponse: error.response?.data,
+              stack: error.stack,
+            }, 'Failed to transcribe chunk');
+            throw error;
+          }
         })
       );
 

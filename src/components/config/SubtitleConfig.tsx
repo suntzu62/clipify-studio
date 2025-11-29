@@ -91,7 +91,7 @@ export const SubtitleConfig = ({ preferences, onChange }: SubtitleConfigProps) =
               value={[preferences.marginVertical]}
               onValueChange={([value]) => updatePreference('marginVertical', value)}
               min={20}
-              max={100}
+              max={300}
               step={5}
               className="w-full"
             />

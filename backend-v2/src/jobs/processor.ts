@@ -9,6 +9,7 @@ import { renderClips, cleanupRenderDir } from '../services/rendering.js';
 import { uploadFile } from '../services/storage.js';
 import { env } from '../config/env.js';
 import { redis } from '../config/redis.js';
+import { jobs as dbJobs, clips as dbClips } from '../services/database.service.js';
 
 const logger = createLogger('processor');
 
@@ -35,6 +36,18 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
   let renderDir: string | undefined;
 
   try {
+    // Salvar job inicial no banco de dados
+    await dbJobs.insert({
+      id: jobId,
+      user_id: userId,
+      source_type: sourceType,
+      youtube_url: job.data.youtubeUrl,
+      upload_path: job.data.uploadPath,
+      target_duration: targetDuration,
+      clip_count: clipCount,
+      status: 'processing',
+    });
+
     // ============================================
     // STEP 1: INGEST (Download/Upload)
     // ============================================
@@ -50,6 +63,12 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     const metadata = downloadResult.metadata;
 
     logger.info({ jobId, videoPath, metadata }, 'Video downloaded successfully');
+
+    // Atualizar job com caminho do vídeo (necessário para reprocessamento)
+    await dbJobs.update(jobId, {
+      video_path: videoPath,
+      metadata: metadata,
+    });
 
     await updateProgress(job, 'ingest', 15, 'Vídeo baixado com sucesso');
 
@@ -191,7 +210,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
           'image/jpeg'
         );
 
-        clips.push({
+        const clipData = {
           id: renderedClip.id,
           title: renderedClip.segment.title,
           start: renderedClip.segment.start,
@@ -202,18 +221,77 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
           keywords: renderedClip.segment.keywords,
           storagePath: videoUpload.publicUrl,
           thumbnail: thumbnailUpload.publicUrl,
+        };
+
+        clips.push(clipData);
+
+        // Salvar clip no banco de dados (upsert para evitar duplicatas)
+        await dbClips.upsert({
+          id: renderedClip.id,
+          job_id: jobId,
+          user_id: userId,
+          title: renderedClip.segment.title,
+          description: renderedClip.segment.reason || '',
+          hashtags: renderedClip.segment.keywords || [],
+          start_time: renderedClip.segment.start,
+          end_time: renderedClip.segment.end,
+          duration: renderedClip.duration,
+          video_url: videoUpload.publicUrl,
+          thumbnail_url: thumbnailUpload.publicUrl,
+          storage_path: clipStoragePath,
+          thumbnail_storage_path: thumbnailStoragePath,
+          transcript: transcript, // Transcrição completa necessária para reprocessamento
         });
 
-        logger.info({ jobId, clipId: renderedClip.id, storageUrl: videoUpload.publicUrl }, 'Clip uploaded');
+        logger.info({ jobId, clipId: renderedClip.id, storageUrl: videoUpload.publicUrl }, 'Clip uploaded and saved to database');
       })
     );
 
     await updateProgress(job, 'export', 98, 'Upload completo');
 
-    // ============================================
-    // FINALIZAÇÃO
-    // ============================================
+    // Salvar dados necessários para reprocessamento no Redis
+    // Armazenar caminho do vídeo original e transcrição
+    const reprocessDataKey = `reprocess:${jobId}`;
+    await redis.set(
+      reprocessDataKey,
+      JSON.stringify({
+        videoPath,
+        transcript,
+        jobData: {
+          userId,
+          sourceType,
+          youtubeUrl: job.data.youtubeUrl,
+        },
+      }),
+      'EX',
+      60 * 60 * 24 * 30 // 30 days
+    );
+
+    // Salvar dados de cada clip (start, end, transcript)
+    for (const clip of renderResult.clips) {
+      const clipReprocessKey = `reprocess:${jobId}:${clip.id}`;
+      await redis.set(
+        clipReprocessKey,
+        JSON.stringify({
+          id: clip.id,
+          start: clip.segment.start,
+          end: clip.segment.end,
+          title: clip.segment.title,
+        }),
+        'EX',
+        60 * 60 * 24 * 30 // 30 days
+      );
+    }
+
+    logger.info({ jobId }, 'Reprocess data saved to Redis');
+
     await updateProgress(job, 'completed', 100, 'Processamento completo!');
+
+    // Atualizar status do job para completed
+    await dbJobs.update(jobId, {
+      status: 'completed',
+      completed_at: new Date(),
+    });
 
     const processingTime = Date.now() - startTime;
 
@@ -232,6 +310,12 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     logger.error({ jobId, userId, error: error.message, stack: error.stack }, 'Video processing failed');
 
     await updateProgress(job, 'failed', 0, `Erro: ${error.message}`);
+
+    // Atualizar status do job para failed
+    await dbJobs.update(jobId, {
+      status: 'failed',
+      error: error.message,
+    });
 
     const processingTime = Date.now() - startTime;
 
@@ -278,6 +362,13 @@ async function updateProgress(
   };
 
   await job.updateProgress(progressData);
+
+  // Atualizar também no banco de dados
+  await dbJobs.update(job.data.jobId, {
+    progress,
+    current_step: step,
+    current_step_message: message,
+  });
 
   logger.debug(
     { jobId: job.data.jobId, step, progress },

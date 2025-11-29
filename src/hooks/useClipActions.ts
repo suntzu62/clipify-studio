@@ -32,6 +32,9 @@ export const useClipActions = ({
     Array<{ platform: SocialPlatform; url: string; publishedAt: string }>
   >([]);
 
+  // Base URL for API calls
+  const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+
   // Check if actions are allowed based on status
   const canPerformActions = clipStatus === 'ready';
 
@@ -114,7 +117,7 @@ export const useClipActions = ({
     try {
       // For now, this is a placeholder
       // In the future, this will call the actual API
-      const response = await fetch(`http://localhost:3001/clips/${clipId}/publish-${platform}`, {
+      const response = await fetch(`${baseUrl}/clips/${clipId}/publish-${platform}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

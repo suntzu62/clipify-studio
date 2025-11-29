@@ -378,6 +378,83 @@ export async function createTempConfig(
   }
 }
 
+/**
+ * Create a job from an uploaded file
+ * Called after file is uploaded to Supabase Storage
+ */
+export async function createJobFromUpload(
+  userId: string,
+  storagePath: string,
+  fileName: string,
+  getToken?: () => Promise<string | null>
+): Promise<{ jobId: string }> {
+  const useLocalAPI = import.meta.env.DEV &&
+    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+
+  if (useLocalAPI) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': import.meta.env.VITE_API_KEY,
+    } as Record<string, string>;
+
+    const jobData = {
+      userId,
+      storagePath,
+      fileName,
+      targetDuration: 60,
+      clipCount: 5,
+    };
+
+    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs/from-upload`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(jobData),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to create job from upload';
+      throw new Error(`create-job-from-upload failed: ${resp.status} ${resp.statusText} - ${msg}`);
+    }
+
+    return { jobId: (data as any).jobId };
+  } else {
+    // Production: use the same backend endpoint (deployed version)
+    // For now, we'll use the same approach but with auth token
+    const token = getToken ? await getToken() : null;
+
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    } as Record<string, string>;
+
+    // In production, the backend URL should come from environment
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://api.cortai.app';
+
+    const jobData = {
+      userId,
+      storagePath,
+      fileName,
+      targetDuration: 60,
+      clipCount: 5,
+    };
+
+    const resp = await fetch(`${backendUrl}/jobs/from-upload`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(jobData),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to create job from upload';
+      throw new Error(`create-job-from-upload failed: ${resp.status} ${resp.statusText} - ${msg}`);
+    }
+
+    return { jobId: (data as any).jobId };
+  }
+}
+
 export async function getJobStatus(
   jobId: string,
   getToken?: () => Promise<string | null>

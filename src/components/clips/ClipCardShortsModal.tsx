@@ -87,8 +87,8 @@ export const ClipShortsModal = ({
             </Button>
           </div>
 
-          {/* Player vertical 9:16 ocupando quase toda tela */}
-          <div className="w-full h-full max-w-[min(100vh*9/16,100vw)] mx-auto relative">
+          {/* Player vertical 9:16 - TAMANHO AUMENTADO para melhor qualidade */}
+          <div className="w-full h-full max-w-[min(75vh*9/16,700px)] mx-auto relative">
             <div className="absolute inset-0">
               {clip.previewUrl || clip.downloadUrl ? (
                 <Player

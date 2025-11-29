@@ -46,7 +46,7 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
   return (
     <div className={`w-full h-full overflow-hidden ${className}`}>
       <div className="relative w-full h-full bg-black video-player-container">
-        {/* HTML5 Video Player com controles customizados - fullscreen com object-fit cover */}
+        {/* HTML5 Video Player com controles customizados - sem cortes, qualidade profissional */}
         <video
           src={url}
           controls={controls}
@@ -54,7 +54,8 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
           loop={loop}
           muted={muted}
           playsInline
-          className="w-full h-full video-enhanced-controls object-cover"
+          crossOrigin="anonymous"
+          className="w-full h-full video-enhanced-controls object-contain"
           onError={(e) => {
             console.error('[OptimizedPlayer] Video load error:', {
               url,
@@ -99,10 +100,27 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
             -webkit-filter: none !important;
           }
 
-          .video-enhanced-controls::-webkit-media-controls-panel,
-          .video-enhanced-controls::-moz-media-control-panel {
-            background: linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0.25), transparent);
+          /* Controles do player mais discretos e transparentes */
+          .video-enhanced-controls::-webkit-media-controls-panel {
+            background: linear-gradient(to top, rgba(0,0,0,0.4), transparent) !important;
+            height: 35px !important;
           }
+
+          .video-enhanced-controls::-moz-media-control-panel {
+            background: linear-gradient(to top, rgba(0,0,0,0.4), transparent) !important;
+            height: 35px !important;
+          }
+
+          /* Reduzir altura dos controles nativos */
+          .video-enhanced-controls::-webkit-media-controls-enclosure {
+            height: 35px !important;
+            bottom: 0 !important;
+          }
+
+          .video-enhanced-controls::-webkit-media-controls {
+            height: 35px !important;
+          }
+
         `}</style>
       </div>
     </div>

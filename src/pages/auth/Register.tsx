@@ -14,7 +14,7 @@ const Register = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { signUp, signInWithGoogle, user } = useAuth();
+  const { signUp, user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -60,22 +60,25 @@ const Register = () => {
     if (error) {
       toast({
         title: 'Erro ao criar conta',
-        description: error.message === 'User already registered' 
-          ? 'Este email já está cadastrado' 
+        description: error.message === 'User already registered'
+          ? 'Este email já está cadastrado'
           : error.message,
         variant: 'destructive',
       });
     } else {
       toast({
-        title: 'Conta criada!',
-        description: 'Verifique seu email para confirmar o cadastro.',
+        title: 'Conta criada com sucesso!',
+        description: 'Bem-vindo ao Cortaí',
       });
+      // Redirecionar imediatamente após registro bem-sucedido
+      navigate('/dashboard', { replace: true });
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    setIsLoading(true);
-    await signInWithGoogle();
+  const handleGoogleSignIn = () => {
+    // Redirecionar para o backend que vai redirecionar para o Google
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    window.location.href = `${backendUrl}/auth/google`;
   };
 
   return (

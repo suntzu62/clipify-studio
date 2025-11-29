@@ -20,12 +20,12 @@ const Settings = () => {
       <header className="border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-6">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center space-x-2">
+            <Link to="/clip-lab" className="flex items-center space-x-2 hover:opacity-90 transition-opacity">
               <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">
                 <span className="text-white font-bold text-sm">C</span>
               </div>
               <span className="text-xl font-bold text-foreground">Cortaí</span>
-            </div>
+            </Link>
             
             <div className="flex items-center space-x-4">
               <span className="text-sm text-muted-foreground">

@@ -153,21 +153,29 @@ async function renderSingleClip(
     const vfFilters: string[] = [];
 
     // Crop and scale to target aspect ratio
+    // QUALIDADE MÁXIMA: Usa Lanczos com parâmetros otimizados (preserva nitidez)
+    const scaleParams = 'flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp';
+
     if (options.format === '9:16') {
-      // Vertical format (1080x1920)
+      // Vertical format (1080x1920) - Estratégia OTIMIZADA para máxima qualidade
+      // 1. CROP PRIMEIRO no tamanho original (minimiza upscale)
+      // 2. SCALE depois apenas o necessário
+      // Para vídeo 16:9 (1920x1080) -> crop mantendo altura: width = ih*9/16
       vfFilters.push(
-        `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`
+        // Crop PRIMEIRO para 9:16 no tamanho original (menos zoom)
+        `crop=ih*9/16:ih:(iw-ih*9/16)/2:0`,
+        // SCALE depois com Lanczos (upscale mínimo necessário)
+        `scale=${width}:${height}:${scaleParams}`
       );
     } else if (options.format === '1:1') {
-      // Square format
+      // Square format - crop menor dimensão, depois scale
       vfFilters.push(
-        `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`
+        `crop=min(iw\\,ih):min(iw\\,ih):(iw-min(iw\\,ih))/2:(ih-min(iw\\,ih))/2`,
+        `scale=${width}:${height}:${scaleParams}`
       );
     } else {
-      // Keep original 16:9
-      vfFilters.push(`scale=${width}:${height}`);
+      // Keep original 16:9 - apenas scale se necessário
+      vfFilters.push(`scale=${width}:${height}:${scaleParams}`);
     }
 
     // Add subtitles if requested
@@ -186,8 +194,8 @@ async function renderSingleClip(
       }
     }
 
-    // Add FPS
-    vfFilters.push('fps=30');
+    // NÃO forçar FPS - preservar o framerate original do vídeo
+    // Se precisar limitar, use: vfFilters.push('fps=fps=source_fps');
 
     const vf = vfFilters.join(',');
 
@@ -205,19 +213,23 @@ async function renderSingleClip(
           '-vf', vf,
           '-af', af,
           '-c:v', 'libx264',
-          '-preset', options.preset,
-          '-tune', 'zerolatency',
-          '-threads', '4', // Explicit thread control for better performance
+          '-preset', 'slow', // QUALIDADE MÁXIMA: slow preset para melhor compressão
+          '-tune', 'film', // Otimiza para conteúdo filmado (preserva detalhes)
+          '-threads', '8', // Mais threads para compensar preset slow
           '-profile:v', 'high',
-          '-level', '4.1',
+          '-level', '4.2', // Level 4.2 adequado para 1080p
           '-pix_fmt', 'yuv420p',
-          '-b:v', '4M',
-          '-maxrate', '6M',
-          '-bufsize', '8M',
-          '-g', '30',
+          '-crf', '16', // CRF 16 = Qualidade excelente (ideal para 1080p)
+          '-b:v', '12M', // 12 Mbps ideal para 1080x1920 (alta qualidade)
+          '-maxrate', '15M', // Picos de qualidade
+          '-bufsize', '20M', // Buffer adequado
+          '-g', '60', // GOP maior = melhor qualidade em cenas estáticas
           '-keyint_min', '30',
+          '-refs', '5', // Frames de referência
+          '-bf', '3', // B-frames para melhor compressão sem perda
+          '-x264-params', 'aq-mode=3:aq-strength=0.8', // Adaptive quantization para preservar detalhes
           '-c:a', 'aac',
-          '-b:a', '128k',
+          '-b:a', '192k', // 192k áudio de alta qualidade
           '-ac', '2',
           '-ar', '48000',
           '-movflags', '+faststart',
@@ -249,7 +261,7 @@ async function renderSingleClip(
 /**
  * Constrói filtro de legendas para FFmpeg
  */
-async function buildSubtitlesFilter(
+export async function buildSubtitlesFilter(
   transcript: Transcript,
   start: number,
   end: number,
@@ -344,10 +356,14 @@ function generateThumbnail(
 
 /**
  * Obtém resolução baseada no formato
+ * Usa resoluções MENORES para evitar upscale excessivo e preservar qualidade
  */
-function getResolutionForFormat(format: '9:16' | '16:9' | '1:1'): { width: number; height: number } {
+export function getResolutionForFormat(format: '9:16' | '16:9' | '1:1'): { width: number; height: number } {
   switch (format) {
     case '9:16':
+      // 1080x1920 para MÁXIMA QUALIDADE
+      // Vídeo 1920x1080 -> crop 608x1080 -> scale para 1080x1920 (1.78x upscale)
+      // Qualidade superior, arquivo maior mas vale a pena
       return { width: 1080, height: 1920 };
     case '1:1':
       return { width: 1080, height: 1080 };

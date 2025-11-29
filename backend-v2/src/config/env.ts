@@ -10,12 +10,20 @@ const envSchema = z.object({
   PORT: z.string().default('3001'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_KEY: z.string().min(1),
+  JWT_SECRET: z.string().min(32),
+  BASE_URL: z.string().url().optional(),
 
-  // Supabase
-  SUPABASE_URL: z.string().url(),
-  SUPABASE_ANON_KEY: z.string().min(1),
-  SUPABASE_SERVICE_KEY: z.string().min(1),
+  // Database
+  DATABASE_URL: z.string().url().optional(),
+
+  // Supabase (opcional quando usar DATABASE_URL)
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_ANON_KEY: z.string().min(1).optional(),
+  SUPABASE_SERVICE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('raw'),
+
+  // Local Storage (alternativa ao Supabase Storage)
+  LOCAL_STORAGE_PATH: z.string().default('./uploads'),
 
   // Redis
   REDIS_HOST: z.string().default('localhost'),
@@ -24,10 +32,15 @@ const envSchema = z.object({
   REDIS_DB: z.string().default('0'),
 
   // OpenAI
-  OPENAI_API_KEY: z.string().min(1),
+  OPENAI_API_KEY: z.string().min(1).optional(),
 
-  // Anthropic
-  ANTHROPIC_API_KEY: z.string().min(1),
+  // Anthropic (opcional para análise de highlights)
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+
+  // Google OAuth
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CALLBACK_URL: z.string().url().optional(),
 
   // Optional
   FFMPEG_PATH: z.string().optional(),
@@ -49,8 +62,13 @@ export const env = {
   port: parseInt(parsed.data.PORT, 10),
   nodeEnv: parsed.data.NODE_ENV,
   apiKey: parsed.data.API_KEY,
+  jwtSecret: parsed.data.JWT_SECRET,
+  baseUrl: parsed.data.BASE_URL || `http://localhost:${parsed.data.PORT}`,
   isDevelopment: parsed.data.NODE_ENV === 'development',
   isProduction: parsed.data.NODE_ENV === 'production',
+
+  // Database
+  databaseUrl: parsed.data.DATABASE_URL,
 
   // Supabase
   supabase: {
@@ -59,6 +77,9 @@ export const env = {
     serviceKey: parsed.data.SUPABASE_SERVICE_KEY,
     bucket: parsed.data.SUPABASE_STORAGE_BUCKET,
   },
+
+  // Storage
+  localStoragePath: parsed.data.LOCAL_STORAGE_PATH,
 
   // Redis
   redis: {
@@ -74,6 +95,13 @@ export const env = {
   },
   anthropic: {
     apiKey: parsed.data.ANTHROPIC_API_KEY,
+  },
+
+  // Google OAuth
+  google: {
+    clientId: parsed.data.GOOGLE_CLIENT_ID,
+    clientSecret: parsed.data.GOOGLE_CLIENT_SECRET,
+    callbackUrl: parsed.data.GOOGLE_CALLBACK_URL,
   },
 
   // Optional

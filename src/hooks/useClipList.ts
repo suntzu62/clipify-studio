@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import { log } from '@/lib/logger';
+import type { SubtitlePreferences } from '@/components/clips/SubtitleCustomizer';
+import type { ViralIntelligence } from '@/types/viral-intelligence';
+import { generateViralIntelligence } from '@/types/viral-intelligence';
 
 export interface Clip {
   id: string;
@@ -12,6 +15,8 @@ export interface Clip {
   duration: number;
   status: 'processing' | 'ready' | 'failed';
   transcript?: Array<{ start: number; end: number; text: string }>;
+  subtitleSettings?: SubtitlePreferences;
+  viralIntel?: ViralIntelligence;
 }
 
 export const useClipList = (jobResult?: any) => {
@@ -57,7 +62,7 @@ export const useClipList = (jobResult?: any) => {
 
     // Strategy 1: Check for ready clips first (from enhanced job-status response)
     if (result.clips && Array.isArray(result.clips) && result.clips.length > 0) {
-      log.info('[useClipList] ✅ Found clips in result.clips', { 
+      log.info('[useClipList] ✅ Found clips in result.clips', {
         clipCount: result.clips.length,
         sampleClip: result.clips[0] ? {
           id: result.clips[0].id,
@@ -66,20 +71,47 @@ export const useClipList = (jobResult?: any) => {
           hasDownloadUrl: !!result.clips[0].downloadUrl
         } : null
       });
-      const validClips = result.clips.map((clip: any, index: number) => ({
-        id: clip.id || `clip-${index + 1}`,
-        title: clip.title || `Clipe ${index + 1}`,
-        description: clip.description || 'Descrição gerada automaticamente',
-        hashtags: Array.isArray(clip.hashtags) ? clip.hashtags : [],
-        previewUrl: clip.previewUrl || clip.downloadUrl,
-        downloadUrl: clip.downloadUrl || clip.previewUrl,
-        thumbnailUrl: clip.thumbnailUrl,
-        duration: clip.duration || 45,
-        status: clip.status || 'ready'
-      }));
-      setDebugInfo(prev => ({ ...prev, processed: true, strategy: 'clips_array', foundClips: validClips.length }));
-      setClips(validClips);
-      log.info('[useClipList] ✅ Successfully set clips from result.clips', { count: validClips.length });
+      const validClips = result.clips.map((clip: any, index: number): Clip => {
+        const clipData: Clip = {
+          id: clip.id || `clip-${index + 1}`,
+          title: clip.title || `Clipe ${index + 1}`,
+          description: clip.description || 'Descrição gerada automaticamente',
+          hashtags: Array.isArray(clip.hashtags) ? clip.hashtags : [],
+          previewUrl: clip.previewUrl || clip.downloadUrl,
+          downloadUrl: clip.downloadUrl || clip.previewUrl,
+          thumbnailUrl: clip.thumbnailUrl,
+          duration: clip.duration || 45,
+          status: clip.status || 'ready',
+          transcript: clip.transcript
+        };
+
+        // Gerar Inteligência Viral para clipes prontos
+        if (clipData.status === 'ready') {
+          clipData.viralIntel = generateViralIntelligence(clipData);
+        }
+
+        return clipData;
+      });
+
+      // Adicionar ranking baseado no score viral
+      const clipsWithRanking = validClips
+        .map((clip, idx) => ({ ...clip, originalIndex: idx }))
+        .sort((a, b) => (b.viralIntel?.overallScore || 0) - (a.viralIntel?.overallScore || 0))
+        .map((clip, idx) => {
+          if (clip.viralIntel) {
+            clip.viralIntel.ranking = {
+              position: idx + 1,
+              total: validClips.length,
+              percentile: Math.round((1 - idx / validClips.length) * 100)
+            };
+          }
+          return clip;
+        })
+        .sort((a, b) => a.originalIndex - b.originalIndex); // Manter ordem original
+
+      setDebugInfo((prev: any) => ({ ...prev, processed: true, strategy: 'clips_array', foundClips: clipsWithRanking.length }));
+      setClips(clipsWithRanking);
+      log.info('[useClipList] ✅ Successfully set clips from result.clips', { count: clipsWithRanking.length });
       return;
     }
 

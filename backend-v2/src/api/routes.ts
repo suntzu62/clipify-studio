@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
+import { z } from 'zod';
 import {
   CreateJobSchema,
   type JobData,
@@ -10,16 +12,30 @@ import {
   DEFAULT_SUBTITLE_PREFERENCES,
   type ProjectConfig,
 } from '../types/index.js';
-import { addVideoJob, getJobStatus, cancelJob, getQueueHealth } from '../jobs/queue.js';
+import { addVideoJob, getJobStatus, cancelJob, getQueueHealth, videoQueue } from '../jobs/queue.js';
 import { createLogger } from '../config/logger.js';
 import { createClient } from '@supabase/supabase-js';
 import { env } from '../config/env.js';
 import { redis, setTempConfig, getTempConfig, deleteTempConfig } from '../config/redis.js';
 import { registerSocialMediaRoutes } from './social-media.js';
+import { registerAuthRoutes } from './auth.routes.js';
+import { reprocessClip } from '../services/clip-reprocessor.js';
+import * as db from '../services/database.service.js';
 
 const logger = createLogger('routes');
+const dbJobs = db.jobs;
+
+// Criar cliente Supabase global com service_key (bypassa RLS automaticamente) - apenas se configurado
+const supabaseClient = env.supabase.url && env.supabase.serviceKey
+  ? createClient(env.supabase.url, env.supabase.serviceKey)
+  : null;
 
 export async function registerRoutes(app: FastifyInstance) {
+  // ============================================
+  // AUTHENTICATION ROUTES
+  // ============================================
+  await registerAuthRoutes(app);
+
   // ============================================
   // HEALTH CHECK
   // ============================================
@@ -31,6 +47,52 @@ export async function registerRoutes(app: FastifyInstance) {
       timestamp: new Date().toISOString(),
       queue: queueHealth,
     };
+  });
+
+  // ============================================
+  // CREATE JOB FROM UPLOAD (after file is uploaded to Supabase)
+  // ============================================
+  app.post('/jobs/from-upload', async (request, reply) => {
+    const schema = z.object({
+      userId: z.string().uuid(),
+      storagePath: z.string(),
+      fileName: z.string(),
+      targetDuration: z.number().min(15).max(90).default(60),
+      clipCount: z.number().min(1).max(10).default(5),
+    });
+
+    const parsed = schema.safeParse(request.body);
+
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'INVALID_INPUT',
+        message: 'Invalid request body',
+        details: parsed.error.format(),
+      });
+    }
+
+    const input = parsed.data;
+    const jobId = `job_${randomUUID().replace(/-/g, '')}`;
+
+    const jobData: JobData = {
+      jobId,
+      userId: input.userId,
+      sourceType: 'upload',
+      uploadPath: input.storagePath,
+      targetDuration: input.targetDuration,
+      clipCount: input.clipCount,
+      createdAt: new Date(),
+    };
+
+    await addVideoJob(jobData);
+
+    logger.info({ jobId, userId: input.userId, storagePath: input.storagePath }, 'Job created from upload');
+
+    return reply.status(201).send({
+      jobId,
+      status: 'queued',
+      message: 'Job created successfully from upload',
+    });
   });
 
   // ============================================
@@ -91,6 +153,31 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // ============================================
+  // LIST ALL JOBS FOR USER
+  // ============================================
+  app.get('/jobs', async (request, reply) => {
+    try {
+      // Para desenvolvimento, usar um userId fixo ou extrair do JWT/session
+      // TODO: Implementar autenticação JWT adequada
+      const userId = (request as any).user?.id || 'dev-user';
+
+      logger.info({ userId }, 'Fetching all jobs for user');
+
+      const userJobs = await dbJobs.findByUserId(userId);
+
+      logger.info({ userId, count: userJobs.length }, 'Found jobs for user');
+
+      return reply.send(userJobs);
+    } catch (error: any) {
+      logger.error({ error: error.message }, 'Failed to fetch user jobs');
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to fetch jobs',
+      });
+    }
+  });
+
+  // ============================================
   // GET JOB STATUS
   // ============================================
   app.get('/jobs/:jobId', async (request, reply) => {
@@ -112,7 +199,7 @@ export async function registerRoutes(app: FastifyInstance) {
         ...result,
         clips: result.clips.map((clip: any) => {
           // Use proxy URL instead of direct Supabase URL (workaround for private buckets)
-          const proxyUrl = `http://localhost:3001/clips/${jobId}/${clip.id}.mp4`;
+          const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
 
           return {
             id: clip.id,
@@ -254,7 +341,7 @@ export async function registerRoutes(app: FastifyInstance) {
           result = {
             ...result,
             clips: result.clips.map((clip: any) => {
-              const proxyUrl = `http://localhost:3001/clips/${jobId}/${clip.id}.mp4`;
+              const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
               return {
                 id: clip.id,
                 title: clip.title,
@@ -320,25 +407,78 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // ============================================
-  // CANCEL JOB
+  // UPDATE JOB (e.g., update title)
+  // ============================================
+  app.patch('/jobs/:jobId', async (request, reply) => {
+    const { jobId } = request.params as { jobId: string };
+    const updates = request.body as { title?: string };
+
+    try {
+      // Verificar se job existe
+      const job = await dbJobs.findById(jobId);
+
+      if (!job) {
+        return reply.status(404).send({
+          error: 'JOB_NOT_FOUND',
+          message: `Job ${jobId} not found`,
+        });
+      }
+
+      // Atualizar no banco de dados
+      const updatedJob = await dbJobs.update(jobId, updates);
+
+      logger.info({ jobId, updates }, 'Job updated successfully');
+
+      return reply.send(updatedJob);
+    } catch (error: any) {
+      logger.error({ error: error.message, jobId }, 'Failed to update job');
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to update job',
+      });
+    }
+  });
+
+  // ============================================
+  // DELETE JOB
   // ============================================
   app.delete('/jobs/:jobId', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
 
-    const cancelled = await cancelJob(jobId);
+    try {
+      // 1. Cancelar job na fila se ainda estiver ativo
+      await cancelJob(jobId);
 
-    if (!cancelled) {
-      return reply.status(404).send({
-        error: 'JOB_NOT_FOUND',
-        message: `Job ${jobId} not found`,
+      // 2. Deletar do banco de dados
+      const job = await dbJobs.findById(jobId);
+
+      if (!job) {
+        return reply.status(404).send({
+          error: 'JOB_NOT_FOUND',
+          message: `Job ${jobId} not found`,
+        });
+      }
+
+      // Deletar todos os clips associados
+      await db.clips.deleteByJobId(jobId);
+
+      // Deletar job
+      await dbJobs.delete(jobId);
+
+      logger.info({ jobId }, 'Job and associated clips deleted successfully');
+
+      return {
+        jobId,
+        status: 'deleted',
+        message: 'Job deleted successfully',
+      };
+    } catch (error: any) {
+      logger.error({ error: error.message, jobId }, 'Failed to delete job');
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to delete job',
       });
     }
-
-    return {
-      jobId,
-      status: 'cancelled',
-      message: 'Job cancelled successfully',
-    };
   });
 
   // ============================================
@@ -584,6 +724,300 @@ export async function registerRoutes(app: FastifyInstance) {
     }
   });
 
+  // ============================================
+  // CLIP REPROCESSING (FAST)
+  // ============================================
+
+  // Reprocess a single clip with updated subtitle preferences (ultra-fast)
+  app.post('/jobs/:jobId/clips/:clipId/reprocess', async (request, reply) => {
+    const { jobId, clipId } = request.params as { jobId: string; clipId: string };
+
+    logger.info({ jobId, clipId }, 'Starting fast clip reprocessing');
+
+    try {
+      // Usar cliente Supabase global (já configurado com service_key)
+      const supabase = supabaseClient;
+
+      // 1. Buscar job do BullMQ (dados dos vídeos existentes estão aqui)
+      const job = await videoQueue.getJob(jobId);
+
+      if (!job) {
+        logger.error({ jobId }, 'Job not found in queue');
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Job not found',
+        });
+      }
+
+      // 2. Buscar resultado do job (contém clips e transcripts)
+      const result = job.returnvalue;
+
+      if (!result || !result.clips) {
+        logger.error({ jobId }, 'Job result not found');
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Job result not available. Job may still be processing.',
+        });
+      }
+
+      // 3. Encontrar o clip específico no resultado
+      const clipData = result.clips.find((c: any) => c.id === clipId);
+
+      if (!clipData) {
+        logger.error({ clipId, jobId }, 'Clip not found in job result');
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Clip not found',
+        });
+      }
+
+      // 5. Buscar preferências salvas desse clip
+      const prefKey = `subtitle:${jobId}:${clipId}`;
+      const prefData = await redis.get(prefKey);
+
+      if (!prefData) {
+        return reply.status(400).send({
+          error: 'NO_PREFERENCES',
+          message: 'No subtitle preferences found for this clip. Please save preferences first.',
+        });
+      }
+
+      const subtitlePreferences = JSON.parse(prefData);
+
+      // 6. Buscar dados de reprocessamento do Redis
+      const reprocessDataKey = `reprocess:${jobId}`;
+      let reprocessData = await redis.get(reprocessDataKey);
+      let originalVideoPath;
+      let transcript;
+      let wasRedownloaded = false; // Flag para saber se precisa limpar o vídeo depois
+
+      if (!reprocessData) {
+        // FALLBACK: Vídeo antigo - não tem dados no Redis
+        logger.warn({ jobId }, 'Reprocess data not in Redis, trying database + YouTube re-download');
+
+        // 1. Buscar transcript do banco de dados
+        const { data: clipDbData, error: clipDbError } = await supabase
+          .from('clips')
+          .select('transcript, start_time, end_time')
+          .eq('id', clipId)
+          .single();
+
+        if (clipDbError || !clipDbData) {
+          logger.error({ jobId, clipId, error: clipDbError?.message }, 'Clip not found in database');
+          return reply.status(404).send({
+            error: 'CLIP_NOT_FOUND',
+            message: 'Clip not found in database',
+          });
+        }
+
+        if (!clipDbData.transcript) {
+          logger.error({ jobId, clipId }, 'Transcript not found in database');
+          return reply.status(400).send({
+            error: 'TRANSCRIPT_NOT_FOUND',
+            message:
+              'Transcript not found in database. This video was processed before transcript storage was implemented.',
+          });
+        }
+
+        transcript = clipDbData.transcript;
+        logger.info({ jobId, clipId, hasTranscript: true }, 'Found transcript in database');
+
+        // 2. Re-download vídeo do YouTube (vídeo original provavelmente foi deletado do /tmp)
+        const jobData = job.data;
+
+        if (!jobData.youtubeUrl) {
+          logger.error({ jobId }, 'YouTube URL not available for re-download');
+          return reply.status(400).send({
+            error: 'NO_YOUTUBE_URL',
+            message: 'Cannot re-download video: YouTube URL not available',
+          });
+        }
+
+        logger.info({ jobId, youtubeUrl: jobData.youtubeUrl }, 'Re-downloading video from YouTube for reprocessing');
+
+        // Importar dinamicamente o serviço de download
+        const { downloadVideo } = await import('../services/download.js');
+
+        try {
+          const downloadResult = await downloadVideo('youtube', jobData.youtubeUrl, undefined);
+          originalVideoPath = downloadResult.videoPath;
+          wasRedownloaded = true; // Marcar que foi re-baixado para cleanup posterior
+          logger.info({ jobId, videoPath: originalVideoPath }, 'Video re-downloaded successfully');
+        } catch (downloadError: any) {
+          logger.error({ jobId, error: downloadError.message }, 'Failed to re-download video from YouTube');
+          return reply.status(500).send({
+            error: 'DOWNLOAD_FAILED',
+            message: `Failed to re-download video from YouTube: ${downloadError.message}`,
+          });
+        }
+      } else {
+        const parsedData = JSON.parse(reprocessData);
+        const cachedVideoPath = parsedData.videoPath;
+        transcript = parsedData.transcript;
+
+        logger.info({ jobId, cachedVideoPath }, 'Found reprocess data in Redis, checking if video still exists');
+
+        // VERIFICAR se o arquivo ainda existe (pode ter sido deletado do /tmp)
+        try {
+          await fs.access(cachedVideoPath);
+          originalVideoPath = cachedVideoPath;
+          logger.info({ jobId, videoPath: originalVideoPath }, 'Original video file still exists, using cached version');
+        } catch {
+          logger.warn({ jobId, cachedVideoPath }, 'Cached video file no longer exists, will re-download from YouTube');
+
+          // Re-download do YouTube
+          const jobData = job.data;
+
+          if (!jobData.youtubeUrl) {
+            logger.error({ jobId }, 'YouTube URL not available for re-download');
+            return reply.status(400).send({
+              error: 'NO_YOUTUBE_URL',
+              message: 'Cannot re-download video: YouTube URL not available',
+            });
+          }
+
+          logger.info({ jobId, youtubeUrl: jobData.youtubeUrl }, 'Re-downloading video from YouTube');
+
+          const { downloadVideo } = await import('../services/download.js');
+
+          try {
+            const downloadResult = await downloadVideo('youtube', jobData.youtubeUrl, undefined);
+            originalVideoPath = downloadResult.videoPath;
+            wasRedownloaded = true; // Marcar que foi re-baixado para cleanup posterior
+            logger.info({ jobId, videoPath: originalVideoPath }, 'Video re-downloaded successfully');
+          } catch (downloadError: any) {
+            logger.error({ jobId, error: downloadError.message }, 'Failed to re-download video from YouTube');
+            return reply.status(500).send({
+              error: 'DOWNLOAD_FAILED',
+              message: `Failed to re-download video from YouTube: ${downloadError.message}`,
+            });
+          }
+        }
+      }
+
+      // 7. Buscar dados do clip no Redis ou usar dados do resultado do job
+      const clipReprocessKey = `reprocess:${jobId}:${clipId}`;
+      let clipReprocessData = await redis.get(clipReprocessKey);
+      let clipInfo;
+
+      if (!clipReprocessData) {
+        // FALLBACK: Usar dados do clipData do job result
+        logger.warn({ clipId }, 'Clip reprocess data not in Redis, using job result');
+        clipInfo = {
+          start: clipData.start,
+          end: clipData.end,
+          title: clipData.title,
+        };
+      } else {
+        clipInfo = JSON.parse(clipReprocessData);
+      }
+
+      logger.info({ jobId, clipId, subtitlePreferences }, 'All data loaded, starting reprocess');
+
+      // 8. Responder imediatamente e processar em background
+      reply.status(202).send({
+        jobId,
+        clipId,
+        status: 'processing',
+        message: 'Clip reprocessing started',
+      });
+
+      // 9. Processar em background (não bloquear a resposta)
+      (async () => {
+        try {
+          // Usar cliente Supabase global (já tem service_key que bypassa RLS)
+          const supabaseBg = supabaseClient;
+
+          if (!originalVideoPath) {
+            throw new Error('Original video path not found in job data');
+          }
+
+          // Reprocessar clip
+          const result = await reprocessClip({
+            jobId,
+            clipId,
+            originalVideoPath,
+            clipData: {
+              start_time: clipInfo.start,
+              end_time: clipInfo.end,
+              transcript,
+            },
+            subtitlePreferences,
+            onProgress: async (progress, message) => {
+              logger.info({ jobId, clipId, progress, message }, 'Reprocess progress');
+            },
+          });
+
+          logger.info({ jobId, clipId, result }, 'Reprocessing completed, uploading to storage');
+
+          // Upload para Supabase Storage usando o serviço correto
+          const bucket = env.supabase.bucket; // 'raw'
+          const videoStoragePath = `clips/${jobId}/${clipId}.mp4`;
+          const thumbnailStoragePath = `clips/${jobId}/${clipId}.jpg`;
+
+          // Importar serviço de upload
+          const { uploadFile } = await import('../services/storage.js');
+
+          // Upload vídeo
+          const videoUpload = await uploadFile(
+            bucket,
+            videoStoragePath,
+            result.videoPath,
+            'video/mp4'
+          );
+
+          // Upload thumbnail
+          const thumbnailUpload = await uploadFile(
+            bucket,
+            thumbnailStoragePath,
+            result.thumbnailPath,
+            'image/jpeg'
+          );
+
+          // Atualizar banco de dados
+          const { error: updateError } = await supabaseBg
+            .from('clips')
+            .update({
+              preview_url: videoUpload.publicUrl,
+              download_url: videoUpload.publicUrl,
+              thumbnail_url: thumbnailUpload.publicUrl,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', clipId);
+
+          if (updateError) {
+            throw new Error(`Database update failed: ${updateError.message}`);
+          }
+
+          logger.info({ jobId, clipId }, 'Clip reprocessed and updated successfully');
+
+          // Limpar arquivos temporários
+          await fs.rm(result.videoPath, { force: true });
+          await fs.rm(result.thumbnailPath, { force: true });
+
+          // Se vídeo foi re-baixado do YouTube, limpar também
+          if (wasRedownloaded && originalVideoPath) {
+            const { cleanupVideo } = await import('../services/download.js');
+            await cleanupVideo(originalVideoPath);
+            logger.info({ jobId, videoPath: originalVideoPath }, 'Cleaned up re-downloaded video');
+          }
+        } catch (bgError: any) {
+          logger.error(
+            { error: bgError.message, stack: bgError.stack, jobId, clipId },
+            'Background reprocessing failed'
+          );
+        }
+      })();
+
+    } catch (error: any) {
+      logger.error({ error: error.message, jobId, clipId }, 'Failed to reprocess clip');
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to reprocess clip',
+      });
+    }
+  });
+
   // Get global subtitle preferences for the entire job
   app.get('/jobs/:jobId/subtitle-settings', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
@@ -615,27 +1049,58 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // ============================================
-  // PROXY VIDEO FILES (Temporary workaround for private buckets)
+  // SERVE VIDEO FILES (From local storage or Supabase)
   // ============================================
   app.get('/clips/:jobId/:filename', async (request, reply) => {
     const { jobId, filename } = request.params as { jobId: string; filename: string };
+    const { download } = request.query as { download?: string };
 
     try {
-      const supabase = createClient(
-        env.supabase.url,
-        env.supabase.serviceKey
-      );
-
       const filePath = `clips/${jobId}/${filename}`;
 
-      logger.info({ filePath }, 'Proxying video file');
+      // Se Supabase não está configurado, servir do armazenamento local
+      if (!supabaseClient) {
+        logger.info({ filePath, download }, 'Serving video file from local storage');
 
-      const { data, error } = await supabase.storage
+        const { join } = await import('path');
+        const storagePath = env.localStoragePath || './uploads';
+        const localPath = join(storagePath, filePath);
+
+        try {
+          const fileBuffer = await fs.readFile(localPath);
+
+          // Set proper headers for video streaming
+          const contentType = filename.endsWith('.jpg') ? 'image/jpeg' : 'video/mp4';
+          reply.header('Content-Type', contentType);
+          reply.header('Accept-Ranges', 'bytes');
+          reply.header('Cache-Control', 'public, max-age=31536000');
+          reply.header('Access-Control-Allow-Origin', '*');
+
+          // If download parameter is present, force download
+          if (download === 'true') {
+            reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+          }
+
+          logger.info({ filePath, size: fileBuffer.length }, 'Video file sent successfully from local storage');
+          return reply.send(fileBuffer);
+        } catch (fileError: any) {
+          logger.error({ error: fileError.message, localPath }, 'File not found in local storage');
+          return reply.status(404).send({
+            error: 'FILE_NOT_FOUND',
+            message: `File not found: ${filePath}`,
+          });
+        }
+      }
+
+      // Caso contrário, buscar do Supabase
+      logger.info({ filePath, download }, 'Proxying video file from Supabase');
+
+      const { data, error } = await supabaseClient.storage
         .from('raw')
         .download(filePath);
 
       if (error || !data) {
-        logger.error({ error, filePath }, 'File not found in storage');
+        logger.error({ error, filePath }, 'File not found in Supabase storage');
         return reply.status(404).send({
           error: 'FILE_NOT_FOUND',
           message: `File not found: ${filePath}`,
@@ -643,17 +1108,23 @@ export async function registerRoutes(app: FastifyInstance) {
       }
 
       // Set proper headers for video streaming
-      reply.header('Content-Type', 'video/mp4');
+      const contentType = filename.endsWith('.jpg') ? 'image/jpeg' : 'video/mp4';
+      reply.header('Content-Type', contentType);
       reply.header('Accept-Ranges', 'bytes');
       reply.header('Cache-Control', 'public, max-age=31536000');
       reply.header('Access-Control-Allow-Origin', '*');
 
+      // If download parameter is present, force download
+      if (download === 'true') {
+        reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      }
+
       const buffer = Buffer.from(await data.arrayBuffer());
-      logger.info({ filePath, size: buffer.length }, 'Video file sent successfully');
+      logger.info({ filePath, size: buffer.length }, 'Video file sent successfully from Supabase');
 
       return reply.send(buffer);
     } catch (error: any) {
-      logger.error({ error: error.message, jobId, filename }, 'Failed to proxy video file');
+      logger.error({ error: error.message, jobId, filename }, 'Failed to serve video file');
       return reply.status(500).send({
         error: 'INTERNAL_ERROR',
         message: 'Failed to retrieve video file',

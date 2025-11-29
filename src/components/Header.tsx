@@ -66,7 +66,7 @@ const Header = () => {
       <div className="container mx-auto px-4 lg:px-6">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link to="/" className="flex items-center space-x-2 group">
+          <Link to={user ? '/clip-lab' : '/'} className="flex items-center space-x-2 group">
             <div className="h-8 w-8 bg-gradient-primary rounded-lg flex items-center justify-center group-hover:shadow-glow transition-shadow">
               <span className="text-primary-foreground text-lg font-bold">C</span>
             </div>

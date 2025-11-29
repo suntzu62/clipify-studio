@@ -105,18 +105,18 @@ export function generateASS(
     maxCharsPerLine,
   } = preferences;
 
-  // ASS Header
+  // ASS Header - Configurado para 720x1280 (9:16) - resolução otimizada para qualidade
   const header = `[Script Info]
 Title: Generated Subtitles
 ScriptType: v4.00+
 WrapStyle: 0
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: 720
+PlayResY: 1280
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${font},${fontSize},${hexToAssColor(fontColor)},${hexToAssColor(fontColor)},${hexToAssColor(outlineColor)},${hexToAssColor(backgroundColor)}${opacityToAssAlpha(backgroundOpacity)},${bold ? '-1' : '0'},${italic ? '-1' : '0'},0,0,100,100,0,0,${outline ? '1' : '0'},${outline ? outlineWidth : '0'},${shadow ? '1' : '0'},${getAssAlignment(position)},10,10,${preferences.marginVertical},1
+Style: Default,${font},${Math.round(fontSize * 0.67)},${hexToAssColor(fontColor)},${hexToAssColor(fontColor)},${hexToAssColor(outlineColor)},${hexToAssColor(backgroundColor)}${opacityToAssAlpha(backgroundOpacity)},${bold ? '-1' : '0'},${italic ? '-1' : '0'},0,0,100,100,0,0,${outline ? '1' : '0'},${outline ? outlineWidth : '0'},${shadow ? '2' : '0'},${getAssAlignment(position)},30,30,${Math.round(preferences.marginVertical * 0.67)},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

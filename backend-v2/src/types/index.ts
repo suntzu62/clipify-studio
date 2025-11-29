@@ -31,7 +31,7 @@ export const SubtitlePreferencesSchema = z.object({
   shadow: z.boolean(),
   shadowColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
   maxCharsPerLine: z.number().min(20).max(60),
-  marginVertical: z.number().min(20).max(100),
+  marginVertical: z.number().min(20).max(300),
 });
 
 export type SubtitlePreferencesInput = z.infer<typeof SubtitlePreferencesSchema>;
@@ -215,7 +215,7 @@ export const DEFAULT_SUBTITLE_PREFERENCES: SubtitlePreferences = {
   shadow: true,  // Ativado para melhor legibilidade
   shadowColor: '#000000',
   maxCharsPerLine: 28,  // Reduzido para 28 - linhas mais curtas e fáceis de ler
-  marginVertical: 80,  // Aumentado para 80px - mais espaço da borda
+  marginVertical: 260,  // 260px da borda inferior - legendas mais altas para não serem cobertas pelo nome no YouTube
 };
 
 export interface Clip {

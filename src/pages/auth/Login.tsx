@@ -13,7 +13,7 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn, signInWithGoogle, user } = useAuth();
+  const { signIn, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -44,8 +44,8 @@ const Login = () => {
     if (error) {
       toast({
         title: 'Erro ao fazer login',
-        description: error.message === 'Invalid login credentials' 
-          ? 'Email ou senha incorretos' 
+        description: error.message === 'Invalid login credentials'
+          ? 'Email ou senha incorretos'
           : error.message,
         variant: 'destructive',
       });
@@ -54,12 +54,15 @@ const Login = () => {
         title: 'Login realizado com sucesso!',
         description: 'Bem-vindo de volta ao Cortaí',
       });
+      // Redirecionar imediatamente após login bem-sucedido
+      navigate(from, { replace: true });
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    setIsLoading(true);
-    await signInWithGoogle();
+  const handleGoogleSignIn = () => {
+    // Redirecionar para o backend que vai redirecionar para o Google
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    window.location.href = `${backendUrl}/auth/google`;
   };
 
   return (

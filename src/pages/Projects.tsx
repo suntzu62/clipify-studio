@@ -12,9 +12,30 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import NewProjectDialog from '@/components/projects/NewProjectDialog';
-import { listProjects, type Project } from '@/services/projects';
+import { ProjectCardPro } from '@/components/projects/ProjectCardPro';
+import { listProjects, deleteProject, updateProject, type Project } from '@/services/projects';
 import { useToast } from '@/hooks/use-toast';
 
 const Projects = () => {
@@ -24,6 +45,17 @@ const Projects = () => {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Project[]>([]);
 
+  // Edit project state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
+  const [newTitle, setNewTitle] = useState('');
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  // Delete project state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const fetchProjects = async () => {
     try {
       setLoading(true);
@@ -32,9 +64,10 @@ const Projects = () => {
       console.log('[Projects] Fetched projects:', data.length, 'items');
       console.log('[Projects] Project data:', data);
       setItems(data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[Projects] Error fetching projects:', err);
-      toast({ title: 'Erro ao carregar projetos', description: err?.message ?? 'Tente novamente.', variant: 'destructive' });
+      const message = err instanceof Error ? err.message : 'Tente novamente.';
+      toast({ title: 'Erro ao carregar projetos', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -44,18 +77,94 @@ const Projects = () => {
     fetchProjects();
   }, []);
 
+  // Handle edit project
+  const handleEditProject = (project: Project) => {
+    setProjectToEdit(project);
+    setNewTitle(project.title || '');
+    setEditDialogOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!projectToEdit) return;
+
+    try {
+      setIsUpdating(true);
+      await updateProject(projectToEdit.id, { title: newTitle });
+
+      // Update local state
+      setItems(items.map(item =>
+        item.id === projectToEdit.id
+          ? { ...item, title: newTitle }
+          : item
+      ));
+
+      toast({
+        title: 'Projeto atualizado',
+        description: 'O título do projeto foi atualizado com sucesso',
+      });
+
+      setEditDialogOpen(false);
+      setProjectToEdit(null);
+      setNewTitle('');
+    } catch (error) {
+      console.error('[Projects] Error updating project:', error);
+      toast({
+        title: 'Erro ao atualizar projeto',
+        description: error instanceof Error ? error.message : 'Tente novamente',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Handle delete project
+  const handleDeleteProject = (project: Project) => {
+    setProjectToDelete(project);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!projectToDelete) return;
+
+    try {
+      setIsDeleting(true);
+      await deleteProject(projectToDelete.id);
+
+      // Update local state
+      setItems(items.filter(item => item.id !== projectToDelete.id));
+
+      toast({
+        title: 'Projeto excluído',
+        description: 'O projeto foi excluído com sucesso',
+      });
+
+      setDeleteDialogOpen(false);
+      setProjectToDelete(null);
+    } catch (error) {
+      console.error('[Projects] Error deleting project:', error);
+      toast({
+        title: 'Erro ao excluir projeto',
+        description: error instanceof Error ? error.message : 'Tente novamente',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-6">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center space-x-2">
+            <Link to="/clip-lab" className="flex items-center space-x-2 hover:opacity-90 transition-opacity">
               <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">
                 <span className="text-white font-bold text-sm">C</span>
               </div>
               <span className="text-xl font-bold text-foreground">Cortaí</span>
-            </div>
+            </Link>
 
             <div className="flex items-center space-x-4">
               {/* User Menu Dropdown */}
@@ -251,39 +360,32 @@ const Projects = () => {
                 </Card>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {items.map((p) => (
-                  <Link key={p.id} to={`/projects/${p.id}`}>
-                    <Card className="hover:shadow-lg transition-all duration-200 cursor-pointer hover:border-primary/50 h-full">
-                      <CardHeader>
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <Play className="w-4 h-4 text-primary" />
-                          {p.source === 'youtube' ? 'Vídeo do YouTube' :
-                           p.file_name || p.title || 'Projeto sem título'}
-                        </CardTitle>
-                        <CardDescription className="truncate">
-                          {p.youtube_url || p.storage_path || 'Sem origem'}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                          <Badge variant={p.status === 'completed' ? 'default' : 'secondary'}>
-                            {p.status === 'completed' ? '✅ Concluído' :
-                             p.status === 'active' ? '🚀 Processando' :
-                             p.status === 'failed' ? '⚠️ Erro' : '⏰ Na fila'}
-                          </Badge>
-                          {p.progress !== null && p.progress > 0 && (
-                            <span className="text-xs">({p.progress}%)</span>
-                          )}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {new Date(p.created_at).toLocaleString('pt-BR')}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ))}
-              </div>
+              <>
+                {/* Header com contador e filtros */}
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-xl font-bold">
+                      {items.length} {items.length === 1 ? 'Projeto' : 'Projetos'}
+                    </h2>
+                    <p className="text-sm text-muted-foreground">
+                      {items.filter(p => p.status === 'completed').length} concluídos, {' '}
+                      {items.filter(p => p.status === 'active').length} em processamento
+                    </p>
+                  </div>
+                </div>
+
+                {/* Grid de projetos com cards visuais */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {items.map((project) => (
+                    <ProjectCardPro
+                      key={project.id}
+                      project={project}
+                      onEdit={handleEditProject}
+                      onDelete={handleDeleteProject}
+                    />
+                  ))}
+                </div>
+              </>
             )}
 
             <NewProjectDialog
@@ -291,6 +393,69 @@ const Projects = () => {
               onOpenChange={setDialogOpen}
               onCreated={fetchProjects}
             />
+
+            {/* Edit Project Dialog */}
+            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Editar Projeto</DialogTitle>
+                  <DialogDescription>
+                    Atualize o título do seu projeto
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="title">Título do Projeto</Label>
+                    <Input
+                      id="title"
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      placeholder="Digite o título do projeto"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setEditDialogOpen(false)}
+                    disabled={isUpdating}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={handleSaveEdit}
+                    disabled={isUpdating || !newTitle.trim()}
+                  >
+                    {isUpdating ? 'Salvando...' : 'Salvar'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Delete Project Confirmation */}
+            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Esta ação não pode ser desfeita. Isso irá excluir permanentemente o projeto
+                    {projectToDelete?.title && ` "${projectToDelete.title}"`} e todos os seus clips.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={isDeleting}>
+                    Cancelar
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleConfirmDelete}
+                    disabled={isDeleting}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {isDeleting ? 'Excluindo...' : 'Excluir'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </main>
         </div>
       </div>

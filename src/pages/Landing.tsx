@@ -7,7 +7,7 @@ import LazyPricing from "@/components/LazyPricing";
 import LazyFooter from "@/components/LazyFooter";
 import { DualInputHero } from "@/components/DualInputHero";
 import DemoModal from "@/components/DemoModal";
-import { LogoStrip, Testimonials, FAQ, CTA } from "@/components/landing";
+import { FAQ, CTA } from "@/components/landing";
 
 export default function Landing() {
   const [showDemo, setShowDemo] = useState(false);
@@ -78,17 +78,11 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* Logo Strip */}
-        <LogoStrip />
-
         {/* Features */}
         <LazyFeatures />
 
         {/* How It Works */}
         <LazyHowItWorks />
-
-        {/* Testimonials */}
-        <Testimonials />
 
         {/* Pricing */}
         <LazyPricing />

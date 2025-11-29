@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Zap, Loader2, CheckCircle2, XCircle, Sparkles, Captions, Scissors, Upload as UploadIcon } from 'lucide-react';
 import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
 import { createTempConfig } from '@/lib/jobs-api';
+import { FileUploadZone } from '@/components/FileUploadZone';
 
 interface QuickCreateProps {
   userId: string;
@@ -219,12 +220,28 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
           </Badge>
         </div>
 
-        {/* Drag & Drop Placeholder (futuro) */}
-        <div className="border-2 border-dashed border-muted rounded-lg p-6 text-center">
-          <UploadIcon className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">Ou arraste um arquivo de vídeo aqui</p>
-          <p className="text-xs text-muted-foreground/70 mt-1">Upload em breve!</p>
+        {/* Separador */}
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-background px-2 text-muted-foreground">
+              ou faça upload direto
+            </span>
+          </div>
         </div>
+
+        {/* Upload Zone */}
+        <FileUploadZone
+          className="border-primary/20"
+          onUploadSuccess={(jobId) => {
+            toast({
+              title: "Upload concluído! ✨",
+              description: "Redirecionando para o projeto..."
+            });
+          }}
+        />
       </CardContent>
     </Card>
   );

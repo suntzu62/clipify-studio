@@ -31,8 +31,12 @@ await app.register(cors, {
 // MIDDLEWARE DE AUTENTICAÇÃO
 // ============================================
 app.addHook('onRequest', async (request, reply) => {
-  // Skip auth para health check e proxy de vídeos
-  if (request.url === '/health' || request.url.startsWith('/clips/')) {
+  // Skip auth para health check, proxy de vídeos e OAuth routes
+  if (
+    request.url === '/health' ||
+    request.url.startsWith('/clips/') ||
+    request.url.startsWith('/auth/google')
+  ) {
     return;
   }
 
