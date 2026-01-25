@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useState, useEffect, useRef, FormEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -10,6 +11,7 @@ import { toast } from "@/hooks/use-toast";
 import { createTempConfig } from "@/lib/jobs-api";
 import posthog from "posthog-js";
 import { Loader2, Youtube, Cloud, Video, Upload } from "lucide-react";
+import { FileUploadZone } from "@/components/FileUploadZone";
 
 const DEMO_URL = "https://www.youtube.com/watch?v=Zi_XLOBDo_Y"; // Ajuste conforme necessário
 
@@ -52,7 +54,7 @@ export default function Hero() {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const { user, getToken } = useAuth();
   const navigate = useNavigate();
   const pendingUrlRef = useRef<string | null>(null);
@@ -109,20 +111,12 @@ export default function Hero() {
   };
 
   const pickFile = () => {
-    fileInputRef.current?.click();
-  };
-
-  const onFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const maxBytes = 2 * 1024 * 1024 * 1024; // 2GB
-    if (file.size > maxBytes) {
-      toast({ title: 'Arquivo muito grande', description: 'Tamanho máximo: 2GB', variant: 'destructive' });
-      e.target.value = '';
+    if (!user) {
+      toast({ title: 'Login necessário', description: 'Faça login para enviar arquivos', variant: 'destructive' });
+      navigate('/auth/login');
       return;
     }
-    toast({ title: 'Upload local em breve', description: 'Cole um link do YouTube por enquanto.' });
-    e.target.value = '';
+    setShowUploadModal(true);
   };
 
   return (
@@ -170,13 +164,6 @@ export default function Hero() {
                   <Button variant="ghost" type="button" onClick={pickFile} className="h-8 px-2" aria-label="Enviar arquivo local">
                     <Upload className="h-4 w-4 mr-1" /> Enviar arquivo
                   </Button>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    className="hidden"
-                    accept=".mp4,.mov,video/mp4,video/quicktime"
-                    onChange={onFileSelected}
-                  />
                   <Button variant="ghost" type="button" onClick={() => setUrl(DEMO_URL)} className="h-8 px-2" aria-label="Usar vídeo de demonstração">
                     Usar vídeo de demonstração
                   </Button>
@@ -203,6 +190,20 @@ export default function Hero() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={showUploadModal} onOpenChange={setShowUploadModal}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Enviar vídeo</DialogTitle>
+            <DialogDescription>
+              Arraste seu vídeo ou clique para selecionar. Formatos: MP4, MOV, AVI, MKV (máx. 5GB)
+            </DialogDescription>
+          </DialogHeader>
+          <FileUploadZone
+            onUploadSuccess={() => setShowUploadModal(false)}
+          />
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

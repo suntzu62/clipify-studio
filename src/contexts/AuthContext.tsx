@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 interface User {
   id: string;
@@ -23,6 +22,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
   getToken: () => Promise<string | null>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -43,54 +43,43 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check for existing JWT token on mount
+  const fetchUser = async () => {
+    console.log('[AuthContext] Checking authentication...');
+    console.log('[AuthContext] BACKEND_URL:', BACKEND_URL);
+
+    try {
+      console.log('[AuthContext] Calling /auth/me (cookie-based auth)');
+      const response = await fetch(`${BACKEND_URL}/auth/me`, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Send httpOnly cookies automatically
+      });
+
+      console.log('[AuthContext] /auth/me response status:', response.status);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[AuthContext] User authenticated successfully:', data.user.email);
+        setUser(data.user);
+      } else {
+        // Token inválido ou expirado (cookie será limpo no logout)
+        const errorText = await response.text();
+        console.error('[AuthContext] Authentication failed:', response.status, errorText);
+        setUser(null);
+      }
+    } catch (error) {
+      console.error('[AuthContext] Failed to fetch user:', error);
+      setUser(null);
+    }
+  };
+
+  // Check for existing JWT token on mount (token is in httpOnly cookie)
   useEffect(() => {
     const checkAuth = async () => {
-      console.log('[AuthContext] Checking authentication...');
-      const token = localStorage.getItem('access_token');
-      console.log('[AuthContext] Token from localStorage:', token ? 'EXISTS' : 'NOT FOUND');
-      console.log('[AuthContext] BACKEND_URL:', BACKEND_URL);
-      console.log('[AuthContext] API_KEY:', API_KEY ? 'SET' : 'MISSING');
-
-      if (!token) {
-        console.log('[AuthContext] No token found, user not authenticated');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        console.log('[AuthContext] Calling /auth/me with token');
-        const response = await fetch(`${BACKEND_URL}/auth/me`, {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': API_KEY,
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-
-        console.log('[AuthContext] /auth/me response status:', response.status);
-
-        if (response.ok) {
-          const data = await response.json();
-          console.log('[AuthContext] User authenticated successfully:', data.user.email);
-          setUser(data.user);
-        } else {
-          // Token inválido ou expirado
-          const errorText = await response.text();
-          console.error('[AuthContext] Authentication failed:', response.status, errorText);
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
-          setUser(null);
-        }
-      } catch (error) {
-        console.error('[AuthContext] Failed to fetch user:', error);
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        setUser(null);
-      } finally {
-        console.log('[AuthContext] Loading complete');
-        setLoading(false);
-      }
+      await fetchUser();
+      console.log('[AuthContext] Loading complete');
+      setLoading(false);
     };
 
     checkAuth();
@@ -103,8 +92,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': API_KEY,
         },
+        credentials: 'include', // Send and receive cookies
         body: JSON.stringify({ email, password }),
       });
 
@@ -121,12 +110,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         };
       }
 
-      // Save tokens to localStorage
-      console.log('[AuthContext] Saving tokens to localStorage');
-      localStorage.setItem('access_token', data.accessToken);
-      localStorage.setItem('refresh_token', data.refreshToken);
-      console.log('[AuthContext] Tokens saved successfully');
-
+      // Tokens are now in httpOnly cookies (set by backend)
+      console.log('[AuthContext] Login successful, tokens set in httpOnly cookies');
       console.log('[AuthContext] Setting user:', data.user.email);
       setUser(data.user);
 
@@ -147,8 +132,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': API_KEY,
         },
+        credentials: 'include', // Send and receive cookies
         body: JSON.stringify({ email, password, fullName }),
       });
 
@@ -163,10 +148,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         };
       }
 
-      // Save tokens to localStorage
-      localStorage.setItem('access_token', data.accessToken);
-      localStorage.setItem('refresh_token', data.refreshToken);
-
+      // Tokens are now in httpOnly cookies (set by backend)
+      console.log('[AuthContext] Registration successful, tokens set in httpOnly cookies');
       setUser(data.user);
 
       return { error: null };
@@ -186,21 +169,27 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': API_KEY,
         },
+        credentials: 'include', // Send cookies to clear them
       });
+      console.log('[AuthContext] Logged out successfully, cookies cleared');
     } catch (error) {
       console.error('Sign out error:', error);
     } finally {
-      // Always clear local state
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
+      // Clear local state (cookies are cleared by backend)
       setUser(null);
     }
   };
 
   const getToken = async () => {
-    return localStorage.getItem('access_token');
+    // Tokens are now in httpOnly cookies and sent automatically with credentials: 'include'
+    // This function returns null since cookies can't be accessed from JavaScript (security feature)
+    // Use the `user` object to get user information instead
+    return null;
+  };
+
+  const refreshUser = async () => {
+    await fetchUser();
   };
 
   const value = {
@@ -210,6 +199,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     signUp,
     signOut,
     getToken,
+    refreshUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
