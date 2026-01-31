@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "Clipify - Crie vídeos virais",
+    "slug": "clipify-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "clipify",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0ea5e9"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.clipify.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Clipify precisa de acesso à câmera para gravar vídeos.",
+        "NSMicrophoneUsageDescription": "Clipify precisa de acesso ao microfone para gravar áudio dos vídeos.",
+        "NSPhotoLibraryUsageDescription": "Clipify precisa de acesso às suas fotos para fazer upload de vídeos."
+      }
+    },
+    "android": {
+      "package": "com.clipify.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0ea5e9"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Clipify precisa de acesso ao microfone para gravar áudio dos vídeos."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Clipify precisa de acesso às suas fotos para fazer upload de vídeos.",
+          "savePhotosPermission": "Clipify precisa de permissão para salvar vídeos na sua galeria."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0ea5e9"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "clipify-mobile"
+      }
+    }
+  }
+}

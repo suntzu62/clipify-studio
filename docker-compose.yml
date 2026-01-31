@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: cortai-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cortai_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for BullMQ
+  redis:
+    image: redis:7-alpine
+    container_name: cortai-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # pgAdmin (optional - database management UI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: cortai-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+
+  # Backend (Fastify + workers)
+  backend:
+    build:
+      context: ./clipify-studio/backend-v2
+      dockerfile: Dockerfile
+    container_name: cortai-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      NODE_ENV: development
+      BASE_URL: http://localhost:3000
+      FRONTEND_URL: http://localhost:8081
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/cortai_dev
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      FFMPEG_PATH: /usr/bin/ffmpeg
+    working_dir: /app
+    volumes:
+      - ./clipify-studio/backend-v2:/app
+      - backend_node_modules:/app/node_modules
+    depends_on:
+      - postgres
+      - redis
+    command: sh -c "npm install && npm run dev"
+
+  # Frontend (Vite)
+  frontend:
+    build:
+      context: ./clipify-studio
+      dockerfile: Dockerfile
+    container_name: cortai-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      VITE_BACKEND_URL: http://localhost:3000
+    working_dir: /app
+    volumes:
+      - ./clipify-studio:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    command: sh -c "npm install && npm run dev:frontend -- --host 0.0.0.0 --port 8080"
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
+  backend_node_modules:
+  frontend_node_modules:
