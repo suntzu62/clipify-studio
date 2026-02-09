@@ -5,6 +5,7 @@ services:
   - type: keyvalue
     name: cortai-redis
     plan: free
+    ipAllowList: [] # Only allow internal connections
 
   # ----------------------------------------------------------------------------
   # Redis (BullMQ) - Staging
@@ -12,6 +13,7 @@ services:
   - type: keyvalue
     name: cortai-redis-staging
     plan: free
+    ipAllowList: [] # Only allow internal connections
 
   # ----------------------------------------------------------------------------
   # Backend API (Fastify)
