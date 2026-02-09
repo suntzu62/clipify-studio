@@ -1,0 +1,250 @@
+services:
+  # ----------------------------------------------------------------------------
+  # Redis (BullMQ)
+  # ----------------------------------------------------------------------------
+  - type: keyvalue
+    name: cortai-redis
+    plan: free
+
+  # ----------------------------------------------------------------------------
+  # Redis (BullMQ) - Staging
+  # ----------------------------------------------------------------------------
+  - type: keyvalue
+    name: cortai-redis-staging
+    plan: free
+
+  # ----------------------------------------------------------------------------
+  # Backend API (Fastify)
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: cortai-backend
+    runtime: docker
+    branch: main
+    rootDir: clipify-studio/backend-v2
+    dockerfilePath: Dockerfile
+    dockerContext: clipify-studio/backend-v2
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DISABLE_WORKER
+        value: "true"
+      - key: WORKER_CONCURRENCY
+        value: "1"
+      - key: SOCIAL_MEDIA_ENABLED
+        value: "false"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: cortai-redis
+          property: connectionString
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: cortai-frontend
+          envVarKey: RENDER_EXTERNAL_URL
+      # ---- Required secrets/config (set in Render dashboard) ----
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: raw
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MERCADOPAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADOPAGO_PUBLIC_KEY
+        sync: false
+      - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: COOKIE_SECRET
+        sync: false
+      - key: API_KEY
+        sync: false
+
+  # ----------------------------------------------------------------------------
+  # Backend API (Fastify) - Staging
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: cortai-backend-staging
+    runtime: docker
+    branch: staging
+    rootDir: clipify-studio/backend-v2
+    dockerfilePath: Dockerfile
+    dockerContext: clipify-studio/backend-v2
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DISABLE_WORKER
+        value: "true"
+      - key: WORKER_CONCURRENCY
+        value: "1"
+      - key: SOCIAL_MEDIA_ENABLED
+        value: "false"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: cortai-redis-staging
+          property: connectionString
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: cortai-frontend-staging
+          envVarKey: RENDER_EXTERNAL_URL
+      # ---- Required secrets/config (set in Render dashboard) ----
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: raw
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MERCADOPAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADOPAGO_PUBLIC_KEY
+        sync: false
+      - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: COOKIE_SECRET
+        sync: false
+      - key: API_KEY
+        sync: false
+
+  # ----------------------------------------------------------------------------
+  # Worker (BullMQ processor)
+  # ----------------------------------------------------------------------------
+  - type: worker
+    name: cortai-worker
+    runtime: docker
+    branch: main
+    rootDir: clipify-studio/backend-v2
+    dockerfilePath: Dockerfile
+    dockerContext: clipify-studio/backend-v2
+    dockerCommand: node dist/jobs/worker.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WORKER_CONCURRENCY
+        value: "1"
+      - key: SOCIAL_MEDIA_ENABLED
+        value: "false"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: cortai-redis
+          property: connectionString
+      # ---- Same secrets/config as the backend (set in Render dashboard) ----
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: raw
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MERCADOPAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADOPAGO_PUBLIC_KEY
+        sync: false
+      - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: COOKIE_SECRET
+        sync: false
+      - key: API_KEY
+        sync: false
+
+  # ----------------------------------------------------------------------------
+  # Worker (BullMQ processor) - Staging
+  # ----------------------------------------------------------------------------
+  - type: worker
+    name: cortai-worker-staging
+    runtime: docker
+    branch: staging
+    rootDir: clipify-studio/backend-v2
+    dockerfilePath: Dockerfile
+    dockerContext: clipify-studio/backend-v2
+    dockerCommand: node dist/jobs/worker.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WORKER_CONCURRENCY
+        value: "1"
+      - key: SOCIAL_MEDIA_ENABLED
+        value: "false"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: cortai-redis-staging
+          property: connectionString
+      # ---- Same secrets/config as the backend (set in Render dashboard) ----
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: raw
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MERCADOPAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADOPAGO_PUBLIC_KEY
+        sync: false
+      - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: COOKIE_SECRET
+        sync: false
+      - key: API_KEY
+        sync: false
+
+  # ----------------------------------------------------------------------------
+  # Frontend (Vite static)
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: cortai-frontend
+    runtime: static
+    branch: main
+    rootDir: clipify-studio
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_BACKEND_URL
+        fromService:
+          type: web
+          name: cortai-backend
+          envVarKey: RENDER_EXTERNAL_URL
+
+  # ----------------------------------------------------------------------------
+  # Frontend (Vite static) - Staging
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: cortai-frontend-staging
+    runtime: static
+    branch: staging
+    rootDir: clipify-studio
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_BACKEND_URL
+        fromService:
+          type: web
+          name: cortai-backend-staging
+          envVarKey: RENDER_EXTERNAL_URL
