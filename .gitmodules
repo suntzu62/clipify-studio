@@ -1,0 +1,3 @@
+[submodule "clipify-studio"]
+	path = clipify-studio
+	url = https://github.com/suntzu62/clipify-studio.git
