@@ -171,12 +171,15 @@ CREATE INDEX IF NOT EXISTS idx_usage_records_period ON public.usage_records(user
 -- ==============================================================================
 -- Triggers
 -- ==============================================================================
+DROP TRIGGER IF EXISTS update_plans_updated_at ON public.plans;
 CREATE TRIGGER update_plans_updated_at BEFORE UPDATE ON public.plans
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_subscriptions_updated_at ON public.subscriptions;
 CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON public.subscriptions
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_payments_updated_at ON public.payments;
 CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON public.payments
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 

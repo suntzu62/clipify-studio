@@ -35,6 +35,14 @@ services:
         value: "1"
       - key: SOCIAL_MEDIA_ENABLED
         value: "false"
+      - key: UPLOADS_ENABLED
+        value: "true"
+      - key: BETA_MODE
+        value: "false"
+      - key: BETA_ALLOWLIST_EMAILS
+        sync: false
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -62,11 +70,29 @@ services:
         sync: false
       - key: MERCADOPAGO_WEBHOOK_SECRET
         sync: false
+      - key: MERCADOPAGO_SANDBOX_MODE
+        value: "false"
+      - key: NOTIFICATIONS_EMAIL_ENABLED
+        value: "false"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
       - key: JWT_SECRET
         sync: false
       - key: COOKIE_SECRET
         sync: false
       - key: API_KEY
+        sync: false
+      - key: SENTRY_DSN
         sync: false
 
   # ----------------------------------------------------------------------------
@@ -89,6 +115,14 @@ services:
         value: "1"
       - key: SOCIAL_MEDIA_ENABLED
         value: "false"
+      - key: UPLOADS_ENABLED
+        value: "true"
+      - key: BETA_MODE
+        value: "false"
+      - key: BETA_ALLOWLIST_EMAILS
+        sync: false
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -116,11 +150,29 @@ services:
         sync: false
       - key: MERCADOPAGO_WEBHOOK_SECRET
         sync: false
+      - key: MERCADOPAGO_SANDBOX_MODE
+        value: "true"
+      - key: NOTIFICATIONS_EMAIL_ENABLED
+        value: "false"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
       - key: JWT_SECRET
         sync: false
       - key: COOKIE_SECRET
         sync: false
       - key: API_KEY
+        sync: false
+      - key: SENTRY_DSN
         sync: false
 
   # ----------------------------------------------------------------------------
@@ -141,6 +193,8 @@ services:
         value: "1"
       - key: SOCIAL_MEDIA_ENABLED
         value: "false"
+      - key: UPLOADS_ENABLED
+        value: "true"
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -163,11 +217,29 @@ services:
         sync: false
       - key: MERCADOPAGO_WEBHOOK_SECRET
         sync: false
+      - key: MERCADOPAGO_SANDBOX_MODE
+        value: "false"
+      - key: NOTIFICATIONS_EMAIL_ENABLED
+        value: "false"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
       - key: JWT_SECRET
         sync: false
       - key: COOKIE_SECRET
         sync: false
       - key: API_KEY
+        sync: false
+      - key: SENTRY_DSN
         sync: false
 
   # ----------------------------------------------------------------------------
@@ -188,6 +260,8 @@ services:
         value: "1"
       - key: SOCIAL_MEDIA_ENABLED
         value: "false"
+      - key: UPLOADS_ENABLED
+        value: "true"
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -209,6 +283,22 @@ services:
       - key: MERCADOPAGO_PUBLIC_KEY
         sync: false
       - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      - key: MERCADOPAGO_SANDBOX_MODE
+        value: "true"
+      - key: NOTIFICATIONS_EMAIL_ENABLED
+        value: "false"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
         sync: false
       - key: JWT_SECRET
         sync: false
@@ -233,6 +323,18 @@ services:
           type: web
           name: cortai-backend
           envVarKey: RENDER_EXTERNAL_URL
+      - key: VITE_FEATURE_UPLOAD
+        value: "true"
+      - key: VITE_FEATURE_DIRECT_PUBLISHING
+        value: "false"
+      - key: VITE_SENTRY_DSN
+        sync: false
+      - key: SENTRY_ORG
+        sync: false
+      - key: SENTRY_PROJECT
+        sync: false
+      - key: SENTRY_AUTH_TOKEN
+        sync: false
 
   # ----------------------------------------------------------------------------
   # Frontend (Vite static) - Staging
@@ -250,3 +352,15 @@ services:
           type: web
           name: cortai-backend-staging
           envVarKey: RENDER_EXTERNAL_URL
+      - key: VITE_FEATURE_UPLOAD
+        value: "true"
+      - key: VITE_FEATURE_DIRECT_PUBLISHING
+        value: "false"
+      - key: VITE_SENTRY_DSN
+        sync: false
+      - key: SENTRY_ORG
+        sync: false
+      - key: SENTRY_PROJECT
+        sync: false
+      - key: SENTRY_AUTH_TOKEN
+        sync: false

@@ -10,30 +10,35 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ==============================================================================
--- Table: user_jobs
+-- Table: jobs
 -- Tracks video processing jobs (YouTube downloads and local uploads)
 -- ==============================================================================
-CREATE TABLE IF NOT EXISTS public.user_jobs (
+CREATE TABLE IF NOT EXISTS public.jobs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
+  source_type TEXT NOT NULL CHECK (source_type IN ('youtube', 'upload')),
   youtube_url TEXT,
-  source TEXT DEFAULT 'youtube' CHECK (source IN ('youtube', 'upload')),
-  storage_path TEXT,
-  file_name TEXT,
-  file_size BIGINT,
-  status TEXT NOT NULL DEFAULT 'queued',
+  upload_path TEXT,
+  video_path TEXT,
+  title TEXT,
+  target_duration INTEGER,
+  clip_count INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending',
   progress INTEGER DEFAULT 0,
+  current_step TEXT,
+  current_step_message TEXT,
   error TEXT,
   metadata JSONB DEFAULT '{}'::jsonb,
+  completed_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_user_jobs_user_id ON public.user_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_jobs_source ON public.user_jobs(source);
-CREATE INDEX IF NOT EXISTS idx_user_jobs_status ON public.user_jobs(status);
-CREATE INDEX IF NOT EXISTS idx_user_jobs_user_created ON public.user_jobs(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON public.jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_source_type ON public.jobs(source_type);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON public.jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON public.jobs(user_id, created_at DESC);
 
 -- ==============================================================================
 -- Table: clips
@@ -41,17 +46,31 @@ CREATE INDEX IF NOT EXISTS idx_user_jobs_user_created ON public.user_jobs(user_i
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.clips (
   id TEXT PRIMARY KEY,
-  job_id TEXT NOT NULL REFERENCES public.user_jobs(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL REFERENCES public.jobs(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   title TEXT,
   description TEXT,
-  duration FLOAT,
-  start_time FLOAT,
-  end_time FLOAT,
+  hashtags TEXT[] DEFAULT '{}'::TEXT[],
+  seo_title TEXT,
+  seo_description TEXT,
+  seo_hashtags TEXT[] DEFAULT '{}'::TEXT[],
+  seo_variants JSONB DEFAULT '[]'::jsonb,
+  seo_selected_index INTEGER DEFAULT 0,
+  start_time DOUBLE PRECISION,
+  end_time DOUBLE PRECISION,
+  duration DOUBLE PRECISION,
+  video_url TEXT,
+  thumbnail_url TEXT,
   storage_path TEXT,
-  thumbnail_path TEXT,
+  thumbnail_storage_path TEXT,
+  transcript JSONB,
+  ai_score INTEGER,
+  virality_components JSONB,
+  virality_label TEXT,
   status TEXT DEFAULT 'pending',
-  metadata JSONB DEFAULT '{}'::jsonb,
+  user_rating INTEGER,
+  rejection_reason TEXT,
+  reviewed_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -119,7 +138,7 @@ END;
 $$ language 'plpgsql';
 
 -- Apply triggers
-CREATE TRIGGER update_user_jobs_updated_at BEFORE UPDATE ON public.user_jobs
+CREATE TRIGGER update_jobs_updated_at BEFORE UPDATE ON public.jobs
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_clips_updated_at BEFORE UPDATE ON public.clips

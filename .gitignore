@@ -4,6 +4,8 @@ build/
 .next/
 .turbo/
 coverage/
+.cache/
+**/.cache/
 
 # Env and secrets
 .env
@@ -19,3 +21,6 @@ logs/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local worktrees / leftovers
+clipify-studio-wt-staging/

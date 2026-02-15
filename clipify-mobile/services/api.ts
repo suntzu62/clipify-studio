@@ -221,12 +221,88 @@ class ApiClient {
       onError?: (error: Error) => void;
     }
   ): Promise<() => void> {
-    // EventSource não é nativo no React Native, então vamos usar fetch com streaming
-    // Ou podemos fazer polling como fallback
+    const pollIntervalMs = 3000;
+    let isActive = true;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let lastProgressValue = -1;
+    let lastStep: string | undefined;
 
-    // Por enquanto, retornar função de cleanup vazia
-    // TODO: Implementar SSE ou polling para updates em tempo real
-    return () => {};
+    const emitProgress = (job: any) => {
+      const progressValue =
+        typeof job.progress === 'number'
+          ? job.progress
+          : typeof job.progress?.progress === 'number'
+            ? job.progress.progress
+            : 0;
+
+      const currentStep = job.currentStep || '';
+      const shouldEmit =
+        progressValue !== lastProgressValue || currentStep !== lastStep;
+
+      if (shouldEmit && callbacks.onProgress) {
+        callbacks.onProgress({
+          jobId,
+          state: job.state || job.status,
+          status: job.status || job.state,
+          currentStep,
+          progress: job.progress ?? progressValue,
+        });
+        lastProgressValue = progressValue;
+        lastStep = currentStep;
+      }
+    };
+
+    const poll = async () => {
+      if (!isActive) return;
+
+      try {
+        const job = await this.getJob(jobId);
+        emitProgress(job);
+
+        const state = (job.state || job.status || '').toLowerCase();
+
+        if (state === 'completed') {
+          callbacks.onCompleted?.({
+            jobId,
+            state: 'completed',
+            status: 'completed',
+            currentStep: job.currentStep || 'export',
+            progress: job.progress ?? { progress: 100, message: 'Concluido' },
+            result: job.result,
+          });
+          cleanup();
+          return;
+        }
+
+        if (state === 'failed') {
+          callbacks.onFailed?.({
+            jobId,
+            state: 'failed',
+            status: 'failed',
+            error: job.error || 'Job failed',
+          });
+          cleanup();
+        }
+      } catch (error: any) {
+        callbacks.onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    const cleanup = () => {
+      isActive = false;
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    intervalId = setInterval(() => {
+      void poll();
+    }, pollIntervalMs);
+
+    void poll();
+
+    return cleanup;
   }
 
   // ============================================

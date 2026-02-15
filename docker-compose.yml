@@ -1,11 +1,16 @@
-version: '3.8'
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: cortai-postgres
-    restart: unless-stopped
+    restart: "no"
+    logging: *default-logging
     ports:
       - "5432:5432"
     environment:
@@ -14,7 +19,7 @@ services:
       POSTGRES_DB: cortai_dev
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -25,7 +30,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: cortai-redis
-    restart: unless-stopped
+    restart: "no"
+    logging: *default-logging
     ports:
       - "6379:6379"
     volumes:
@@ -40,7 +46,8 @@ services:
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: cortai-pgadmin
-    restart: unless-stopped
+    restart: "no"
+    logging: *default-logging
     ports:
       - "5050:80"
     environment:
@@ -58,18 +65,29 @@ services:
       context: ./clipify-studio/backend-v2
       dockerfile: Dockerfile
     container_name: cortai-backend
-    restart: unless-stopped
+    restart: "no"
+    logging: *default-logging
     ports:
       - "3000:3000"
     environment:
       PORT: "3000"
       NODE_ENV: development
       BASE_URL: http://localhost:3000
-      FRONTEND_URL: http://localhost:8081
+      FRONTEND_URL: http://localhost:8080
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/cortai_dev
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       FFMPEG_PATH: /usr/bin/ffmpeg
+      # Performance tuning (faster local processing)
+      RENDER_PRESET: superfast
+      RENDER_CONCURRENCY: "4"
+      RENDER_FAST_DETECTION: "true"
+      # MVP beta defaults (YouTube-only + closed beta ready)
+      UPLOADS_ENABLED: "false"
+      SOCIAL_MEDIA_ENABLED: "false"
+      BETA_MODE: "false"
+      BETA_ALLOWLIST_EMAILS: ""
+      NOTIFICATIONS_EMAIL_ENABLED: "false"
     working_dir: /app
     volumes:
       - ./clipify-studio/backend-v2:/app
@@ -77,7 +95,7 @@ services:
     depends_on:
       - postgres
       - redis
-    command: sh -c "npm install && npm run dev"
+    command: sh -c "npm install && npm run build && npm run start"
 
   # Frontend (Vite)
   frontend:
@@ -85,11 +103,14 @@ services:
       context: ./clipify-studio
       dockerfile: Dockerfile
     container_name: cortai-frontend
-    restart: unless-stopped
+    restart: "no"
+    logging: *default-logging
     ports:
       - "8080:8080"
     environment:
       VITE_BACKEND_URL: http://localhost:3000
+      VITE_FEATURE_UPLOAD: "false"
+      VITE_FEATURE_DIRECT_PUBLISHING: "false"
     working_dir: /app
     volumes:
       - ./clipify-studio:/app
