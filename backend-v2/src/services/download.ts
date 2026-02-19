@@ -6,7 +6,7 @@ import path from 'path';
 import os from 'os';
 import ffmpeg from 'fluent-ffmpeg';
 import { createLogger } from '../config/logger.js';
-import { downloadFile } from '../lib/supabase.js';
+import { downloadFile } from './storage.js';
 import { env } from '../config/env.js';
 import { VideoDownloadError, VideoMetadata } from '../types/index.js';
 
@@ -31,14 +31,14 @@ interface DownloadResult {
  * Download principal - decide entre YouTube ou Upload
  */
 export async function downloadVideo(
-  sourceType: 'youtube' | 'upload',
+  sourceType: 'youtube' | 'youtube_live' | 'upload',
   youtubeUrl?: string,
   uploadPath?: string
 ): Promise<DownloadResult> {
   logger.info({ sourceType, youtubeUrl, uploadPath }, 'Starting video download');
 
   try {
-    if (sourceType === 'youtube' && youtubeUrl) {
+    if ((sourceType === 'youtube' || sourceType === 'youtube_live') && youtubeUrl) {
       return await downloadFromYouTube(youtubeUrl);
     } else if (sourceType === 'upload' && uploadPath) {
       return await downloadFromSupabase(uploadPath);

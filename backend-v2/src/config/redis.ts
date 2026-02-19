@@ -3,6 +3,23 @@ import { env } from './env.js';
 import { createLogger } from './logger.js';
 
 const logger = createLogger('redis');
+const memoryStore = new Map<string, { value: any; expiresAt: number }>();
+
+// Periodic cleanup of expired in-memory entries to prevent memory leaks
+const MEMORY_CLEANUP_INTERVAL_MS = 60_000;
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [key, item] of memoryStore.entries()) {
+    if (item.expiresAt < now) {
+      memoryStore.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    logger.debug({ cleaned, remaining: memoryStore.size }, 'Memory store cleanup completed');
+  }
+}, MEMORY_CLEANUP_INTERVAL_MS).unref();
 
 // Shared Redis connection for general use
 export const redis = new IORedis({
@@ -10,6 +27,7 @@ export const redis = new IORedis({
   port: env.redis.port,
   password: env.redis.password,
   db: env.redis.db || 0,
+  ...(env.redis.tls ? { tls: {} } : {}),
   maxRetriesPerRequest: 3,
   retryStrategy(times) {
     const delay = Math.min(times * 50, 2000);
@@ -49,8 +67,14 @@ export async function setTempConfig(
   ttlSeconds: number = 3600
 ): Promise<void> {
   const key = `temp:config:${tempId}`;
-  await redis.set(key, JSON.stringify(config), 'EX', ttlSeconds);
-  logger.info({ tempId, ttl: ttlSeconds }, 'Temporary config saved');
+  const expiresAt = Date.now() + ttlSeconds * 1000;
+  try {
+    await redis.set(key, JSON.stringify(config), 'EX', ttlSeconds);
+    logger.info({ tempId, ttl: ttlSeconds }, 'Temporary config saved');
+  } catch (error: any) {
+    logger.warn({ error: error.message, tempId }, 'Redis unavailable, using in-memory temp config');
+    memoryStore.set(key, { value: config, expiresAt });
+  }
 }
 
 /**
@@ -60,15 +84,27 @@ export async function setTempConfig(
  */
 export async function getTempConfig(tempId: string): Promise<any | null> {
   const key = `temp:config:${tempId}`;
-  const data = await redis.get(key);
-
-  if (!data) {
-    logger.debug({ tempId }, 'Temporary config not found or expired');
-    return null;
+  try {
+    const data = await redis.get(key);
+    if (data) {
+      logger.debug({ tempId }, 'Temporary config retrieved');
+      return JSON.parse(data);
+    }
+  } catch (error: any) {
+    logger.warn({ error: error.message, tempId }, 'Redis unavailable, checking in-memory temp config');
   }
 
-  logger.debug({ tempId }, 'Temporary config retrieved');
-  return JSON.parse(data);
+  const mem = memoryStore.get(key);
+  if (mem) {
+    if (mem.expiresAt > Date.now()) {
+      logger.debug({ tempId }, 'Temporary config retrieved from memory');
+      return mem.value;
+    }
+    memoryStore.delete(key);
+  }
+
+  logger.debug({ tempId }, 'Temporary config not found or expired');
+  return null;
 }
 
 /**
@@ -77,8 +113,13 @@ export async function getTempConfig(tempId: string): Promise<any | null> {
  */
 export async function deleteTempConfig(tempId: string): Promise<void> {
   const key = `temp:config:${tempId}`;
-  await redis.del(key);
-  logger.info({ tempId }, 'Temporary config deleted');
+  try {
+    await redis.del(key);
+    logger.info({ tempId }, 'Temporary config deleted');
+  } catch (error: any) {
+    logger.warn({ error: error.message, tempId }, 'Redis unavailable, deleting from memory');
+    memoryStore.delete(key);
+  }
 }
 
 export default redis;

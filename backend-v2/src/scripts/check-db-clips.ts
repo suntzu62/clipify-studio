@@ -9,6 +9,11 @@ import { createLogger } from '../config/logger.js';
 import { env } from '../config/env.js';
 
 const logger = createLogger('check-db-clips');
+if (!env.supabase.url || !env.supabase.serviceKey) {
+  logger.error('Supabase credentials missing. Set SUPABASE_URL and SUPABASE_SERVICE_KEY.');
+  process.exit(1);
+}
+
 const supabase = createClient(env.supabase.url, env.supabase.serviceKey);
 
 async function checkDatabaseClips() {

@@ -1,22 +1,24 @@
-import { Queue, Worker, Job } from 'bullmq';
-import IORedis from 'ioredis';
+import { Queue } from 'bullmq';
+import type { ConnectionOptions } from 'bullmq';
 import { env } from '../config/env.js';
 import { createLogger } from '../config/logger.js';
 import type { JobData, JobResult } from '../types/index.js';
 
 const logger = createLogger('queue');
+type VideoJobName = 'process-video';
 
 // Conexão Redis
-const connection = new IORedis({
+const connection: ConnectionOptions = {
   host: env.redis.host,
   port: env.redis.port,
   password: env.redis.password,
   db: env.redis.db,
+  ...(env.redis.tls ? { tls: {} } : {}),
   maxRetriesPerRequest: null,
-});
+};
 
 // Fila unificada
-export const videoQueue = new Queue<JobData>('video-processing', {
+export const videoQueue = new Queue<JobData, JobResult, VideoJobName>('video-processing', {
   connection,
   defaultJobOptions: {
     attempts: 3,

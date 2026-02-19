@@ -1,4 +1,5 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { z } from 'zod';
 import { authenticateJWT, optionalAuth } from '../middleware/auth.middleware.js';
 import { createLogger } from '../config/logger.js';
@@ -6,6 +7,87 @@ import { env } from '../config/env.js';
 import * as mp from '../services/mercadopago.service.js';
 
 const logger = createLogger('payments-routes');
+const billingEnabled = Boolean(env.mercadoPago.accessToken && env.mercadoPago.publicKey);
+
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) {
+    return false;
+  }
+  return timingSafeEqual(left, right);
+}
+
+function getHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
+}
+
+function parseSignatureHeader(signatureHeader: string): Record<string, string> {
+  return signatureHeader
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .reduce<Record<string, string>>((acc, entry) => {
+      const separatorIndex = entry.indexOf('=');
+      if (separatorIndex <= 0) {
+        return acc;
+      }
+      const key = entry.slice(0, separatorIndex).trim().toLowerCase();
+      const value = entry.slice(separatorIndex + 1).trim();
+      if (key) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {});
+}
+
+function isMercadoPagoWebhookValid(request: FastifyRequest, body: unknown): boolean {
+  const secret = env.mercadoPago.webhookSecret;
+  if (!secret) {
+    return true;
+  }
+
+  const signatureHeader = getHeaderValue(request.headers['x-signature']);
+  if (!signatureHeader) {
+    return false;
+  }
+
+  if (safeEqual(signatureHeader, secret)) {
+    return true;
+  }
+
+  const parsedSignature = parseSignatureHeader(signatureHeader);
+  const v1 = parsedSignature.v1;
+  const ts = parsedSignature.ts;
+  if (!v1 || !ts) {
+    return false;
+  }
+
+  const query = (request.query || {}) as Record<string, unknown>;
+  const queryDataId = query['data.id'] ?? (query.data as any)?.id;
+  const bodyDataId = (body as any)?.data?.id;
+  const requestId = getHeaderValue(request.headers['x-request-id']) || '';
+
+  const idCandidates = [queryDataId, bodyDataId]
+    .map((value) => (value == null ? '' : String(value).trim()))
+    .filter(Boolean);
+
+  for (const id of idCandidates) {
+    const manifest = `id:${id};request-id:${requestId};ts:${ts};`;
+    const digest = createHmac('sha256', secret).update(manifest).digest('hex');
+    if (safeEqual(digest, v1)) {
+      return true;
+    }
+  }
+
+  const fallbackDigest = createHmac('sha256', secret)
+    .update(JSON.stringify(body ?? {}))
+    .digest('hex');
+  return safeEqual(fallbackDigest, v1);
+}
 
 const DEFAULT_USAGE = {
   plan: 'free',
@@ -113,8 +195,11 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
         });
       }
 
+      const plan = await mp.getPlanById(subscription.plan_id) || await mp.getPlanById('plan_free');
+
       return reply.send({
         subscription,
+        plan,
         isFreeTier: subscription.plan_id === 'plan_free',
       });
     } catch (error: any) {
@@ -143,6 +228,55 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     }
   });
 
+  // ============================================
+  // TRIAL (Free Trial)
+  // ============================================
+
+  app.post('/trial/start', {
+    preHandler: authenticateJWT,
+  }, async (request, reply) => {
+    try {
+      if (!billingEnabled) {
+        return reply.status(501).send({
+          error: 'BILLING_DISABLED',
+          message: 'Billing desativado no beta.',
+        });
+      }
+
+      const userId = request.user!.userId;
+      const subscription = await mp.startFreeTrial(userId, 7);
+      const plan = await mp.getPlanById(subscription.plan_id) || await mp.getPlanById('plan_free');
+
+      return reply.status(201).send({
+        subscription,
+        plan,
+        message: 'Trial started successfully',
+      });
+    } catch (error: any) {
+      const message = error?.message || 'unknown';
+      logger.warn({ userId: request.user?.userId, error: message }, 'Failed to start trial');
+
+      if (message === 'TRIAL_ALREADY_USED') {
+        return reply.status(409).send({
+          error: 'TRIAL_ALREADY_USED',
+          message: 'Você já utilizou o teste grátis anteriormente.',
+        });
+      }
+
+      if (message === 'USER_ALREADY_SUBSCRIBED') {
+        return reply.status(409).send({
+          error: 'USER_ALREADY_SUBSCRIBED',
+          message: 'Você já possui uma assinatura ativa. O trial é apenas para novos usuários.',
+        });
+      }
+
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        message: 'Erro ao iniciar o teste grátis',
+      });
+    }
+  });
+
   // Criar nova assinatura (checkout redirect)
   app.post('/subscriptions', {
     preHandler: authenticateJWT,
@@ -153,6 +287,13 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     });
 
     try {
+      if (!billingEnabled) {
+        return reply.status(501).send({
+          error: 'BILLING_DISABLED',
+          message: 'Billing desativado no beta.',
+        });
+      }
+
       const body = schema.parse(request.body);
       const userId = request.user!.userId;
       const userEmail = request.user!.email || 'user@example.com';
@@ -174,7 +315,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
 
       // Verificar se é plano grátis (sem checkout)
       const checkoutUrl = 'sandboxUrl' in result
-        ? (env.isDevelopment ? result.sandboxUrl : result.checkoutUrl)
+        ? (env.mercadoPago.sandboxMode ? result.sandboxUrl : result.checkoutUrl)
         : null;
 
       return reply.status(201).send({
@@ -239,6 +380,13 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     });
 
     try {
+      if (!billingEnabled) {
+        return reply.status(501).send({
+          error: 'BILLING_DISABLED',
+          message: 'Billing desativado no beta.',
+        });
+      }
+
       const body = schema.parse(request.body);
       const userId = request.user!.userId;
       const userEmail = request.user!.email || 'user@example.com';
@@ -254,7 +402,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
       });
 
       const checkoutUrl = 'sandboxUrl' in result
-        ? (env.isDevelopment ? result.sandboxUrl : result.checkoutUrl)
+        ? (env.mercadoPago.sandboxMode ? result.sandboxUrl : result.checkoutUrl)
         : null;
 
       return reply.status(201).send({
@@ -281,6 +429,13 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     });
 
     try {
+      if (!billingEnabled) {
+        return reply.status(501).send({
+          error: 'BILLING_DISABLED',
+          message: 'Billing desativado no beta.',
+        });
+      }
+
       const body = schema.parse(request.body);
       const userId = request.user!.userId;
       const userEmail = request.user!.email || 'user@example.com';
@@ -370,19 +525,21 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
         mp.checkUserLimits(userId, 'minute'),
       ]);
 
+      const subscription = clipLimits.subscription || minuteLimits.subscription || null;
+      const planId = subscription?.plan_id || 'plan_free';
+      const plan = await mp.getPlanById(planId) || await mp.getPlanById('plan_free');
+
       return reply.send({
-        planName: clipLimits.planName,
-        clips: {
-          used: clipLimits.currentUsage,
-          limit: clipLimits.maxAllowed,
-          remaining: clipLimits.maxAllowed - clipLimits.currentUsage,
-          canCreate: clipLimits.canUse,
-        },
-        minutes: {
-          used: minuteLimits.currentUsage,
-          limit: minuteLimits.maxAllowed,
-          remaining: minuteLimits.maxAllowed - minuteLimits.currentUsage,
-          canProcess: minuteLimits.canUse,
+        canUse: clipLimits.canUse && minuteLimits.canUse,
+        plan,
+        subscription,
+        usage: {
+          clips_used: clipLimits.currentUsage,
+          clips_limit: clipLimits.maxAllowed,
+          clips_remaining: Math.max(0, clipLimits.maxAllowed - clipLimits.currentUsage),
+          minutes_used: minuteLimits.currentUsage,
+          minutes_limit: minuteLimits.maxAllowed,
+          minutes_remaining: Math.max(0, minuteLimits.maxAllowed - minuteLimits.currentUsage),
         },
       });
     } catch (error: any) {
@@ -423,11 +580,11 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
       const userId = request.user!.userId;
 
       if (minutes > 0) {
-        await mp.incrementUsage(userId, 'minute', minutes, idempotencyKey, 'manual');
+        await mp.incrementUsage(userId, 'minute', minutes, idempotencyKey, 'manual', idempotencyKey);
       }
 
       if (shorts > 0) {
-        await mp.incrementUsage(userId, 'clip', shorts, idempotencyKey, 'manual');
+        await mp.incrementUsage(userId, 'clip', shorts, idempotencyKey, 'manual', idempotencyKey);
       }
 
       const usage = await buildUsagePayload(userId);
@@ -448,16 +605,20 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
 
   // Webhook do Mercado Pago (não autenticado - vem do MP)
   app.post('/webhooks/mercadopago', async (request, reply) => {
+    const body = request.body as any;
+    if (!isMercadoPagoWebhookValid(request, body)) {
+      logger.warn({
+        hasSecret: Boolean(env.mercadoPago.webhookSecret),
+        hasSignature: Boolean(getHeaderValue(request.headers['x-signature'])),
+      }, 'Webhook signature invalid');
+      return reply.status(401).send({
+        error: 'INVALID_SIGNATURE',
+        message: 'Invalid webhook signature',
+      });
+    }
+
     try {
-      const body = request.body as any;
-
       logger.info({ type: body.type, action: body.action }, 'Webhook recebido');
-
-      // Verificar assinatura do webhook (opcional mas recomendado)
-      // const signature = request.headers['x-signature'];
-      // if (env.mercadoPago.webhookSecret && signature) {
-      //   // Validar assinatura
-      // }
 
       const result = await mp.handleWebhook(body);
 
@@ -479,8 +640,9 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     logger.info({ query }, 'Pagamento sucesso - redirect');
 
     // Redirecionar para frontend com status de sucesso
-    const frontendUrl = env.isDevelopment ? 'http://localhost:8080' : env.baseUrl;
+    const frontendUrl = env.frontendUrl;
     const redirectUrl = new URL('/billing', frontendUrl);
+    redirectUrl.searchParams.set('payment', 'success');
     redirectUrl.searchParams.set('payment_status', 'success');
 
     if (query.subscription_id) {
@@ -498,8 +660,9 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
 
     logger.info({ query }, 'Pagamento falhou - redirect');
 
-    const frontendUrl = env.isDevelopment ? 'http://localhost:8080' : env.baseUrl;
+    const frontendUrl = env.frontendUrl;
     const redirectUrl = new URL('/billing', frontendUrl);
+    redirectUrl.searchParams.set('payment', 'failure');
     redirectUrl.searchParams.set('payment_status', 'failure');
 
     if (query.subscription_id) {
@@ -514,8 +677,9 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
 
     logger.info({ query }, 'Pagamento pendente - redirect');
 
-    const frontendUrl = env.isDevelopment ? 'http://localhost:8080' : env.baseUrl;
+    const frontendUrl = env.frontendUrl;
     const redirectUrl = new URL('/billing', frontendUrl);
+    redirectUrl.searchParams.set('payment', 'pending');
     redirectUrl.searchParams.set('payment_status', 'pending');
 
     if (query.subscription_id) {
@@ -532,7 +696,8 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
   app.get('/payments/config', async (_request, reply) => {
     return reply.send({
       publicKey: env.mercadoPago.publicKey || null,
-      isConfigured: !!env.mercadoPago.accessToken,
+      isConfigured: billingEnabled,
+      sandboxMode: env.mercadoPago.sandboxMode,
     });
   });
 }

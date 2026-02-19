@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { promises as fs, createReadStream } from 'fs';
 import { join, dirname } from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { createLogger } from '../config/logger.js';
@@ -9,6 +9,9 @@ const logger = createLogger('storage');
 const supabase = env.supabase.url && env.supabase.serviceKey
   ? createClient(env.supabase.url, env.supabase.serviceKey)
   : null;
+const localStorageRoot = env.localStoragePath || './uploads';
+
+const resolveLocalPath = (path: string) => join(localStorageRoot, path);
 
 interface UploadResult {
   path: string;
@@ -32,14 +35,18 @@ export async function uploadFile(
   logger.info({ bucket, path, filePath, contentType }, 'Uploading file to storage');
 
   try {
-    const fileBuffer = await fs.readFile(filePath);
+    const stat = await fs.stat(filePath);
+    const fileStream = createReadStream(filePath);
+
+    logger.info({ bucket, path, sizeBytes: stat.size }, 'Streaming file upload');
 
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(path, fileBuffer, {
+      .upload(path, fileStream, {
         contentType,
+        duplex: 'half',
         upsert: true,
-      });
+      } as any);
 
     if (error) {
       throw error;
@@ -90,6 +97,16 @@ export async function uploadFiles(
 export async function downloadFile(bucket: string, path: string): Promise<Blob> {
   logger.info({ bucket, path }, 'Downloading file from storage');
 
+  if (!supabase) {
+    try {
+      const fileBuffer = await fs.readFile(resolveLocalPath(path));
+      return new Blob([fileBuffer]);
+    } catch (error: any) {
+      logger.error({ error: error.message, path }, 'Local file download failed');
+      throw new Error(`Download failed: ${error.message}`);
+    }
+  }
+
   try {
     const { data, error } = await supabase.storage.from(bucket).download(path);
 
@@ -117,6 +134,35 @@ export async function listFiles(
   prefix: string
 ): Promise<Array<{ name: string; size: number; createdAt: string }>> {
   logger.info({ bucket, prefix }, 'Listing files from storage');
+
+  if (!supabase) {
+    try {
+      const dirPath = resolveLocalPath(prefix);
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      const files = await Promise.all(
+        entries
+          .filter((entry) => entry.isFile())
+          .map(async (entry) => {
+            const fullPath = join(dirPath, entry.name);
+            const stats = await fs.stat(fullPath);
+            return {
+              name: entry.name,
+              size: stats.size,
+              createdAt: stats.mtime.toISOString(),
+            };
+          })
+      );
+
+      logger.info({ prefix, count: files.length }, 'Local files listed successfully');
+      return files;
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return [];
+      }
+      logger.error({ error: error.message, prefix }, 'Local file listing failed');
+      throw new Error(`List failed: ${error.message}`);
+    }
+  }
 
   try {
     const { data, error } = await supabase.storage.from(bucket).list(prefix);
@@ -146,6 +192,17 @@ export async function listFiles(
 export async function deleteFile(bucket: string, path: string): Promise<void> {
   logger.info({ bucket, path }, 'Deleting file from storage');
 
+  if (!supabase) {
+    try {
+      await fs.rm(resolveLocalPath(path), { force: true });
+      logger.info({ path }, 'Local file deleted successfully');
+      return;
+    } catch (error: any) {
+      logger.error({ error: error.message, path }, 'Local file deletion failed');
+      throw new Error(`Delete failed: ${error.message}`);
+    }
+  }
+
   try {
     const { error } = await supabase.storage.from(bucket).remove([path]);
 
@@ -166,6 +223,17 @@ export async function deleteFile(bucket: string, path: string): Promise<void> {
 export async function deleteFiles(bucket: string, paths: string[]): Promise<void> {
   logger.info({ bucket, count: paths.length }, 'Deleting multiple files');
 
+  if (!supabase) {
+    try {
+      await Promise.all(paths.map((path) => fs.rm(resolveLocalPath(path), { force: true })));
+      logger.info({ count: paths.length }, 'Local files deleted successfully');
+      return;
+    } catch (error: any) {
+      logger.error({ error: error.message, count: paths.length }, 'Local files deletion failed');
+      throw new Error(`Delete failed: ${error.message}`);
+    }
+  }
+
   try {
     const { error } = await supabase.storage.from(bucket).remove(paths);
 
@@ -184,6 +252,15 @@ export async function deleteFiles(bucket: string, paths: string[]): Promise<void
  * Verifica se um arquivo existe
  */
 export async function fileExists(bucket: string, path: string): Promise<boolean> {
+  if (!supabase) {
+    try {
+      await fs.access(resolveLocalPath(path));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   try {
     const { data, error } = await supabase.storage.from(bucket).download(path);
 
@@ -208,8 +285,7 @@ async function uploadToLocalStorage(
 
   try {
     // Caminho de destino: ./uploads/{path}
-    const storagePath = env.localStoragePath || './uploads';
-    const destPath = join(storagePath, path);
+    const destPath = resolveLocalPath(path);
 
     // Criar diretórios se não existirem
     await fs.mkdir(dirname(destPath), { recursive: true });

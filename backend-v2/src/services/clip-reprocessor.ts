@@ -2,8 +2,9 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import { createLogger } from '../config/logger.js';
-import { SubtitlePreferences } from '../types/index.js';
+import type { AspectRatio, ReframeResult, SubtitlePreferences } from '../types/index.js';
 import { buildSubtitlesFilter, getResolutionForFormat } from './rendering.js';
+import { generateCropFilter } from './roi-detector.js';
 
 const logger = createLogger('clip-reprocessor');
 
@@ -11,6 +12,8 @@ export interface ReprocessOptions {
   jobId: string;
   clipId: string;
   originalVideoPath: string;
+  format?: AspectRatio;
+  reframeSettings?: ReframeResult;
   clipData: any;
   subtitlePreferences: SubtitlePreferences;
   onProgress?: (progress: number, message: string) => void;
@@ -28,7 +31,16 @@ export interface ReprocessResult {
  * Usa CRF 16, preset slow, e todas as otimizações de qualidade
  */
 export async function reprocessClip(options: ReprocessOptions): Promise<ReprocessResult> {
-  const { jobId, clipId, originalVideoPath, clipData, subtitlePreferences, onProgress } = options;
+  const {
+    jobId,
+    clipId,
+    originalVideoPath,
+    clipData,
+    subtitlePreferences,
+    onProgress,
+    format = '9:16',
+    reframeSettings,
+  } = options;
 
   logger.info({ jobId, clipId }, 'Starting high-quality clip reprocessing');
 
@@ -62,13 +74,16 @@ export async function reprocessClip(options: ReprocessOptions): Promise<Reproces
     }
 
     // Build subtitle filter com as novas preferências
+    const { width, height } = getResolutionForFormat(format);
+
     const subtitlesFilter = await buildSubtitlesFilter(
       transcript,
       start_time,
       end_time,
       outputDir,
       clipId,
-      subtitlePreferences
+      subtitlePreferences,
+      { width, height }
     );
 
     if (onProgress) {
@@ -76,15 +91,37 @@ export async function reprocessClip(options: ReprocessOptions): Promise<Reproces
     }
 
     // Renderizar com ALTA QUALIDADE (mesmas configurações do rendering principal)
-    const { width, height } = getResolutionForFormat('9:16');
-
     const vfFilters: string[] = [];
 
-    // Crop and scale to 9:16 vertical format com filtro Lanczos (alta qualidade)
-    vfFilters.push(
-      `scale=${width}:${height}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp:force_original_aspect_ratio=decrease`,
-      `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`
-    );
+    const scaleParams = 'flags=lanczos';
+
+    if (reframeSettings?.enabled && reframeSettings.roi) {
+      // Preserva o reenquadramento original quando disponível
+      vfFilters.push(
+        generateCropFilter(reframeSettings.roi),
+        `scale=${width}:${height}:${scaleParams}`
+      );
+    } else {
+      // Fallback: crop central por formato
+      if (format === '9:16') {
+        vfFilters.push(
+          `crop=ih*9/16:ih:(iw-ih*9/16)/2:0`,
+          `scale=${width}:${height}:${scaleParams}`
+        );
+      } else if (format === '1:1') {
+        vfFilters.push(
+          `crop=min(iw\\,ih):min(iw\\,ih):(iw-min(iw\\,ih))/2:(ih-min(iw\\,ih))/2`,
+          `scale=${width}:${height}:${scaleParams}`
+        );
+      } else if (format === '4:5') {
+        vfFilters.push(
+          `crop=ih*4/5:ih:(iw-ih*4/5)/2:0`,
+          `scale=${width}:${height}:${scaleParams}`
+        );
+      } else {
+        vfFilters.push(`scale=${width}:${height}:${scaleParams}`);
+      }
+    }
 
     // Adicionar legendas
     if (subtitlesFilter) {

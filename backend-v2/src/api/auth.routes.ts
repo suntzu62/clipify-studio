@@ -2,7 +2,9 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { registerUser, loginUser, getUserById, registerOrLoginGoogle, updateUserProfile } from '../services/auth.service.js';
 import { getUserSettings, upsertUserSettings } from '../services/user-settings.service.js';
-import { authenticateJWT } from '../middleware/auth.middleware.js';
+import type { UserSettingsUpdate } from '../services/user-settings.service.js';
+import { authenticateJWT, optionalAuth } from '../middleware/auth.middleware.js';
+import { rateLimitByIp } from '../middleware/rate-limit.middleware.js';
 import { createLogger } from '../config/logger.js';
 import { env } from '../config/env.js';
 
@@ -12,7 +14,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // ============================================
   // REGISTER - Criar nova conta
   // ============================================
-  app.post('/auth/register', async (request, reply) => {
+  app.post('/auth/register', {
+    preHandler: rateLimitByIp('auth-register', env.rateLimit.register.max, env.rateLimit.register.windowSeconds),
+  }, async (request, reply) => {
     const schema = z.object({
       email: z.string().email(),
       password: z.string().min(6),
@@ -71,7 +75,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // ============================================
   // LOGIN - Autenticar usuário
   // ============================================
-  app.post('/auth/login', async (request, reply) => {
+  app.post('/auth/login', {
+    preHandler: rateLimitByIp('auth-login', env.rateLimit.login.max, env.rateLimit.login.windowSeconds),
+  }, async (request, reply) => {
     const schema = z.object({
       email: z.string().email(),
       password: z.string(),
@@ -119,23 +125,19 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // ME - Buscar usuário autenticado
   // ============================================
   app.get('/auth/me', {
-    preHandler: authenticateJWT,
+    preHandler: optionalAuth,
   }, async (request, reply) => {
     try {
+      // For SPA bootstrapping: returning 200 with user=null avoids noisy 401 console errors
+      // on public pages while still allowing protected routes to enforce auth elsewhere.
       if (!request.user) {
-        return reply.code(401).send({
-          error: 'Unauthorized',
-          message: 'Not authenticated',
-        });
+        return reply.code(200).send({ user: null });
       }
 
       const user = await getUserById(request.user.userId);
 
       if (!user) {
-        return reply.code(404).send({
-          error: 'Not Found',
-          message: 'User not found',
-        });
+        return reply.code(200).send({ user: null });
       }
 
       return reply.code(200).send({ user });
@@ -239,7 +241,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     });
 
     try {
-      const updates = schema.parse(request.body);
+      const updates: UserSettingsUpdate = schema.parse(request.body);
       const userId = request.user!.userId;
       const settings = await upsertUserSettings(userId, updates);
       return reply.code(200).send({ settings });

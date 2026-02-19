@@ -10,6 +10,7 @@ declare module 'fastify' {
     user?: {
       userId: string;
       email: string;
+      name?: string;
     };
   }
 }
@@ -23,17 +24,24 @@ export async function authenticateJWT(
   reply: FastifyReply
 ): Promise<void> {
   try {
-    // Extrair token do header Authorization
-    const authHeader = request.headers.authorization;
+    // Tentar obter token de httpOnly cookie (preferencial) ou header Authorization (fallback)
+    let token = request.cookies?.access_token;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.code(401).send({
-        error: 'Unauthorized',
-        message: 'Missing or invalid authorization header',
-      });
+    if (!token) {
+      // Fallback para header Authorization (compatibilidade temporária)
+      const authHeader = request.headers.authorization;
+
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7); // Remove "Bearer "
+      }
     }
 
-    const token = authHeader.substring(7); // Remove "Bearer "
+    if (!token) {
+      return reply.code(401).send({
+        error: 'Unauthorized',
+        message: 'Missing authentication token',
+      });
+    }
 
     // Verificar token
     const decoded = verifyToken(token);
@@ -66,12 +74,18 @@ export async function optionalAuth(
   _reply: FastifyReply
 ): Promise<void> {
   try {
-    const authHeader = request.headers.authorization;
+    // Tentar obter token de httpOnly cookie ou header Authorization
+    let token = request.cookies?.access_token;
 
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
+    if (!token) {
+      const authHeader = request.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7);
+      }
+    }
+
+    if (token) {
       const decoded = verifyToken(token);
-
       if (decoded) {
         request.user = decoded;
       }

@@ -19,6 +19,13 @@ export type UserSettings = {
   language: 'pt-BR' | 'en-US' | 'es-ES';
 };
 
+export type UserSettingsUpdate = {
+  notifications?: Partial<UserSettings['notifications']>;
+  privacy?: Partial<UserSettings['privacy']>;
+  appearance?: Partial<UserSettings['appearance']>;
+  language?: UserSettings['language'];
+};
+
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   notifications: {
     jobCompleteEmail: true,
@@ -40,7 +47,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 
 function mergeSettings(
   current: UserSettings,
-  updates: Partial<UserSettings>
+  updates: UserSettingsUpdate
 ): UserSettings {
   return {
     ...current,
@@ -67,7 +74,7 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
 
 export async function upsertUserSettings(
   userId: string,
-  updates: Partial<UserSettings>
+  updates: UserSettingsUpdate
 ): Promise<UserSettings> {
   const current = await getUserSettings(userId);
   const merged = mergeSettings(current, updates);

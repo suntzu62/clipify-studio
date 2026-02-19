@@ -8,6 +8,7 @@ import { toFile } from 'openai/uploads';
 import { createLogger } from '../config/logger.js';
 import { env } from '../config/env.js';
 import type { Transcript, TranscriptSegment, TranscriptionError } from '../types/index.js';
+import { fetchTranscriptFromYouTubeCaptions } from './youtube-captions.js';
 
 const logger = createLogger('transcription');
 
@@ -16,8 +17,16 @@ if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic);
 }
 
+// Log OpenAI API key status (without exposing the full key)
+logger.info({
+  hasApiKey: !!env.openai.apiKey,
+}, 'OpenAI client configuration');
+
 const openai = new OpenAI({
   apiKey: env.openai.apiKey,
+  // Keep timeout bounded per request; handle retries explicitly below.
+  timeout: 120000, // 2 minutes per call
+  maxRetries: 0,
 });
 
 /**
@@ -25,29 +34,63 @@ const openai = new OpenAI({
  */
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
-  maxRetries = 3,
-  initialDelay = 1000
+  maxRetries = 5,
+  initialDelay = 3000,
+  context = 'transcription'
 ): Promise<T> {
   let lastError: any;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      if (attempt > 0) {
+        logger.info({ attempt: attempt + 1, maxRetries: maxRetries + 1, context }, 'Retrying request');
+      }
       return await fn();
     } catch (error: any) {
       lastError = error;
 
-      // Don't retry on authentication errors or invalid request errors
-      if (error.status === 401 || error.status === 400) {
+      // Enhanced error logging
+      const errorType = (error as any)?.error?.type || error.constructor?.name;
+      const errorDetails = {
+        attempt: attempt + 1,
+        maxRetries: maxRetries + 1,
+        context,
+        errorType,
+        errorMessage: error.message,
+        errorCode: error.code,
+        errorStatus: error.status,
+        isConnectionError: error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.message?.includes('Connection'),
+        isRateLimitError: error.status === 429,
+        isAuthError: error.status === 401 || error.status === 403,
+      };
+
+      // Don't retry on authentication errors, invalid requests or quota exhaustion
+      const isAuthError = error.status === 401 || error.status === 403;
+      const isBadRequest = error.status === 400;
+      const isQuotaExhausted = errorType === 'insufficient_quota';
+
+      if (isAuthError || isBadRequest || isQuotaExhausted) {
+        logger.error(errorDetails, 'Non-retryable error encountered');
         throw error;
       }
 
       if (attempt < maxRetries) {
-        const delay = initialDelay * Math.pow(2, attempt);
+        // Prefer server-provided Retry-After header when rate limited
+        const retryAfterHeader = Number(error.response?.headers?.['retry-after']);
+        const retryAfterMs = !Number.isNaN(retryAfterHeader) ? retryAfterHeader * 1000 : undefined;
+
+        // Exponential backoff with jitter to avoid thundering herd
+        const baseDelay = initialDelay * Math.pow(2, attempt); // 3s,6s,12s,24s,48s,...
+        const jitter = Math.floor(Math.random() * 500);
+        const delay = retryAfterMs ?? baseDelay + jitter;
+
         logger.warn(
-          { attempt: attempt + 1, maxRetries: maxRetries + 1, delay, error: error.message },
+          { ...errorDetails, delay },
           'Retrying after error'
         );
         await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        logger.error(errorDetails, 'Max retries exceeded');
       }
     }
   }
@@ -69,21 +112,22 @@ export async function transcribeVideo(
     language?: string;
     model?: 'whisper-1';
     chunkDuration?: number; // seconds per chunk
+    youtubeUrl?: string; // optional fallback source for captions
     onProgress?: (progress: number, message: string) => Promise<void>; // Progress callback
   } = {}
 ): Promise<TranscriptionResult> {
-  const { language = 'pt', model = 'whisper-1', chunkDuration = 300, onProgress } = options;
+  const { language = 'pt', model = 'whisper-1', chunkDuration = 120, youtubeUrl, onProgress } = options;
 
   logger.info({ videoPath, language, model }, 'Starting video transcription');
 
   const tmpDir = join('/tmp', `transcribe-${Date.now()}`);
   await fs.mkdir(tmpDir, { recursive: true });
 
-  const audioPath = join(tmpDir, 'audio.wav');
+  const audioPath = join(tmpDir, 'audio.mp3');
   const chunksDir = join(tmpDir, 'chunks');
 
   try {
-    // Step 1: Extract audio from video
+    // Step 1: Extract audio from video (MP3 = ~10x smaller than WAV, faster Whisper upload)
     logger.info({ videoPath }, 'Extracting audio from video');
     await extractAudio(videoPath, audioPath);
 
@@ -94,13 +138,15 @@ export async function transcribeVideo(
 
     // Step 3: Transcribe chunks in parallel
     const chunkFiles = (await fs.readdir(chunksDir))
-      .filter((f) => f.startsWith('chunk_') && f.endsWith('.wav'))
+      .filter((f) => f.startsWith('chunk_') && f.endsWith('.mp3'))
       .sort();
 
     logger.info({ totalChunks: chunkFiles.length }, 'Transcribing audio chunks');
 
     const allSegments: TranscriptSegment[] = [];
-    const batchSize = 3; // Reduced to avoid rate limiting
+    // Process up to 3 chunks in parallel for faster transcription
+    // while staying within Whisper API rate limits.
+    const batchSize = 3;
 
     for (let i = 0; i < chunkFiles.length; i += batchSize) {
       const batch = chunkFiles.slice(i, i + batchSize);
@@ -139,7 +185,7 @@ export async function transcribeVideo(
                 response_format: 'verbose_json',
                 language,
               });
-            }, 3, 2000); // 3 retries with 2s initial delay
+            }, 3, 2000, `transcription-chunk-${chunkIndex + 1}`); // 3 retries com atraso inicial de 2s (exponencial)
 
             logger.info({ chunk: chunkIndex + 1, total: chunkFiles.length, segmentsCount: transcription.segments?.length || 0 }, 'Chunk transcription completed');
 
@@ -149,17 +195,41 @@ export async function transcribeVideo(
               text: transcription.text,
             };
           } catch (error: any) {
+            // Enhanced error logging with more context
             logger.error({
               chunk: chunkIndex + 1,
               total: chunkFiles.length,
+              chunkFile,
               errorMessage: error.message,
               errorType: error.constructor?.name,
               errorCode: error.code,
               errorStatus: error.status,
               errorResponse: error.response?.data,
+              // Log connection-specific errors
+              isConnectionError: error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.message?.includes('Connection'),
+              isRateLimitError: error.status === 429,
+              isAuthError: error.status === 401,
               stack: error.stack,
-            }, 'Failed to transcribe chunk');
-            throw error;
+            }, 'Failed to transcribe chunk after retries');
+
+            // Provide more helpful error messages
+            let errorMsg = error.message || 'connection error';
+            if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+              errorMsg = 'Network timeout - please check your internet connection';
+            } else if (error.status === 429) {
+              if ((error as any)?.error?.type === 'insufficient_quota') {
+                errorMsg = 'OpenAI quota exceeded - update billing or use a different API key';
+              } else {
+                errorMsg = 'OpenAI rate limit exceeded - please wait and try again';
+              }
+            } else if (error.status === 401) {
+              errorMsg = 'Invalid OpenAI API key';
+            }
+
+            const wrapped = new Error(`TRANSCRIPTION_FAILED: ${errorMsg}`);
+            (wrapped as any).code = error.code || 'TRANSCRIPTION_FAILED';
+            (wrapped as any).status = error.status;
+            throw wrapped;
           }
         })
       );
@@ -203,6 +273,63 @@ export async function transcribeVideo(
 
     return { transcript, audioPath };
   } catch (error: any) {
+    const fallbackDuration = await getVideoDurationSafe(videoPath);
+
+    // Fallback: for YouTube sources, try to use YouTube captions (manual/auto) to keep subtitles working.
+    if (youtubeUrl) {
+      try {
+        if (onProgress) {
+          await onProgress(28, 'Falha na transcrição — usando legendas do YouTube (fallback)...');
+        }
+
+        const ytTranscript = await fetchTranscriptFromYouTubeCaptions(youtubeUrl, {
+          language,
+          fallbackDuration,
+        });
+
+        if (ytTranscript.segments.length > 0) {
+          logger.warn(
+            { status: error.status, segmentCount: ytTranscript.segments.length },
+            'Using YouTube captions as transcription fallback'
+          );
+          return { transcript: ytTranscript, audioPath };
+        }
+      } catch (ytError: any) {
+        logger.warn(
+          { error: ytError.message, youtubeUrl },
+          'YouTube captions fallback failed'
+        );
+      }
+    }
+
+    const msg = String(error.message || '').toLowerCase();
+    const isQuotaOrAuth =
+      msg.includes('quota') ||
+      msg.includes('invalid openai api key') ||
+      error.status === 401 ||
+      error.status === 403 ||
+      error.status === 429;
+
+    if (isQuotaOrAuth) {
+      const fallbackTranscript: Transcript = {
+        segments: [],
+        language,
+        duration: fallbackDuration || chunkDuration,
+        isFallback: true,
+      };
+
+      logger.warn(
+        {
+          error: error.message,
+          status: error.status,
+          fallbackDuration,
+        },
+        'OpenAI transcription failed due to quota/auth — using fallback transcript'
+      );
+
+      return { transcript: fallbackTranscript, audioPath };
+    }
+
     logger.error({ error: error.message, videoPath }, 'Transcription failed');
     throw new Error(`Transcription failed: ${error.message}`);
   } finally {
@@ -223,8 +350,9 @@ function extractAudio(videoPath: string, audioPath: string): Promise<void> {
     ffmpeg(videoPath)
       .audioChannels(1)
       .audioFrequency(16000)
-      .audioCodec('pcm_s16le')
-      .format('wav')
+      .audioCodec('libmp3lame')
+      .audioBitrate('64k')
+      .format('mp3')
       .output(audioPath)
       .on('end', () => {
         logger.info({ audioPath }, 'Audio extraction completed');
@@ -250,13 +378,15 @@ function splitAudioIntoChunks(
     ffmpeg(audioPath)
       .audioChannels(1)
       .audioFrequency(16000)
+      .audioCodec('libmp3lame')
+      .audioBitrate('64k')
       .outputOptions([
         '-f segment',
         `-segment_time ${chunkDuration}`,
         '-reset_timestamps 1',
         `-threads ${Math.min(4, os.cpus().length)}`,
       ])
-      .output(join(chunksDir, 'chunk_%03d.wav'))
+      .output(join(chunksDir, 'chunk_%03d.mp3'))
       .on('end', () => {
         logger.info({ chunksDir }, 'Audio splitting completed');
         resolve();
@@ -266,6 +396,19 @@ function splitAudioIntoChunks(
         reject(err);
       })
       .run();
+  });
+}
+
+async function getVideoDurationSafe(videoPath: string): Promise<number> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(videoPath, (err, metadata) => {
+      if (err) {
+        logger.warn({ error: err.message }, 'Failed to read video duration for fallback transcript');
+        return resolve(60); // default to 60s
+      }
+      const duration = metadata.format?.duration || 60;
+      resolve(Math.max(5, Math.round(duration)));
+    });
   });
 }
 

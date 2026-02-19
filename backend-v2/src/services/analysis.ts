@@ -27,7 +27,7 @@ export async function analyzeHighlights(
   const {
     targetDuration = 60,
     clipCount = 8,
-    minDuration = 30,
+    minDuration = 15, // Reduzido de 30 para 15 para suportar vídeos curtos
     maxDuration = 90,
   } = options;
 
@@ -67,7 +67,16 @@ export async function analyzeHighlights(
         { detectedScenes: detectedScenes.length, required: clipCount },
         'Not enough scenes detected, using fallback AI analysis'
       );
-      return await fallbackAIAnalysis(transcript, options);
+      const fallbackResult = await fallbackAIAnalysis(transcript, options);
+
+      // Se o fallback retornou segmentos, usar eles
+      if (fallbackResult.segments && fallbackResult.segments.length > 0) {
+        return fallbackResult;
+      }
+
+      // Se ainda não tiver segmentos, usar geração automática
+      logger.warn('Fallback also returned no segments, using automatic clip generation');
+      return generateAutoClips(transcript, options);
     }
 
     // STEP 3: Prepare scenes for AI ranking
@@ -93,9 +102,9 @@ export async function analyzeHighlights(
     logger.debug('Sending scenes to OpenAI for ranking and metadata generation');
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 4096,
-      temperature: 0.7,
+      model: 'gpt-4o-mini', // OTIMIZAÇÃO: GPT-4o-mini é 60x mais rápido e 15x mais barato que GPT-4o!
+      max_tokens: 2048, // OTIMIZAÇÃO: Reduzir tokens para resposta mais rápida (era 4096)
+      temperature: 0.5, // OTIMIZAÇÃO: Temperatura menor para respostas mais diretas
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -142,18 +151,29 @@ export async function analyzeHighlights(
       minDuration,
       maxDuration
     );
+    const completedSegments = ensureMinimumClipCount(
+      validatedSegments,
+      transcript,
+      {
+        ...options,
+        targetDuration,
+        clipCount,
+        minDuration,
+        maxDuration,
+      }
+    );
 
     logger.info(
       {
         detectedScenes: detectedScenes.length,
         rankedScenes: analysis.rankings.length,
-        finalClips: validatedSegments.length,
+        finalClips: completedSegments.length,
       },
       'Highlight analysis completed with scene detection'
     );
 
     return {
-      segments: validatedSegments,
+      segments: completedSegments,
       reasoning: analysis.reasoning,
     };
   } catch (error: any) {
@@ -161,7 +181,12 @@ export async function analyzeHighlights(
 
     // Fallback to traditional analysis on error
     logger.warn('Falling back to traditional AI analysis due to error');
-    return await fallbackAIAnalysis(transcript, options);
+    try {
+      return await fallbackAIAnalysis(transcript, options);
+    } catch (fallbackError: any) {
+      logger.error({ error: fallbackError.message }, 'Fallback AI analysis also failed, using automatic clip generation');
+      return generateAutoClips(transcript, options);
+    }
   }
 }
 
@@ -175,46 +200,276 @@ async function fallbackAIAnalysis(
   const {
     targetDuration = 60,
     clipCount = 8,
-    minDuration = 30,
+    minDuration = 15, // Reduzido de 30 para 15 para vídeos curtos
     maxDuration = 90,
   } = options;
 
   logger.info('Using fallback AI-based analysis');
 
-  const transcriptText = formatTranscriptForAnalysis(transcript);
-  const prompt = buildAnalysisPrompt(
-    transcriptText,
-    transcript.duration,
-    targetDuration,
-    clipCount,
-    minDuration,
+  try {
+    const transcriptText = formatTranscriptForAnalysis(transcript);
+    const prompt = buildAnalysisPrompt(
+      transcriptText,
+      transcript.duration,
+      targetDuration,
+      clipCount,
+      minDuration,
+      maxDuration
+    );
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 2048,
+      temperature: 0.5,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: 'Você é um especialista em análise de conteúdo de vídeo para redes sociais. Sempre responda em formato JSON válido.',
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    });
+
+    const responseText = completion.choices[0]?.message?.content || '';
+    const analysis = parseAIResponse(responseText);
+    const validatedSegments = validateSegments(analysis.segments, transcript.duration, minDuration, maxDuration);
+    const completedSegments = ensureMinimumClipCount(
+      validatedSegments,
+      transcript,
+      {
+        ...options,
+        targetDuration,
+        clipCount,
+        minDuration,
+        maxDuration,
+      }
+    );
+
+    // Se ainda não tiver segmentos, usar fallback automático
+    if (completedSegments.length === 0) {
+      logger.warn('AI analysis returned no valid segments, using automatic clip generation');
+      return generateAutoClips(transcript, options);
+    }
+
+    return {
+      segments: completedSegments,
+      reasoning: analysis.reasoning,
+    };
+  } catch (error: any) {
+    logger.error({ error: error.message }, 'AI fallback analysis failed, using automatic clip generation');
+    return generateAutoClips(transcript, options);
+  }
+}
+
+/**
+ * Gera clipes automaticamente dividindo o vídeo em partes iguais
+ * Este é o fallback final que SEMPRE funciona
+ */
+export function generateAutoClips(
+  transcript: Transcript,
+  options: AnalysisOptions
+): HighlightAnalysis {
+  const {
+    targetDuration = 60,
+    clipCount = 8,
+    minDuration = 15,
+    maxDuration = 90,
+  } = options;
+
+  logger.info(
+    { duration: transcript.duration, targetDuration, clipCount },
+    'Generating automatic clips from video'
+  );
+
+  const segments: HighlightSegment[] = [];
+  const videoDuration = transcript.duration;
+
+  // Calcular número real de clipes baseado na duração do vídeo
+  // Cada clipe deve ter pelo menos minDuration segundos
+  const maxPossibleClips = Math.floor(videoDuration / minDuration);
+  const parsedMinAutoClips = Number.parseInt(process.env.MIN_AUTO_CLIPS || '', 10);
+  const minAutoClips = Number.isFinite(parsedMinAutoClips)
+    ? Math.max(1, Math.min(20, parsedMinAutoClips))
+    : 8;
+  const parsedMaxAutoClips = Number.parseInt(process.env.MAX_AUTO_CLIPS || '', 10);
+  const maxAutoClips = Number.isFinite(parsedMaxAutoClips)
+    ? Math.max(minAutoClips, Math.min(50, parsedMaxAutoClips))
+    : 30;
+
+  const estimatedAutoClips = Math.ceil(videoDuration / Math.max(150, targetDuration * 4));
+  const desiredClipCount = clipCount > 0
+    ? clipCount
+    : Math.max(minAutoClips, Math.min(maxAutoClips, estimatedAutoClips));
+
+  const actualClipCount = Math.min(desiredClipCount, maxPossibleClips, maxAutoClips);
+
+  if (actualClipCount === 0) {
+    // Vídeo muito curto - criar apenas 1 clipe com o vídeo todo
+    logger.info({ videoDuration }, 'Video too short, creating single clip');
+
+    const clipText = transcript.segments.map(s => s.text).join(' ');
+    const keywords = extractKeywords(clipText);
+    segments.push({
+      start: 0,
+      end: videoDuration,
+      score: 0.7,
+      title: generateTitleFromText(clipText) || 'Clipe completo',
+      reason: generateReasonFromText(clipText, keywords) || 'Trecho selecionado automaticamente',
+      keywords,
+    });
+
+    return {
+      segments,
+      reasoning: 'Vídeo curto - foi gerado um único clipe com o conteúdo completo.',
+    };
+  }
+
+  // Calcular duração ideal de cada clipe
+  const idealClipDuration = Math.min(
+    Math.max(videoDuration / actualClipCount, minDuration),
     maxDuration
   );
 
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    max_tokens: 4096,
-    temperature: 0.7,
-    response_format: { type: 'json_object' },
-    messages: [
-      {
-        role: 'system',
-        content: 'Você é um especialista em análise de conteúdo de vídeo para redes sociais. Sempre responda em formato JSON válido.',
-      },
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-  });
+  logger.info(
+    { actualClipCount, idealClipDuration },
+    'Calculated clip parameters'
+  );
 
-  const responseText = completion.choices[0]?.message?.content || '';
-  const analysis = parseAIResponse(responseText);
+  // Gerar clipes
+  for (let i = 0; i < actualClipCount; i++) {
+    const start = i * idealClipDuration;
+    const end = Math.min((i + 1) * idealClipDuration, videoDuration);
+
+    // Pegar segmentos de transcrição nesse intervalo
+    const clipSegments = transcript.segments.filter(
+      seg => seg.start >= start && seg.end <= end
+    );
+
+    const clipText = clipSegments.map(s => s.text).join(' ') || `Parte ${i + 1} do vídeo`;
+    const keywords = extractKeywords(clipText);
+
+    segments.push({
+      start,
+      end,
+      score: 0.6 + (Math.random() * 0.2), // Score entre 0.6-0.8
+      title: generateTitleFromText(clipText) || `Destaque #${i + 1}`,
+      reason: generateReasonFromText(clipText, keywords) || 'Trecho selecionado automaticamente',
+      keywords,
+    });
+  }
+
+  logger.info(
+    { generatedClips: segments.length },
+    'Automatic clips generated successfully'
+  );
 
   return {
-    segments: validateSegments(analysis.segments, transcript.duration, minDuration, maxDuration),
-    reasoning: analysis.reasoning,
+    segments,
+    reasoning: `Foram gerados ${segments.length} clipes automaticamente dividindo o vídeo em partes iguais de ~${Math.round(idealClipDuration)}s cada.`,
   };
+}
+
+/**
+ * Gera um título a partir do texto do clipe
+ */
+function generateTitleFromText(text: string): string {
+  if (!text || text.length < 10) return '';
+
+  const cleaned = text
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+
+  const stopWords = new Set([
+    'a', 'e', 'o', 'de', 'da', 'do', 'que', 'para', 'com', 'um', 'uma', 'os', 'as', 'em', 'no', 'na', 'por', 'se',
+    'não', 'mais', 'mas', 'como', 'isso', 'esse', 'essa', 'ele', 'ela', 'você', 'eu', 'nós', 'pra', 'pro',
+    // filler
+    'ai', 'ah', 'oh', 'oi', 'opa', 'tipo', 'mano', 'galera', 'gente', 'cara', 'né', 'ne', 'tá', 'ta', 'tô', 'to',
+    // context words that often repeat in transcript but add little in a title
+    'video', 'vídeo', 'clipe', 'clip',
+  ]);
+
+  const words = cleaned.split(/\s+/);
+  const picked: string[] = [];
+  const seen = new Set<string>();
+
+  for (const w of words) {
+    const token = w.toLowerCase();
+    if (token.length < 4) continue;
+    if (stopWords.has(token)) continue;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    picked.push(w);
+    if (picked.length >= 7) break;
+  }
+
+  const titleWords = picked.length > 0 ? picked.join(' ') : words.slice(0, 6).join(' ');
+
+  // Truncar e adicionar reticências se necessário
+  if (titleWords.length > 50) {
+    return titleWords.substring(0, 47) + '...';
+  }
+
+  return titleWords.charAt(0).toUpperCase() + titleWords.slice(1);
+}
+
+/**
+ * Gera um motivo/descrição curta a partir do texto do clipe (fallback sem IA)
+ * Objetivo: evitar "Momento destaque do vídeo" e entregar algo utilizável no UI.
+ */
+function generateReasonFromText(text: string, keywords: string[]): string {
+  const cleaned = (text || '')
+    .replace(/[^\p{L}\p{N}\s.!?]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+
+  const firstSentence = cleaned.split(/[.!?]/)[0]?.trim() || '';
+  const snippet = firstSentence.length >= 28 ? firstSentence : '';
+
+  if (snippet) {
+    return snippet.length > 90 ? `${snippet.slice(0, 87).trim()}...` : snippet;
+  }
+
+  if (keywords && keywords.length > 0) {
+    const topics = keywords.slice(0, 3).join(', ');
+    return `Trecho sobre ${topics}.`;
+  }
+
+  return 'Trecho com contexto completo e boa densidade de fala.';
+}
+
+/**
+ * Extrai palavras-chave do texto
+ */
+function extractKeywords(text: string): string[] {
+  if (!text) return [];
+
+  const stopWords = new Set([
+    'a', 'e', 'o', 'de', 'da', 'do', 'que', 'para', 'com', 'um', 'uma',
+    'os', 'as', 'em', 'no', 'na', 'por', 'se', 'não', 'mais', 'mas',
+    'como', 'isso', 'esse', 'essa', 'ele', 'ela', 'você', 'eu', 'nós',
+    'pra', 'pro', 'ai', 'ah', 'tipo', 'mano', 'galera', 'gente', 'cara', 'né', 'ne', 'tá', 'ta', 'tô', 'to',
+    'video', 'vídeo', 'clipe', 'clip', 'momento', 'destaque',
+  ]);
+
+  const words = text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const keywords = words
+    .filter(w => w.length > 4 && !stopWords.has(w) && !/^\d+$/.test(w))
+    .slice(0, 5);
+
+  return [...new Set(keywords)]; // Remove duplicatas
 }
 
 /**
@@ -279,7 +534,7 @@ Responda APENAS com um JSON válido neste formato:
       "sceneIndex": 1,
       "score": 0.95,
       "title": "Título viral e chamativo (máx 60 chars)",
-      "reason": "Por que este clipe vai viralizar (gancho + conteúdo + emoção)",
+      "reason": "Hook viral CURTO (máx 60 chars) que PRENDE atenção - use emoção, curiosidade e urgência. Exemplos: '🔥 Virou tudo de cabeça pra baixo!', 'Ninguém esperava essa reviravolta!', 'O momento que parou tudo 😱'",
       "keywords": ["palavra1", "palavra2", "palavra3"]
     }
   ],
@@ -451,7 +706,22 @@ function validateSegments(
 
     // Check duration
     if (duration < minDuration) {
-      logger.warn({ segment: seg, duration }, 'Segment too short, skipping');
+      const extendedSegment = extendSegmentToMinDuration(seg, minDuration, videoDuration);
+      const extendedDuration = extendedSegment.end - extendedSegment.start;
+
+      if (extendedDuration < Math.min(minDuration, videoDuration)) {
+        logger.warn(
+          { segment: seg, duration, minDuration, extendedDuration },
+          'Segment too short and could not be extended, skipping'
+        );
+        continue;
+      }
+
+      logger.info(
+        { original: seg, adjusted: extendedSegment, originalDuration: duration, adjustedDuration: extendedDuration },
+        'Segment too short, extended to min duration'
+      );
+      validated.push(extendedSegment);
       continue;
     }
 
@@ -474,4 +744,96 @@ function validateSegments(
   validated.sort((a, b) => b.score - a.score);
 
   return validated;
+}
+
+function extendSegmentToMinDuration(
+  segment: HighlightSegment,
+  minDuration: number,
+  videoDuration: number
+): HighlightSegment {
+  if (videoDuration <= minDuration) {
+    return {
+      ...segment,
+      start: 0,
+      end: videoDuration,
+    };
+  }
+
+  const currentDuration = segment.end - segment.start;
+  if (currentDuration >= minDuration) {
+    return segment;
+  }
+
+  const extra = minDuration - currentDuration;
+  let start = Math.max(0, segment.start - extra / 2);
+  let end = Math.min(videoDuration, segment.end + extra / 2);
+
+  if (end - start < minDuration) {
+    if (start <= 0) {
+      end = Math.min(videoDuration, minDuration);
+    } else if (end >= videoDuration) {
+      start = Math.max(0, videoDuration - minDuration);
+    }
+  }
+
+  return {
+    ...segment,
+    start: Number(start.toFixed(3)),
+    end: Number(end.toFixed(3)),
+  };
+}
+
+function ensureMinimumClipCount(
+  segments: HighlightSegment[],
+  transcript: Transcript,
+  options: AnalysisOptions
+): HighlightSegment[] {
+  const targetCount = Math.max(1, options.clipCount || 8);
+  if (segments.length >= targetCount) {
+    return segments;
+  }
+
+  const autoSegments = generateAutoClips(transcript, options).segments;
+  const merged = [...segments];
+
+  for (const candidate of autoSegments) {
+    if (merged.length >= targetCount) break;
+
+    const overlapsExisting = merged.some((existing) => {
+      const overlap = Math.max(
+        0,
+        Math.min(existing.end, candidate.end) - Math.max(existing.start, candidate.start)
+      );
+      if (overlap <= 0) return false;
+
+      const smallerDuration = Math.min(existing.end - existing.start, candidate.end - candidate.start);
+      return smallerDuration > 0 && (overlap / smallerDuration) >= 0.7;
+    });
+
+    if (overlapsExisting) continue;
+
+    merged.push({
+      ...candidate,
+      score: Math.min(candidate.score || 0.6, 0.59),
+    });
+  }
+
+  if (merged.length < targetCount) {
+    for (const candidate of autoSegments) {
+      if (merged.length >= targetCount) break;
+      merged.push({
+        ...candidate,
+        score: Math.min(candidate.score || 0.6, 0.58),
+      });
+    }
+  }
+
+  merged.sort((a, b) => b.score - a.score);
+
+  logger.info(
+    { aiSegments: segments.length, autoSegments: autoSegments.length, finalSegments: merged.length, targetCount },
+    'Topped up segments with automatic clips'
+  );
+
+  return merged.slice(0, targetCount);
 }

@@ -38,8 +38,8 @@ export async function detectScenes(
   options: SceneDetectionOptions = {}
 ): Promise<DetectedScene[]> {
   const {
-    minSilenceDuration = 1.0,
-    minSceneDuration = 30,
+    minSilenceDuration = 0.8, // Reduzido para detectar mais pausas
+    minSceneDuration = 15, // Reduzido de 30 para suportar vídeos curtos
     maxSceneDuration = 90,
     padding = 0.4, // 400ms padding
     targetSceneCount = 10,
@@ -239,6 +239,32 @@ function createScenesFromBoundaries(
   // Merge nearby boundaries (within 5 seconds)
   const mergedBoundaries = mergeBoundaries(sortedBoundaries, 5.0);
 
+  // If we don't have enough boundaries, create artificial ones based on intervals
+  const targetBoundaryCount = Math.ceil(transcript.duration / maxDuration);
+  if (mergedBoundaries.length < targetBoundaryCount) {
+    logger.info(
+      { currentBoundaries: mergedBoundaries.length, targetBoundaries: targetBoundaryCount },
+      'Not enough boundaries, adding interval-based boundaries'
+    );
+
+    // Add boundaries at regular intervals
+    const interval = transcript.duration / (targetBoundaryCount + 1);
+    for (let i = 1; i <= targetBoundaryCount; i++) {
+      const timestamp = interval * i;
+      // Only add if not too close to existing boundaries
+      const tooClose = mergedBoundaries.some((b) => Math.abs(b.timestamp - timestamp) < 10);
+      if (!tooClose) {
+        mergedBoundaries.push({
+          timestamp,
+          type: 'punctuation', // Use punctuation as a neutral type
+          confidence: 0.5,
+        });
+      }
+    }
+    // Re-sort after adding
+    mergedBoundaries.sort((a, b) => a.timestamp - b.timestamp);
+  }
+
   // Create scenes between boundaries
   const scenes: DetectedScene[] = [];
   let sceneStart = 0;
@@ -247,8 +273,8 @@ function createScenesFromBoundaries(
     const sceneEnd = boundary.timestamp;
     const duration = sceneEnd - sceneStart;
 
-    // Only create scene if duration is reasonable
-    if (duration >= minDuration && duration <= maxDuration * 1.5) {
+    // Create scene if duration is at least minDuration (we'll split long ones later)
+    if (duration >= minDuration) {
       // Apply padding (but don't go negative or beyond video duration)
       const paddedStart = Math.max(0, sceneStart - padding);
       const paddedEnd = Math.min(transcript.duration, sceneEnd + padding);
@@ -295,8 +321,47 @@ function createScenesFromBoundaries(
     }
   }
 
-  // Filter out scenes that are too long
-  return scenes.filter((scene) => scene.duration <= maxDuration);
+  // Instead of filtering out long scenes, split them into smaller chunks
+  const finalScenes: DetectedScene[] = [];
+
+  for (const scene of scenes) {
+    if (scene.duration <= maxDuration) {
+      finalScenes.push(scene);
+    } else {
+      // Split long scenes into chunks of maxDuration
+      const numChunks = Math.ceil(scene.duration / maxDuration);
+      const chunkDuration = scene.duration / numChunks;
+
+      for (let i = 0; i < numChunks; i++) {
+        const chunkStart = scene.start + (i * chunkDuration);
+        const chunkEnd = Math.min(scene.start + ((i + 1) * chunkDuration), scene.end);
+
+        // Get segments for this chunk
+        const chunkSegments = scene.segments.filter(
+          (seg) => seg.start >= chunkStart && seg.end <= chunkEnd
+        );
+
+        if (chunkSegments.length > 0) {
+          finalScenes.push({
+            start: chunkStart,
+            end: chunkEnd,
+            duration: chunkEnd - chunkStart,
+            segments: chunkSegments,
+            text: chunkSegments.map((s) => s.text).join(' '),
+            confidence: scene.confidence * 0.9, // Slightly lower confidence for split scenes
+            boundaryTypes: [...scene.boundaryTypes, 'split'],
+          });
+        }
+      }
+    }
+  }
+
+  logger.info(
+    { originalScenes: scenes.length, afterSplit: finalScenes.length },
+    'Scenes after splitting long ones'
+  );
+
+  return finalScenes;
 }
 
 /**

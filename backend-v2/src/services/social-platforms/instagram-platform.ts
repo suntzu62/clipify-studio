@@ -65,8 +65,12 @@ export class InstagramPlatform extends SocialPlatform {
         throw new Error('Failed to exchange code for token');
       }
 
-      const tokenData = await tokenResponse.json();
+      const tokenData = await tokenResponse.json() as { access_token: string; token_type?: string; expires_in?: number };
       const shortLivedToken = tokenData.access_token;
+
+      if (!shortLivedToken) {
+        throw new Error('Missing short-lived access token');
+      }
 
       // Step 2: Exchange short-lived token for long-lived token
       const longLivedResponse = await fetch(
@@ -83,14 +87,18 @@ export class InstagramPlatform extends SocialPlatform {
         throw new Error('Failed to get long-lived token');
       }
 
-      const longLivedData = await longLivedResponse.json();
+      const longLivedData = await longLivedResponse.json() as { access_token: string; token_type?: string; expires_in?: number };
 
       // Step 3: Get Instagram Business Account ID
       const meResponse = await fetch(
         `${this.baseUrl}/me?fields=id,name&access_token=${longLivedData.access_token}`
       );
 
-      const meData = await meResponse.json();
+      if (!meResponse.ok) {
+        throw new Error('Failed to fetch Instagram account');
+      }
+
+      const meData = await meResponse.json() as { id: string; name?: string };
 
       // Calculate expiration (long-lived tokens last 60 days)
       const expiresAt = new Date();
@@ -132,7 +140,7 @@ export class InstagramPlatform extends SocialPlatform {
         throw new Error('Failed to refresh token');
       }
 
-      const data = await response.json();
+      const data = await response.json() as { access_token: string; token_type?: string; expires_in?: number };
 
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 60);
@@ -229,11 +237,16 @@ export class InstagramPlatform extends SocialPlatform {
     );
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json() as unknown;
       throw new Error(`Failed to create media container: ${JSON.stringify(error)}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { id: string };
+
+    if (!data.id) {
+      throw new Error('Invalid media container response');
+    }
+
     return data.id;
   }
 
@@ -252,11 +265,11 @@ export class InstagramPlatform extends SocialPlatform {
     );
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json() as unknown;
       throw new Error(`Failed to publish media: ${JSON.stringify(error)}`);
     }
 
-    return response.json();
+    return response.json() as Promise<{ id: string }>;
   }
 
   /**
@@ -276,7 +289,7 @@ export class InstagramPlatform extends SocialPlatform {
         throw new Error('Failed to get media status');
       }
 
-      const data = await response.json();
+      const data = await response.json() as { id: string; permalink: string; timestamp: string };
 
       return {
         platformId: data.id,
