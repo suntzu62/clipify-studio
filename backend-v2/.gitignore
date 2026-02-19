@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
@@ -36,3 +35,12 @@ Thumbs.db
 # Temp
 /tmp
 *.tmp
+core
+core.*
+
+# Generated media artifacts
+uploads/
+*-player-script.js
+
+# Downloaded ML models (kept out of git; fetched by scripts/download-models.js)
+models/*.bin
