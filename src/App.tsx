@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import AdminRoute from "@/components/AdminRoute";
 import { Skeleton } from "@/components/ui/skeleton";
 import PerformanceMonitor from "@/components/PerformanceMonitor";
 
@@ -18,6 +19,7 @@ const ClipLab = lazy(() => import("./pages/ClipLab"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Billing = lazy(() => import("./pages/Billing"));
 const Integrations = lazy(() => import("./pages/Integrations"));
+const Admin = lazy(() => import("./pages/Admin"));
 const Login = lazy(() => import("./pages/auth/Login"));
 const Register = lazy(() => import("./pages/auth/Register"));
 const Callback = lazy(() => import("./pages/auth/Callback"));
@@ -64,6 +66,7 @@ const App = () => {
               <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/integrations" element={<ProtectedRoute><Integrations /></ProtectedRoute>} />
+              <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
 
               {/* Public Pages */}
               <Route path="/terms" element={<Terms />} />

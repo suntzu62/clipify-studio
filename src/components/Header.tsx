@@ -27,8 +27,10 @@ import {
   Video,
   Sparkles,
   Crown,
+  Shield,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isAdminEmail } from '@/lib/admin';
 
 // Navigation routes for easy AB testing and management
 const NAVIGATION_ROUTES = [
@@ -48,6 +50,7 @@ const Header = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = isAdminEmail(user?.email);
 
   const getUserInitials = () => {
     if (!user?.email) return 'U';
@@ -179,6 +182,14 @@ const Header = () => {
                           <span>Integrações</span>
                         </Link>
                       </DropdownMenuItem>
+                      {isAdmin && (
+                        <DropdownMenuItem asChild>
+                          <Link to="/admin" className="flex items-center cursor-pointer">
+                            <Shield className="mr-2 h-4 w-4" />
+                            <span>Admin</span>
+                          </Link>
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuGroup>
 
                     <DropdownMenuSeparator />
