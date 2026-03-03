@@ -21,6 +21,7 @@ import { redis, setTempConfig, getTempConfig, deleteTempConfig } from '../config
 import { registerSocialMediaRoutes } from './social-media.js';
 import { registerAuthRoutes } from './auth.routes.js';
 import { registerPaymentsRoutes } from './payments.routes.js';
+import { registerAdminRoutes } from './admin.routes.js';
 import { reprocessClip } from '../services/clip-reprocessor.js';
 import * as db from '../services/database.service.js';
 import * as mp from '../services/mercadopago.service.js';
