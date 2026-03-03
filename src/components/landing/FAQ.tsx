@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion';
 import {
   Accordion,
   AccordionContent,
@@ -5,6 +6,7 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { cn } from '@/lib/utils';
+import { AnimatedText } from './AnimatedText';
 
 interface FAQProps {
   className?: string;
@@ -59,30 +61,49 @@ export const FAQ = ({ className }: FAQProps) => {
       <div className="container mx-auto px-6">
         {/* Header */}
         <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">
-            Perguntas Frequentes
-          </h2>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+          <AnimatedText
+            text="Perguntas Frequentes"
+            as="h2"
+            className="text-3xl md:text-4xl font-bold mb-4"
+          />
+          <motion.p
+            initial={{ opacity: 0, y: 15 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.3, duration: 0.5 }}
+            className="text-lg text-muted-foreground max-w-2xl mx-auto"
+          >
             Tudo que você precisa saber sobre o Cortai
-          </p>
+          </motion.p>
         </div>
 
         {/* FAQ Accordion */}
         <div className="max-w-3xl mx-auto">
           <Accordion type="single" collapsible className="space-y-4">
             {faqs.map((faq, index) => (
-              <AccordionItem
+              <motion.div
                 key={index}
-                value={`item-${index}`}
-                className="bg-background rounded-lg border-2 px-6 hover:border-primary/30 transition-colors"
+                initial={{ opacity: 0, x: -20 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true, margin: '-50px' }}
+                transition={{
+                  delay: index * 0.08,
+                  duration: 0.5,
+                  ease: [0.22, 1, 0.36, 1],
+                }}
               >
-                <AccordionTrigger className="text-left font-semibold hover:no-underline py-5">
-                  {faq.question}
-                </AccordionTrigger>
-                <AccordionContent className="text-muted-foreground leading-relaxed pb-5">
-                  {faq.answer}
-                </AccordionContent>
-              </AccordionItem>
+                <AccordionItem
+                  value={`item-${index}`}
+                  className="bg-background rounded-lg border-2 px-6 hover:border-primary/30 transition-colors"
+                >
+                  <AccordionTrigger className="text-left font-semibold hover:no-underline py-5">
+                    {faq.question}
+                  </AccordionTrigger>
+                  <AccordionContent className="text-muted-foreground leading-relaxed pb-5">
+                    {faq.answer}
+                  </AccordionContent>
+                </AccordionItem>
+              </motion.div>
             ))}
           </Accordion>
         </div>

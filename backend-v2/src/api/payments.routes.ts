@@ -30,10 +30,7 @@ async function buildUsagePayload(userId?: string) {
   ]);
 
   const subscription = clipLimits.subscription || minuteLimits.subscription;
-  const periodEndValue = subscription?.current_period_end;
-  const periodEnd = typeof periodEndValue === 'string'
-    ? periodEndValue
-    : periodEndValue?.toISOString?.() ?? null;
+  const periodEnd = subscription?.current_period_end ?? null;
 
   return {
     plan: clipLimits.planName || 'free',
@@ -156,7 +153,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
       const body = schema.parse(request.body);
       const userId = request.user!.userId;
       const userEmail = request.user!.email || 'user@example.com';
-      const userName = request.user!.name || 'Usuário';
+      const userName = request.user!.email?.split('@')[0] || 'Usuário';
 
       const result = await mp.createSubscription({
         userId,
@@ -172,15 +169,14 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
         subscriptionId: result.subscription.id,
       }, 'Assinatura criada');
 
-      // Verificar se é plano grátis (sem checkout)
-      const checkoutUrl = 'sandboxUrl' in result
-        ? (env.isDevelopment ? result.sandboxUrl : result.checkoutUrl)
-        : null;
+      // Free plan has no checkout URL
+      const checkoutUrl = 'checkoutUrl' in result ? result.checkoutUrl : null;
+      const preferenceId = 'preferenceId' in result ? result.preferenceId : null;
 
       return reply.status(201).send({
         subscription: result.subscription,
         checkoutUrl,
-        preferenceId: 'preferenceId' in result ? result.preferenceId : null,
+        preferenceId,
       });
     } catch (error: any) {
       logger.error({ error: error.message }, 'Erro ao criar assinatura');
@@ -242,7 +238,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
       const body = schema.parse(request.body);
       const userId = request.user!.userId;
       const userEmail = request.user!.email || 'user@example.com';
-      const userName = request.user!.name || 'Usuário';
+      const userName = request.user!.email?.split('@')[0] || 'Usuário';
 
       const result = await mp.createPayment({
         userId,
@@ -253,14 +249,13 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
         paymentMethod: body.paymentMethod,
       });
 
-      const checkoutUrl = 'sandboxUrl' in result
-        ? (env.isDevelopment ? result.sandboxUrl : result.checkoutUrl)
-        : null;
+      const checkoutUrl = 'checkoutUrl' in result ? result.checkoutUrl : null;
+      const preferenceId = 'preferenceId' in result ? result.preferenceId : null;
 
       return reply.status(201).send({
         subscription: result.subscription,
         checkoutUrl,
-        preferenceId: 'preferenceId' in result ? result.preferenceId : null,
+        preferenceId,
       });
     } catch (error: any) {
       logger.error({ error: error.message }, 'Erro ao criar pagamento');
@@ -284,7 +279,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
       const body = schema.parse(request.body);
       const userId = request.user!.userId;
       const userEmail = request.user!.email || 'user@example.com';
-      const userName = request.user!.name || 'Usuário';
+      const userName = request.user!.email?.split('@')[0] || 'Usuário';
 
       const result = await mp.createPixPayment({
         userId,
@@ -533,6 +528,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     return reply.send({
       publicKey: env.mercadoPago.publicKey || null,
       isConfigured: !!env.mercadoPago.accessToken,
+      sandboxMode: env.mercadoPago.sandboxMode,
     });
   });
 }

@@ -202,6 +202,13 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
       const credentials = JSON.parse(credentialsData);
       instagramPlatform.setCredentials(credentials);
 
+      if (!env.supabase.url || !env.supabase.serviceKey) {
+        return reply.status(500).send({
+          error: 'SUPABASE_NOT_CONFIGURED',
+          message: 'Supabase storage is not configured',
+        });
+      }
+
       // Get video file from Supabase
       const supabase = createClient(env.supabase.url, env.supabase.serviceKey);
 

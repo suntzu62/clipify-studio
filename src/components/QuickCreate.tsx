@@ -4,25 +4,100 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { Zap, Loader2, CheckCircle2, XCircle, Sparkles, Captions, Scissors, Upload as UploadIcon } from 'lucide-react';
+import { Zap, Loader2, CheckCircle2, XCircle, Sparkles, Captions, Scissors, Upload as UploadIcon, TrendingUp } from 'lucide-react';
 import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
-import { createTempConfig } from '@/lib/jobs-api';
+import { createTempConfig, startJobFromTempConfig, type Job } from '@/lib/jobs-api';
+import { saveUserJob } from '@/lib/storage';
 import { FileUploadZone } from '@/components/FileUploadZone';
+import {
+  DEFAULT_CLIP_SETTINGS,
+  DEFAULT_SUBTITLE_PREFERENCES,
+  type ClipSettings,
+  type SubtitlePreferences,
+} from '@/types/project-config';
 
 interface QuickCreateProps {
   userId: string;
   getToken: () => Promise<string | null>;
   onProjectCreated?: (tempId: string) => void;
+  variant?: 'full' | 'compact';
 }
 
-export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateProps) => {
+export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'full' }: QuickCreateProps) => {
+  const isCompact = variant === 'compact';
+  const isOneClickAvailable = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+
   const [url, setUrl] = useState('');
+  const [objective, setObjective] = useState('');
+  const [targetDuration, setTargetDuration] = useState<30 | 60 | 90>(60);
+  const [subtitleStyle, setSubtitleStyle] = useState<'viral' | 'clean'>('viral');
+  const [oneClickMode, setOneClickMode] = useState(isOneClickAvailable);
+  const [showQuickOptions, setShowQuickOptions] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [isValid, setIsValid] = useState<boolean | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const effectiveOneClickMode = isCompact ? isOneClickAvailable : oneClickMode;
+
+  const getClipSettingsByDuration = (duration: 30 | 60 | 90): ClipSettings => {
+    if (duration === 30) {
+      return {
+        ...DEFAULT_CLIP_SETTINGS,
+        targetDuration: 30,
+        minDuration: 15,
+        maxDuration: 60,
+        clipCount: 10,
+        model: 'Fast',
+      };
+    }
+
+    if (duration === 90) {
+      return {
+        ...DEFAULT_CLIP_SETTINGS,
+        targetDuration: 90,
+        minDuration: 45,
+        maxDuration: 120,
+        clipCount: 6,
+        model: 'ClipAnything',
+      };
+    }
+
+    return {
+      ...DEFAULT_CLIP_SETTINGS,
+      targetDuration: 60,
+      minDuration: 30,
+      maxDuration: 90,
+      clipCount: 8,
+      model: 'ClipAnything',
+    };
+  };
+
+  const getSubtitlePreferencesByStyle = (style: 'viral' | 'clean'): SubtitlePreferences => {
+    if (style === 'clean') {
+      return {
+        ...DEFAULT_SUBTITLE_PREFERENCES,
+        format: 'single-line',
+        font: 'Inter',
+        fontSize: 30,
+        outline: false,
+        backgroundOpacity: 0.55,
+      };
+    }
+
+    return {
+      ...DEFAULT_SUBTITLE_PREFERENCES,
+      format: 'multi-line',
+      font: 'Montserrat',
+      fontSize: 34,
+      outline: true,
+      backgroundOpacity: 0.86,
+      shadow: true,
+    };
+  };
 
   const handleUrlChange = (value: string) => {
     setUrl(value);
@@ -70,9 +145,52 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
       const normalizedUrl = normalizeYoutubeUrl(url);
       const { tempId } = await createTempConfig(normalizedUrl, getToken);
 
+      const shouldUseOneClick = effectiveOneClickMode && isOneClickAvailable;
+
+      if (shouldUseOneClick) {
+        const clipSettings = getClipSettingsByDuration(targetDuration);
+        const subtitlePreferences = getSubtitlePreferencesByStyle(subtitleStyle);
+
+        const { jobId } = await startJobFromTempConfig(
+          tempId,
+          {
+            clipSettings,
+            subtitlePreferences,
+            specificMoments: objective.trim() || undefined,
+          },
+          getToken
+        );
+
+        const queuedJob: Job = {
+          id: jobId,
+          youtubeUrl: normalizedUrl,
+          status: 'queued',
+          progress: 0,
+          createdAt: new Date().toISOString(),
+          neededMinutes: 10,
+        };
+
+        saveUserJob(userId, queuedJob);
+
+        toast({
+          title: "🚀 Processamento iniciado",
+          description: "Seu vídeo entrou na fila com score de viralidade e configuração rápida.",
+        });
+
+        // Resetar form após iniciar
+        setUrl('');
+        setObjective('');
+        setIsValid(null);
+
+        navigate(`/projects/${jobId}`);
+        return;
+      }
+
       toast({
         title: "✨ Link validado com sucesso!",
-        description: "Agora personalize suas configurações antes de processar.",
+        description: isOneClickAvailable
+          ? "Agora personalize suas configurações antes de processar."
+          : "Modo 1 clique indisponível nesse ambiente. Abrindo configuração completa.",
       });
 
       // Resetar form
@@ -85,10 +203,10 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
       }
       // Sempre navegar para a página de configuração
       navigate(`/projects/configure/${tempId}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating project:', error);
-      
-      const errorMsg = error.message || '';
+
+      const errorMsg = error instanceof Error ? error.message : '';
       
       if (errorMsg.includes('quota') || errorMsg.includes('rate limit') || errorMsg.includes('429')) {
         toast({
@@ -128,6 +246,123 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
     return base;
   };
 
+  if (isCompact) {
+    return (
+      <div className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="flex flex-col gap-3 xl:flex-row">
+            <div className="relative flex-1">
+              <Input
+                id="youtube-url-compact"
+                type="url"
+                placeholder="Cole o link do YouTube"
+                value={url}
+                onChange={(e) => handleUrlChange(e.target.value)}
+                disabled={isSubmitting}
+                className={`h-12 text-sm pr-10 ${isValid === true ? 'border-green-500' : ''} ${isValid === false ? 'border-destructive' : ''}`}
+                aria-label="Link do YouTube"
+              />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                {isValidating && (
+                  <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                )}
+                {!isValidating && isValid === true && (
+                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                )}
+                {!isValidating && isValid === false && (
+                  <XCircle className="w-4 h-4 text-destructive" />
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                type="submit"
+                disabled={isSubmitting || isValid === false}
+                className="h-12 min-w-[170px] gap-2"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {effectiveOneClickMode ? 'Gerando...' : 'Validando...'}
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4" />
+                    {effectiveOneClickMode ? 'Gerar em 1 clique' : 'Configurar'}
+                  </>
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12"
+                onClick={() => setShowQuickOptions((prev) => !prev)}
+              >
+                {showQuickOptions ? 'Ocultar ajustes' : 'Ajustes rápidos'}
+              </Button>
+            </div>
+          </div>
+
+          {showQuickOptions && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Duração alvo</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[30, 60, 90].map((duration) => (
+                    <Button
+                      key={`compact-${duration}`}
+                      type="button"
+                      size="sm"
+                      variant={targetDuration === duration ? 'default' : 'outline'}
+                      className="h-8 text-xs"
+                      onClick={() => setTargetDuration(duration as 30 | 60 | 90)}
+                      disabled={isSubmitting}
+                    >
+                      {duration}s
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Legenda</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={subtitleStyle === 'viral' ? 'default' : 'outline'}
+                    className="h-8 text-xs"
+                    onClick={() => setSubtitleStyle('viral')}
+                    disabled={isSubmitting}
+                  >
+                    Viral
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={subtitleStyle === 'clean' ? 'default' : 'outline'}
+                    className="h-8 text-xs"
+                    onClick={() => setSubtitleStyle('clean')}
+                    disabled={isSubmitting}
+                  >
+                    Clean
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isValid === false && (
+            <p className="text-xs text-destructive">
+              Insira um link válido do YouTube (youtube.com/watch ou youtu.be)
+            </p>
+          )}
+        </form>
+      </div>
+    );
+  }
+
   return (
     <Card className="border-2 border-primary/20 shadow-lg bg-gradient-to-br from-background to-accent/5">
       <CardContent className="pt-6 pb-8 space-y-6">
@@ -137,10 +372,92 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
             <h3 className="text-2xl font-bold text-foreground">Criar novo projeto</h3>
           </div>
           <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
-            Cole o link do YouTube e configure legendas, duração e estilo antes de gerar seus clipes
+            Cole o link, defina objetivo rápido (legendas + duração) e gere clipes com score viral em poucos cliques
           </p>
         </div>
-        
+
+        <div className="rounded-xl border border-primary/20 bg-accent/20 p-4 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Modo 1 clique</p>
+              <p className="text-xs text-muted-foreground">
+                Envia direto para processamento sem abrir a tela avançada
+              </p>
+            </div>
+            <Switch
+              checked={oneClickMode}
+              onCheckedChange={setOneClickMode}
+              disabled={isSubmitting || !isOneClickAvailable}
+              aria-label="Ativar modo 1 clique"
+            />
+          </div>
+
+          {!isOneClickAvailable && (
+            <p className="text-xs text-muted-foreground">
+              No ambiente atual, o fluxo abre a configuração completa antes de processar.
+            </p>
+          )}
+
+          <div className="space-y-2">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Duração alvo</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {[30, 60, 90].map((duration) => (
+                <Button
+                  key={duration}
+                  type="button"
+                  size="sm"
+                  variant={targetDuration === duration ? 'default' : 'outline'}
+                  className="h-9"
+                  onClick={() => setTargetDuration(duration as 30 | 60 | 90)}
+                  disabled={isSubmitting}
+                >
+                  {duration}s
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Legendas</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={subtitleStyle === 'viral' ? 'default' : 'outline'}
+                className="h-9"
+                onClick={() => setSubtitleStyle('viral')}
+                disabled={isSubmitting}
+              >
+                Viral Boost
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={subtitleStyle === 'clean' ? 'default' : 'outline'}
+                className="h-9"
+                onClick={() => setSubtitleStyle('clean')}
+                disabled={isSubmitting}
+              >
+                Clean Glass
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="objective-input" className="text-xs uppercase tracking-wide text-muted-foreground">
+              Objetivo do corte (opcional)
+            </Label>
+            <Input
+              id="objective-input"
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              disabled={isSubmitting}
+              placeholder="Ex: priorizar momentos emocionantes com CTA forte"
+              className="h-10 text-sm"
+            />
+          </div>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="flex flex-col md:flex-row gap-3">
             <div className="relative flex-1">
@@ -179,12 +496,12 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Validando...
+                  {effectiveOneClickMode ? 'Gerando...' : 'Validando...'}
                 </>
               ) : (
                 <>
                   <Zap className="w-5 h-5" />
-                  Configurar Clipes
+                  {effectiveOneClickMode ? 'Gerar em 1 Clique' : 'Configurar Clipes'}
                 </>
               )}
             </Button>
@@ -209,6 +526,10 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated }: QuickCreateP
           <Badge variant="secondary" className="gap-1.5 py-1.5 px-3">
             <Captions className="w-3.5 h-3.5" />
             Legendas queimadas
+          </Badge>
+          <Badge variant="secondary" className="gap-1.5 py-1.5 px-3">
+            <TrendingUp className="w-3.5 h-3.5" />
+            Score viral
           </Badge>
           <Badge variant="secondary" className="gap-1.5 py-1.5 px-3">
             <Scissors className="w-3.5 h-3.5" />

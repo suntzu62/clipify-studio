@@ -3,3 +3,7 @@ export { Testimonials } from './Testimonials';
 export { ClipsShowcase } from './ClipsShowcase';
 export { FAQ } from './FAQ';
 export { CTA } from './CTA';
+export { TiltCard } from './TiltCard';
+export { FloatingOrbs } from './FloatingOrbs';
+export { AnimatedText } from './AnimatedText';
+export { MouseSpotlight } from './MouseSpotlight';

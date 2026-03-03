@@ -58,3 +58,13 @@ export function clearUserJobs(userId: string): void {
     console.error('Failed to clear user jobs from storage:', error);
   }
 }
+
+export function deleteUserJob(userId: string, jobId: string): void {
+  try {
+    const jobs = getUserJobs(userId);
+    const filteredJobs = jobs.filter((job) => job.id !== jobId);
+    localStorage.setItem(getStorageKey(userId), JSON.stringify(filteredJobs));
+  } catch (error) {
+    console.error('Failed to delete user job from storage:', error);
+  }
+}

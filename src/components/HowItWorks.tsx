@@ -1,6 +1,8 @@
+import { motion } from 'framer-motion';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Upload, Brain, Scissors, Share2, ArrowRight } from "lucide-react";
+import { AnimatedText } from '@/components/landing';
 
 const HowItWorks = () => {
   const steps = [
@@ -34,54 +36,76 @@ const HowItWorks = () => {
     <section className="py-24 bg-background">
       <div className="container mx-auto px-6">
         <div className="text-center space-y-4 mb-16">
-          <h2 className="text-3xl md:text-5xl font-bold text-foreground">
-            Como funciona
-          </h2>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
+          <AnimatedText
+            text="Como funciona"
+            as="h2"
+            className="text-3xl md:text-5xl font-bold text-foreground"
+          />
+          <motion.p
+            initial={{ opacity: 0, y: 15 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.3, duration: 0.5 }}
+            className="text-xl text-muted-foreground max-w-3xl mx-auto"
+          >
             4 passos simples para transformar seus vídeos em dezenas de conteúdos virais
-          </p>
+          </motion.p>
         </div>
 
         <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+          <div className="relative grid md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+            {/* Animated connecting line (desktop only) */}
+            <motion.div
+              initial={{ scaleX: 0 }}
+              whileInView={{ scaleX: 1 }}
+              viewport={{ once: true }}
+              transition={{ duration: 1.5, ease: 'easeInOut', delay: 0.5 }}
+              className="hidden lg:block absolute top-[4.5rem] left-[12%] right-[12%] h-[2px] z-0"
+              style={{
+                transformOrigin: 'left',
+                background: 'linear-gradient(90deg, hsl(262 100% 65%), hsl(280 100% 60%), hsl(200 100% 60%))',
+              }}
+            />
+
             {steps.map((step, index) => (
-              <div key={index} className="relative">
-                <Card className="text-center p-6 h-full group hover:shadow-xl transition-all duration-300 hover:scale-105">
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 80, rotateX: 15 }}
+                whileInView={{ opacity: 1, y: 0, rotateX: 0 }}
+                viewport={{ once: true }}
+                transition={{
+                  delay: index * 0.2,
+                  duration: 0.7,
+                  ease: [0.22, 1, 0.36, 1],
+                }}
+                whileHover={{ y: -8, transition: { duration: 0.3 } }}
+                style={{ perspective: 800 }}
+                className="relative z-10"
+              >
+                <Card className="text-center p-6 h-full glass-card glass-card-hover transition-all duration-300">
                   <CardContent className="space-y-4">
-                    <div className={`w-16 h-16 mx-auto rounded-xl bg-gradient-to-r ${step.color} p-4 group-hover:scale-110 transition-transform duration-300`}>
+                    <div
+                      className={`w-16 h-16 mx-auto rounded-xl bg-gradient-to-r ${step.color} p-4 animate-glow-pulse`}
+                      style={{ animationDelay: `${index * 0.5}s` }}
+                    >
                       <step.icon className="w-full h-full text-white" />
                     </div>
                     <h3 className="text-lg font-semibold">{step.title}</h3>
                     <p className="text-muted-foreground text-sm">{step.description}</p>
                   </CardContent>
                 </Card>
-                
-                {/* Arrow for desktop */}
-                {index < steps.length - 1 && (
-                  <div className="hidden lg:block absolute top-1/2 -right-4 transform -translate-y-1/2 z-10">
-                    <ArrowRight className="h-6 w-6 text-primary" />
-                  </div>
-                )}
-              </div>
+              </motion.div>
             ))}
           </div>
 
-          {/* Timeline for mobile */}
-          <div className="lg:hidden flex justify-center mb-8">
-            <div className="flex flex-col items-center space-y-4">
-              {steps.map((_, index) => (
-                <div key={index} className="flex items-center">
-                  <div className="w-2 h-2 bg-primary rounded-full" />
-                  {index < steps.length - 1 && (
-                    <div className="w-px h-8 bg-border ml-1" />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
           {/* CTA */}
-          <div className="text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.8, duration: 0.6 }}
+            className="text-center"
+          >
             <Button variant="hero" size="lg" className="group">
               Experimente Grátis Agora
               <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
@@ -89,7 +113,7 @@ const HowItWorks = () => {
             <p className="text-sm text-muted-foreground mt-4">
               Sem cartão de crédito • 7 dias grátis • Cancele quando quiser
             </p>
-          </div>
+          </motion.div>
         </div>
       </div>
     </section>

@@ -1,6 +1,6 @@
 import { Job } from 'bullmq';
 import { createLogger } from '../config/logger.js';
-import type { JobData, JobResult, JobProgress, Clip, SubtitlePreferences } from '../types/index.js';
+import type { JobData, JobResult, JobProgress, Clip, SubtitlePreferences, Transcript } from '../types/index.js';
 import { DEFAULT_SUBTITLE_PREFERENCES } from '../types/index.js';
 import { downloadVideo, cleanupVideo } from '../services/download.js';
 import { transcribeVideo, cleanupAudio } from '../services/transcription.js';
@@ -10,8 +10,44 @@ import { uploadFile } from '../services/storage.js';
 import { env } from '../config/env.js';
 import { redis } from '../config/redis.js';
 import { jobs as dbJobs, clips as dbClips } from '../services/database.service.js';
+import { incrementUsage } from '../services/mercadopago.service.js';
 
 const logger = createLogger('processor');
+
+function applyTimeframeToTranscript(
+  transcript: Transcript,
+  timeframe?: JobData['timeframe']
+): Transcript {
+  if (!timeframe) {
+    return transcript;
+  }
+
+  const startTime = Math.max(0, Number(timeframe.startTime || 0));
+  const endTime = Math.min(transcript.duration, Number(timeframe.endTime || transcript.duration));
+
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) {
+    return transcript;
+  }
+
+  const scopedSegments = transcript.segments
+    .filter((segment) => segment.end > startTime && segment.start < endTime)
+    .map((segment) => ({
+      ...segment,
+      start: Math.max(segment.start, startTime),
+      end: Math.min(segment.end, endTime),
+    }))
+    .filter((segment) => segment.end > segment.start);
+
+  if (scopedSegments.length === 0) {
+    return transcript;
+  }
+
+  return {
+    ...transcript,
+    duration: endTime,
+    segments: scopedSegments,
+  };
+}
 
 /**
  * Processador principal - executa todas as etapas sequencialmente
@@ -27,9 +63,34 @@ const logger = createLogger('processor');
  */
 export async function processVideo(job: Job<JobData>): Promise<JobResult> {
   const { jobId, userId, sourceType, targetDuration, clipCount } = job.data;
+  const clipSettings = job.data.clipSettings;
+  const timeframe = job.data.timeframe;
+  const genre = job.data.genre;
+  const specificMoments = job.data.specificMoments;
+
+  const effectiveTargetDuration = clipSettings?.targetDuration ?? targetDuration ?? 60;
+  const effectiveClipCount = clipSettings?.clipCount ?? clipCount ?? 8;
+  const effectiveMinDuration = clipSettings?.minDuration ?? 30;
+  const effectiveMaxDuration = clipSettings?.maxDuration ?? 90;
+  const clippingModel = clipSettings?.model ?? 'ClipAnything';
   const startTime = Date.now();
 
-  logger.info({ jobId, userId, sourceType, targetDuration, clipCount }, 'Starting video processing');
+  logger.info(
+    {
+      jobId,
+      userId,
+      sourceType,
+      targetDuration: effectiveTargetDuration,
+      clipCount: effectiveClipCount,
+      minDuration: effectiveMinDuration,
+      maxDuration: effectiveMaxDuration,
+      model: clippingModel,
+      hasTimeframe: Boolean(timeframe),
+      genre,
+      hasSpecificMoments: Boolean(specificMoments),
+    },
+    'Starting video processing'
+  );
 
   let videoPath: string | undefined;
   let audioPath: string | undefined;
@@ -43,8 +104,8 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       source_type: sourceType,
       youtube_url: job.data.youtubeUrl,
       upload_path: job.data.uploadPath,
-      target_duration: targetDuration,
-      clip_count: clipCount,
+      target_duration: effectiveTargetDuration,
+      clip_count: effectiveClipCount,
       status: 'processing',
     });
 
@@ -100,11 +161,16 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     // ============================================
     await updateProgress(job, 'scenes', 40, 'Analisando cenas do vídeo...');
 
-    const highlightAnalysis = await analyzeHighlights(transcript, {
-      targetDuration: targetDuration || 60,
-      clipCount: clipCount || 8, // 8-12 clipes conforme requisitos
-      minDuration: 30,
-      maxDuration: 90,
+    const transcriptForAnalysis = applyTimeframeToTranscript(transcript, timeframe);
+
+    const highlightAnalysis = await analyzeHighlights(transcriptForAnalysis, {
+      targetDuration: effectiveTargetDuration,
+      clipCount: effectiveClipCount,
+      minDuration: effectiveMinDuration,
+      maxDuration: effectiveMaxDuration,
+      model: clippingModel,
+      genre,
+      specificMoments,
     });
 
     logger.info(
@@ -134,7 +200,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     await updateProgress(job, 'render', 65, 'Renderizando vídeos...');
 
     // Buscar preferências de legendas do Redis (se disponíveis)
-    const subtitlePreferences = await getSubtitlePreferences(jobId);
+    const subtitlePreferences = await getSubtitlePreferences(jobId, job.data.subtitlePreferences);
 
     logger.info(
       { jobId, hasCustomPreferences: subtitlePreferences !== DEFAULT_SUBTITLE_PREFERENCES },
@@ -255,14 +321,20 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     await redis.set(
       reprocessDataKey,
       JSON.stringify({
-        videoPath,
-        transcript,
-        jobData: {
-          userId,
-          sourceType,
-          youtubeUrl: job.data.youtubeUrl,
-        },
-      }),
+            videoPath,
+            transcript,
+            jobData: {
+              userId,
+              sourceType,
+              youtubeUrl: job.data.youtubeUrl,
+              uploadPath: job.data.uploadPath,
+              targetDuration: effectiveTargetDuration,
+              clipCount: effectiveClipCount,
+              timeframe: job.data.timeframe,
+              genre: job.data.genre,
+              specificMoments: job.data.specificMoments,
+            },
+          }),
       'EX',
       60 * 60 * 24 * 30 // 30 days
     );
@@ -284,6 +356,13 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     }
 
     logger.info({ jobId }, 'Reprocess data saved to Redis');
+
+    // Debit usage only after successful processing/export.
+    // Use per-job idempotency keys so retries do not double-charge.
+    const processedMinutes = Math.max(1, Math.ceil(transcriptForAnalysis.duration / 60));
+    const generatedClips = Math.max(1, clips.length);
+    await incrementUsage(userId, 'minute', processedMinutes, `job:${jobId}:minute`, 'job_completed');
+    await incrementUsage(userId, 'clip', generatedClips, `job:${jobId}:clip`, 'job_completed');
 
     await updateProgress(job, 'completed', 100, 'Processamento completo!');
 
@@ -317,14 +396,8 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       error: error.message,
     });
 
-    const processingTime = Date.now() - startTime;
-
-    return {
-      jobId,
-      status: 'failed',
-      error: error.message,
-      processingTime,
-    };
+    // Re-throw so BullMQ properly marks the job as failed (not completed)
+    throw error;
   } finally {
     // Cleanup: remover arquivos temporários
     const cleanupPromises = [];
@@ -380,7 +453,10 @@ async function updateProgress(
  * Busca preferências de legendas do Redis
  * Retorna preferências padrão se não houver customizações
  */
-async function getSubtitlePreferences(jobId: string): Promise<SubtitlePreferences> {
+async function getSubtitlePreferences(
+  jobId: string,
+  fromJobData?: SubtitlePreferences
+): Promise<SubtitlePreferences> {
   try {
     // Buscar preferências globais do job no Redis
     const key = `subtitle:${jobId}:global`;
@@ -390,6 +466,11 @@ async function getSubtitlePreferences(jobId: string): Promise<SubtitlePreference
       const preferences = JSON.parse(data);
       logger.info({ jobId, key }, 'Custom subtitle preferences found in Redis');
       return preferences;
+    }
+
+    if (fromJobData) {
+      logger.info({ jobId }, 'Using subtitle preferences from job payload');
+      return fromJobData;
     }
 
     // Se não houver preferências personalizadas, usar padrões

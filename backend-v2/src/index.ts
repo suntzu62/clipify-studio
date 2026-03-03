@@ -1,8 +1,10 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { registerRoutes } from './api/routes.js';
+import { verifyToken } from './services/auth.service.js';
 
 // Importar worker para iniciar processamento
 import './jobs/worker.js';
@@ -27,28 +29,58 @@ await app.register(cors, {
   credentials: true,
 });
 
+// Cookie parser (necessario para auth via httpOnly cookies)
+await app.register(cookie);
+
 // ============================================
 // MIDDLEWARE DE AUTENTICAÇÃO
 // ============================================
 app.addHook('onRequest', async (request, reply) => {
-  // Skip auth para health check, proxy de vídeos e OAuth routes
-  if (
-    request.url === '/health' ||
-    request.url.startsWith('/clips/') ||
-    request.url.startsWith('/auth/google')
-  ) {
+  // Skip API key para rotas publicas e fluxo de autenticacao
+  const publicPrefixes = [
+    '/clips/',
+    '/auth/',
+    '/plans',
+    '/payments/config',
+    '/webhooks/mercadopago',
+    '/payments/webhooks/mercadopago',
+    '/payments/success',
+    '/payments/failure',
+    '/payments/pending',
+  ];
+
+  if (request.url === '/health' || publicPrefixes.some((prefix) => request.url.startsWith(prefix))) {
     return;
   }
 
-  // Verificar API Key
-  const apiKey = request.headers['x-api-key'] || request.headers['authorization']?.replace('Bearer ', '');
+  const xApiKey = request.headers['x-api-key'];
+  const bearerToken = request.headers['authorization']?.replace('Bearer ', '');
+  const cookieToken = (request.cookies as { access_token?: string } | undefined)?.access_token;
 
-  if (!apiKey || apiKey !== env.apiKey) {
-    return reply.status(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Invalid or missing API key',
-    });
+  // 1) API key explicita (recomendado para integrações internas)
+  if (xApiKey && xApiKey === env.apiKey) {
+    return;
   }
+
+  // 2) Compatibilidade: Bearer <api-key>
+  if (bearerToken && bearerToken === env.apiKey) {
+    return;
+  }
+
+  // 3) JWT válido (fluxo autenticado por usuário), via header ou cookie
+  for (const token of [bearerToken, cookieToken]) {
+    if (!token) continue;
+    const decoded = verifyToken(token);
+    if (decoded) {
+      (request as any).user = decoded;
+      return;
+    }
+  }
+
+  return reply.status(401).send({
+    error: 'UNAUTHORIZED',
+    message: 'Invalid or missing API key/token',
+  });
 });
 
 // ============================================

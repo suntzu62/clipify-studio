@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { z } from 'zod';
@@ -13,17 +13,81 @@ import {
   type ProjectConfig,
 } from '../types/index.js';
 import { addVideoJob, getJobStatus, cancelJob, getQueueHealth, videoQueue } from '../jobs/queue.js';
+import { clips as dbClips } from '../services/database.service.js';
 import { createLogger } from '../config/logger.js';
 import { createClient } from '@supabase/supabase-js';
 import { env } from '../config/env.js';
 import { redis, setTempConfig, getTempConfig, deleteTempConfig } from '../config/redis.js';
 import { registerSocialMediaRoutes } from './social-media.js';
 import { registerAuthRoutes } from './auth.routes.js';
+import { registerPaymentsRoutes } from './payments.routes.js';
 import { reprocessClip } from '../services/clip-reprocessor.js';
 import * as db from '../services/database.service.js';
+import * as mp from '../services/mercadopago.service.js';
 
 const logger = createLogger('routes');
 const dbJobs = db.jobs;
+
+function getRequestUserId(request: any): string | undefined {
+  return request?.user?.userId;
+}
+
+function getProgressValue(progress: unknown): number {
+  if (typeof progress === 'number') {
+    return progress;
+  }
+
+  if (
+    typeof progress === 'object' &&
+    progress !== null &&
+    'progress' in progress &&
+    typeof (progress as { progress?: unknown }).progress === 'number'
+  ) {
+    return (progress as { progress: number }).progress;
+  }
+
+  return 0;
+}
+
+async function enforceUsageLimits(
+  reply: FastifyReply,
+  userId: string,
+  requestedClipCount: number,
+  targetDurationSeconds: number
+): Promise<boolean> {
+  const [clipLimits, minuteLimits] = await Promise.all([
+    mp.checkUserLimits(userId, 'clip'),
+    mp.checkUserLimits(userId, 'minute'),
+  ]);
+
+  const estimatedMinutes = Math.max(1, Math.ceil((requestedClipCount * targetDurationSeconds) / 60));
+  const clipsWouldExceed = clipLimits.currentUsage + requestedClipCount > clipLimits.maxAllowed;
+  const minutesWouldExceed = minuteLimits.currentUsage + estimatedMinutes > minuteLimits.maxAllowed;
+
+  if (!clipLimits.canUse || !minuteLimits.canUse || clipsWouldExceed || minutesWouldExceed) {
+    reply.status(403).send({
+      error: 'LIMIT_EXCEEDED',
+      message: 'Você atingiu o limite do seu plano. Faça upgrade para continuar.',
+      upgradeUrl: '/billing',
+      limits: {
+        planName: clipLimits.planName,
+        clips: {
+          used: clipLimits.currentUsage,
+          limit: clipLimits.maxAllowed,
+          requested: requestedClipCount,
+        },
+        minutes: {
+          used: minuteLimits.currentUsage,
+          limit: minuteLimits.maxAllowed,
+          estimatedRequested: estimatedMinutes,
+        },
+      },
+    });
+    return false;
+  }
+
+  return true;
+}
 
 // Criar cliente Supabase global com service_key (bypassa RLS automaticamente) - apenas se configurado
 const supabaseClient = env.supabase.url && env.supabase.serviceKey
@@ -35,6 +99,11 @@ export async function registerRoutes(app: FastifyInstance) {
   // AUTHENTICATION ROUTES
   // ============================================
   await registerAuthRoutes(app);
+
+  // ============================================
+  // PAYMENT ROUTES (MercadoPago)
+  // ============================================
+  await registerPaymentsRoutes(app);
 
   // ============================================
   // HEALTH CHECK
@@ -72,13 +141,29 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     const input = parsed.data;
+    const requestUserId = getRequestUserId(request);
+
+    if (requestUserId && input.userId !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only create jobs for your own user',
+      });
+    }
+
+    const effectiveUserId = requestUserId || input.userId;
+
+    if (!(await enforceUsageLimits(reply, effectiveUserId, input.clipCount, input.targetDuration))) {
+      return;
+    }
+
     const jobId = `job_${randomUUID().replace(/-/g, '')}`;
 
     const jobData: JobData = {
       jobId,
-      userId: input.userId,
+      userId: effectiveUserId,
       sourceType: 'upload',
       uploadPath: input.storagePath,
+      fileName: input.fileName,
       targetDuration: input.targetDuration,
       clipCount: input.clipCount,
       createdAt: new Date(),
@@ -86,7 +171,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
     await addVideoJob(jobData);
 
-    logger.info({ jobId, userId: input.userId, storagePath: input.storagePath }, 'Job created from upload');
+    logger.info({ jobId, userId: effectiveUserId, storagePath: input.storagePath }, 'Job created from upload');
 
     return reply.status(201).send({
       jobId,
@@ -111,6 +196,20 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     const input = parsed.data;
+    const requestUserId = getRequestUserId(request);
+
+    if (requestUserId && input.userId !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only create jobs for your own user',
+      });
+    }
+
+    const effectiveUserId = requestUserId || input.userId;
+
+    if (!(await enforceUsageLimits(reply, effectiveUserId, input.clipCount, input.targetDuration))) {
+      return;
+    }
 
     // Validar sourceType
     if (input.sourceType === 'youtube' && !input.youtubeUrl) {
@@ -132,7 +231,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
     const jobData: JobData = {
       jobId,
-      userId: input.userId,
+      userId: effectiveUserId,
       sourceType: input.sourceType,
       youtubeUrl: input.youtubeUrl,
       uploadPath: input.uploadPath,
@@ -143,7 +242,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
     await addVideoJob(jobData);
 
-    logger.info({ jobId, userId: input.userId }, 'Job created');
+    logger.info({ jobId, userId: effectiveUserId }, 'Job created');
 
     return reply.status(201).send({
       jobId,
@@ -157,17 +256,74 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.get('/jobs', async (request, reply) => {
     try {
-      // Para desenvolvimento, usar um userId fixo ou extrair do JWT/session
-      // TODO: Implementar autenticação JWT adequada
-      const userId = (request as any).user?.id || 'dev-user';
+      const query = request.query as { userId?: string; includeLegacy?: string } | undefined;
+      const requestedUserId = query?.userId?.trim();
+      const includeLegacy = query?.includeLegacy === 'true';
+      const requestUserId = getRequestUserId(request);
 
-      logger.info({ userId }, 'Fetching all jobs for user');
+      const userIds = new Set<string>();
 
-      const userJobs = await dbJobs.findByUserId(userId);
+      if (requestUserId) {
+        if (requestedUserId && requestedUserId !== requestUserId) {
+          return reply.status(403).send({
+            error: 'FORBIDDEN',
+            message: 'You can only access your own jobs',
+          });
+        }
+        userIds.add(requestUserId);
+      } else {
+        if (requestedUserId) userIds.add(requestedUserId);
+        if (includeLegacy) userIds.add('dev-user');
+        if (userIds.size === 0) userIds.add('dev-user');
+      }
 
-      logger.info({ userId, count: userJobs.length }, 'Found jobs for user');
+      logger.info({ userIds: Array.from(userIds) }, 'Fetching all jobs for users');
 
-      return reply.send(userJobs);
+      const jobsByUser = await Promise.all(
+        Array.from(userIds).map(async (userId) => dbJobs.findByUserId(userId))
+      );
+
+      const mergedJobs = jobsByUser.flat();
+      const uniqueById = new Map<string, any>();
+      for (const job of mergedJobs) {
+        if (!uniqueById.has(job.id)) {
+          uniqueById.set(job.id, job);
+        }
+      }
+
+      const jobs = Array.from(uniqueById.values())
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      const clipRows = await Promise.all(
+        jobs.map(async (job) => {
+          const clips = await dbClips.findByJobId(job.id);
+          return { jobId: job.id, count: clips.length };
+        })
+      );
+      const clipsByJob = new Map<string, number>(
+        clipRows.map((row) => [row.jobId, row.count])
+      );
+
+      const withClipData = jobs.map((job) => {
+        const metadataTitle = typeof job.metadata === 'object' ? job.metadata?.title : undefined;
+        const displayTitle =
+          (typeof job.title === 'string' && job.title.trim().length > 0 ? job.title : null) ||
+          (typeof metadataTitle === 'string' && metadataTitle.trim().length > 0 ? metadataTitle : null);
+
+        return {
+          ...job,
+          display_title: displayTitle,
+          clips_ready_count: clipsByJob.get(job.id) || 0,
+        };
+      });
+
+      logger.info({
+        requestedUserId,
+        includeLegacy,
+        count: withClipData.length,
+      }, 'Found jobs for users');
+
+      return reply.send(withClipData);
     } catch (error: any) {
       logger.error({ error: error.message }, 'Failed to fetch user jobs');
       return reply.status(500).send({
@@ -182,6 +338,15 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.get('/jobs/:jobId', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
+    const requestUserId = getRequestUserId(request);
+
+    const dbJob = await dbJobs.findById(jobId);
+    if (requestUserId && dbJob && dbJob.user_id !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only access your own jobs',
+      });
+    }
 
     const status = await getJobStatus(jobId);
 
@@ -192,36 +357,80 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
+    const queueUserId = (status.data as { userId?: string } | undefined)?.userId;
+    if (requestUserId && queueUserId && queueUserId !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only access your own jobs',
+      });
+    }
+
     // Transform result to match frontend expectations
-    let result = status.returnvalue;
-    if (result && result.clips && Array.isArray(result.clips)) {
+    // NOTE: BullMQ may return returnvalue as a JSON string in some cases
+    let result: any;
+    try {
+      result = typeof status.returnvalue === 'string'
+        ? JSON.parse(status.returnvalue)
+        : status.returnvalue;
+    } catch {
+      result = status.returnvalue;
+    }
+
+    logger.info({
+      jobId,
+      state: status.state,
+      hasReturnvalue: !!status.returnvalue,
+      returnvalueType: typeof status.returnvalue,
+      resultKeys: result ? Object.keys(result) : null,
+      hasClips: result?.clips ? result.clips.length : 'no clips key',
+    }, 'GET /jobs/:jobId - returnvalue debug');
+
+    // Helper to transform raw clip data to frontend format
+    const transformClip = (clip: any) => {
+      const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
+      return {
+        id: clip.id,
+        title: clip.title,
+        description: clip.description || clip.transcript || clip.reason || 'Descrição gerada automaticamente',
+        hashtags: clip.hashtags || clip.keywords || [],
+        previewUrl: proxyUrl,
+        downloadUrl: clip.storagePath || clip.video_url || proxyUrl,
+        thumbnailUrl: clip.thumbnail || clip.thumbnail_url,
+        duration: clip.duration,
+        status: 'ready',
+        start: clip.start ?? clip.start_time,
+        end: clip.end ?? clip.end_time,
+        score: clip.score,
+      };
+    };
+
+    if (result && result.clips && Array.isArray(result.clips) && result.clips.length > 0) {
       result = {
         ...result,
-        clips: result.clips.map((clip: any) => {
-          // Use proxy URL instead of direct Supabase URL (workaround for private buckets)
-          const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
-
-          return {
-            id: clip.id,
-            title: clip.title,
-            description: clip.transcript || clip.reason || 'Descrição gerada automaticamente',
-            hashtags: clip.keywords || [],
-            previewUrl: proxyUrl,
-            downloadUrl: clip.storagePath || proxyUrl,
-            thumbnailUrl: clip.thumbnail,
-            duration: clip.duration,
-            status: 'ready',
-            start: clip.start,
-            end: clip.end,
-            score: clip.score,
-          };
-        }),
+        clips: result.clips.map(transformClip),
       };
+    } else if (status.state === 'completed') {
+      // Fallback: fetch clips from PostgreSQL database when BullMQ returnvalue has no clips
+      logger.info({ jobId }, 'No clips in returnvalue, fetching from database');
+      try {
+        const dbClipRows = await dbClips.findByJobId(jobId);
+        if (dbClipRows.length > 0) {
+          logger.info({ jobId, clipCount: dbClipRows.length }, 'Found clips in database');
+          result = {
+            ...(result || {}),
+            clips: dbClipRows.map(transformClip),
+          };
+        } else {
+          logger.warn({ jobId }, 'No clips found in database either');
+        }
+      } catch (dbError: any) {
+        logger.error({ jobId, error: dbError.message }, 'Failed to fetch clips from database');
+      }
     }
 
     // Derive currentStep from job state and progress
     let currentStep = 'ingest';
-    const progressValue = typeof status.progress === 'object' ? status.progress.progress : status.progress;
+    const progressValue = getProgressValue(status.progress);
 
     if (status.state === 'completed') {
       currentStep = 'export';
@@ -245,14 +454,23 @@ export async function registerRoutes(app: FastifyInstance) {
       else currentStep = 'ingest';
     }
 
+    // Detect jobs where BullMQ state is 'completed' but processor returned a failure
+    // (legacy behavior before the throw fix)
+    const effectiveState = (status.state === 'completed' && result?.status === 'failed')
+      ? 'failed'
+      : status.state;
+    const effectiveError = (effectiveState === 'failed')
+      ? (status.failedReason || result?.error || 'Unknown error')
+      : status.failedReason;
+
     return {
       jobId: status.id,
-      state: status.state,
-      status: status.state, // Add status field for frontend compatibility
-      currentStep, // Add currentStep for timeline tracking
+      state: effectiveState,
+      status: effectiveState,
+      currentStep: effectiveState === 'failed' ? currentStep : currentStep,
       progress: status.progress,
       result,
-      error: status.failedReason,
+      error: effectiveError,
       finishedAt: status.finishedOn ? new Date(status.finishedOn).toISOString() : null,
     };
   });
@@ -262,6 +480,15 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.get('/api/jobs/:jobId/stream', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
+    const requestUserId = getRequestUserId(request);
+
+    const dbJob = await dbJobs.findById(jobId);
+    if (requestUserId && dbJob && dbJob.user_id !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only access your own jobs',
+      });
+    }
 
     // Verificar se job existe
     const status = await getJobStatus(jobId);
@@ -269,6 +496,14 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.status(404).send({
         error: 'JOB_NOT_FOUND',
         message: `Job ${jobId} not found`,
+      });
+    }
+
+    const queueUserId = (status.data as { userId?: string } | undefined)?.userId;
+    if (requestUserId && queueUserId && queueUserId !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only access your own jobs',
       });
     }
 
@@ -307,7 +542,7 @@ export async function registerRoutes(app: FastifyInstance) {
     };
 
     // Enviar status inicial
-    const initialProgressValue = typeof status.progress === 'object' ? status.progress.progress : status.progress;
+    const initialProgressValue = getProgressValue(status.progress);
     sendSSE('progress', {
       jobId: status.id,
       state: status.state,
@@ -319,8 +554,8 @@ export async function registerRoutes(app: FastifyInstance) {
     // Listen para progress updates
     queueEvents.on('progress', async ({ jobId: eventJobId, data }) => {
       if (eventJobId === jobId) {
-        const progressData = typeof data === 'object' ? data : { progress: data };
-        const progressValue = progressData.progress || 0;
+        const progressData = typeof data === 'object' && data !== null ? data : { progress: data };
+        const progressValue = getProgressValue(data);
 
         sendSSE('progress', {
           jobId: eventJobId,
@@ -336,28 +571,54 @@ export async function registerRoutes(app: FastifyInstance) {
     queueEvents.on('completed', async ({ jobId: eventJobId, returnvalue }) => {
       if (eventJobId === jobId) {
         // Transform result like in GET endpoint
-        let result = returnvalue;
-        if (result && result.clips && Array.isArray(result.clips)) {
+        // NOTE: BullMQ QueueEvents returns returnvalue as a JSON string, need to parse it
+        let result: any;
+        try {
+          result = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue;
+        } catch {
+          logger.error({ jobId }, 'Failed to parse returnvalue in SSE completed event');
+          result = {};
+        }
+
+        // Helper to transform clip data
+        const transformClip = (clip: any) => {
+          const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
+          return {
+            id: clip.id,
+            title: clip.title,
+            description: clip.description || clip.transcript || clip.reason || 'Descrição gerada automaticamente',
+            hashtags: clip.hashtags || clip.keywords || [],
+            previewUrl: proxyUrl,
+            downloadUrl: clip.storagePath || clip.video_url || proxyUrl,
+            thumbnailUrl: clip.thumbnail || clip.thumbnail_url,
+            duration: clip.duration,
+            status: 'ready',
+            start: clip.start ?? clip.start_time,
+            end: clip.end ?? clip.end_time,
+            score: clip.score,
+          };
+        };
+
+        if (result && result.clips && Array.isArray(result.clips) && result.clips.length > 0) {
           result = {
             ...result,
-            clips: result.clips.map((clip: any) => {
-              const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
-              return {
-                id: clip.id,
-                title: clip.title,
-                description: clip.transcript || clip.reason || 'Descrição gerada automaticamente',
-                hashtags: clip.keywords || [],
-                previewUrl: proxyUrl,
-                downloadUrl: clip.storagePath || proxyUrl,
-                thumbnailUrl: clip.thumbnail,
-                duration: clip.duration,
-                status: 'ready',
-                start: clip.start,
-                end: clip.end,
-                score: clip.score,
-              };
-            }),
+            clips: result.clips.map(transformClip),
           };
+        } else {
+          // Fallback: fetch clips from database
+          logger.info({ jobId }, 'SSE completed: no clips in returnvalue, fetching from database');
+          try {
+            const dbClipRows = await dbClips.findByJobId(jobId);
+            if (dbClipRows.length > 0) {
+              logger.info({ jobId, clipCount: dbClipRows.length }, 'SSE: Found clips in database');
+              result = {
+                ...(result || {}),
+                clips: dbClipRows.map(transformClip),
+              };
+            }
+          } catch (dbError: any) {
+            logger.error({ jobId, error: dbError.message }, 'SSE: Failed to fetch clips from database');
+          }
         }
 
         sendSSE('completed', {
@@ -412,6 +673,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.patch('/jobs/:jobId', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
     const updates = request.body as { title?: string };
+    const requestUserId = getRequestUserId(request);
 
     try {
       // Verificar se job existe
@@ -421,6 +683,13 @@ export async function registerRoutes(app: FastifyInstance) {
         return reply.status(404).send({
           error: 'JOB_NOT_FOUND',
           message: `Job ${jobId} not found`,
+        });
+      }
+
+      if (requestUserId && job.user_id !== requestUserId) {
+        return reply.status(403).send({
+          error: 'FORBIDDEN',
+          message: 'You can only update your own jobs',
         });
       }
 
@@ -444,12 +713,10 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.delete('/jobs/:jobId', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
+    const requestUserId = getRequestUserId(request);
 
     try {
-      // 1. Cancelar job na fila se ainda estiver ativo
-      await cancelJob(jobId);
-
-      // 2. Deletar do banco de dados
+      // 1. Verificar se job existe e pertence ao usuário autenticado (quando houver)
       const job = await dbJobs.findById(jobId);
 
       if (!job) {
@@ -459,10 +726,20 @@ export async function registerRoutes(app: FastifyInstance) {
         });
       }
 
-      // Deletar todos os clips associados
+      if (requestUserId && job.user_id !== requestUserId) {
+        return reply.status(403).send({
+          error: 'FORBIDDEN',
+          message: 'You can only delete your own jobs',
+        });
+      }
+
+      // 2. Cancelar job na fila se ainda estiver ativo
+      await cancelJob(jobId);
+
+      // 3. Deletar todos os clips associados
       await db.clips.deleteByJobId(jobId);
 
-      // Deletar job
+      // 4. Deletar job
       await dbJobs.delete(jobId);
 
       logger.info({ jobId }, 'Job and associated clips deleted successfully');
@@ -504,27 +781,48 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
-    const { youtubeUrl, userId, sourceType } = parsed.data;
+    const requestUserId = getRequestUserId(request);
+    const sourceInput = parsed.data;
+
+    if (requestUserId && sourceInput.userId !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only create temp configs for your own user',
+      });
+    }
+
+    const effectiveUserId = requestUserId || sourceInput.userId;
 
     // Generate unique tempId
     const tempId = `temp_${randomUUID().replace(/-/g, '')}`;
 
     // Create configuration with defaults
-    const config: ProjectConfig = {
+    const configBase = {
       tempId,
-      youtubeUrl,
-      userId,
-      sourceType,
+      userId: effectiveUserId,
       clipSettings: DEFAULT_CLIP_SETTINGS,
       subtitlePreferences: DEFAULT_SUBTITLE_PREFERENCES,
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 3600 * 1000), // 1 hour expiration
     };
 
+    const config: ProjectConfig = sourceInput.sourceType === 'youtube'
+      ? {
+          ...configBase,
+          sourceType: 'youtube',
+          youtubeUrl: sourceInput.youtubeUrl,
+        }
+      : {
+          ...configBase,
+          sourceType: 'upload',
+          uploadPath: sourceInput.uploadPath,
+          fileName: sourceInput.fileName,
+        };
+
     // Save to Redis with 1 hour TTL
     await setTempConfig(tempId, config, 3600);
 
-    logger.info({ tempId, userId }, 'Temporary config created');
+    logger.info({ tempId, userId: effectiveUserId, sourceType: sourceInput.sourceType }, 'Temporary config created');
 
     return reply.status(201).send({ tempId, config });
   });
@@ -532,6 +830,7 @@ export async function registerRoutes(app: FastifyInstance) {
   // GET /jobs/temp/:tempId - Get temporary configuration
   app.get('/jobs/temp/:tempId', async (request, reply) => {
     const { tempId } = request.params as { tempId: string };
+    const requestUserId = getRequestUserId(request);
 
     const config = await getTempConfig(tempId);
 
@@ -542,12 +841,20 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
+    if (requestUserId && config.userId !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only access your own temp configs',
+      });
+    }
+
     return reply.send(config);
   });
 
   // POST /jobs/temp/:tempId/start - Start processing with configuration
   app.post('/jobs/temp/:tempId/start', async (request, reply) => {
     const { tempId } = request.params as { tempId: string };
+    const requestUserId = getRequestUserId(request);
 
     // 1. Get temporary configuration
     const tempConfig = await getTempConfig(tempId);
@@ -556,6 +863,13 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.status(404).send({
         error: 'CONFIG_NOT_FOUND',
         message: 'Configuration expired or not found',
+      });
+    }
+
+    if (requestUserId && tempConfig.userId !== requestUserId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only start jobs from your own temp configs',
       });
     }
 
@@ -572,6 +886,17 @@ export async function registerRoutes(app: FastifyInstance) {
 
     const finalConfig = parsed.data;
 
+    if (
+      !(await enforceUsageLimits(
+        reply,
+        tempConfig.userId,
+        finalConfig.clipSettings.clipCount,
+        finalConfig.clipSettings.targetDuration
+      ))
+    ) {
+      return;
+    }
+
     // 3. Create JobData with complete configuration
     const jobId = `job_${randomUUID().replace(/-/g, '')}`;
 
@@ -581,8 +906,14 @@ export async function registerRoutes(app: FastifyInstance) {
       sourceType: tempConfig.sourceType,
       youtubeUrl: tempConfig.youtubeUrl,
       uploadPath: tempConfig.uploadPath,
+      fileName: tempConfig.fileName,
       targetDuration: finalConfig.clipSettings.targetDuration,
       clipCount: finalConfig.clipSettings.clipCount,
+      clipSettings: finalConfig.clipSettings,
+      subtitlePreferences: finalConfig.subtitlePreferences,
+      timeframe: finalConfig.timeframe,
+      genre: finalConfig.genre,
+      specificMoments: finalConfig.specificMoments,
       createdAt: new Date(),
     };
 
@@ -738,6 +1069,13 @@ export async function registerRoutes(app: FastifyInstance) {
       // Usar cliente Supabase global (já configurado com service_key)
       const supabase = supabaseClient;
 
+      if (!supabase) {
+        return reply.status(500).send({
+          error: 'SUPABASE_NOT_CONFIGURED',
+          message: 'Supabase service key is required for clip reprocessing',
+        });
+      }
+
       // 1. Buscar job do BullMQ (dados dos vídeos existentes estão aqui)
       const job = await videoQueue.getJob(jobId);
 
@@ -750,9 +1088,9 @@ export async function registerRoutes(app: FastifyInstance) {
       }
 
       // 2. Buscar resultado do job (contém clips e transcripts)
-      const result = job.returnvalue;
+      const result = job.returnvalue as { clips?: any[] } | null | undefined;
 
-      if (!result || !result.clips) {
+      if (!result || !Array.isArray(result.clips)) {
         logger.error({ jobId }, 'Job result not found');
         return reply.status(404).send({
           error: 'NOT_FOUND',
@@ -927,6 +1265,10 @@ export async function registerRoutes(app: FastifyInstance) {
         try {
           // Usar cliente Supabase global (já tem service_key que bypassa RLS)
           const supabaseBg = supabaseClient;
+
+          if (!supabaseBg) {
+            throw new Error('Supabase service key is required for clip reprocessing');
+          }
 
           if (!originalVideoPath) {
             throw new Error('Original video path not found in job data');

@@ -5,12 +5,27 @@ import { pipeline } from 'stream/promises';
 import path from 'path';
 import os from 'os';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
 import { createLogger } from '../config/logger.js';
 import { downloadFile } from '../lib/supabase.js';
 import { env } from '../config/env.js';
 import { VideoDownloadError, VideoMetadata } from '../types/index.js';
 
 const logger = createLogger('download');
+
+// Set ffmpeg/ffprobe paths from ffmpeg-static or system
+if (ffmpegStatic) {
+  ffmpeg.setFfmpegPath(ffmpegStatic);
+  // ffprobe-static não existe como pacote, usar o do sistema ou derivar do ffmpeg-static
+  const ffprobePath = ffmpegStatic.replace(/ffmpeg$/, 'ffprobe');
+  try {
+    require('fs').accessSync(ffprobePath);
+    ffmpeg.setFfprobePath(ffprobePath);
+  } catch {
+    // ffprobe-static não disponível, usar do sistema (instalado via apt)
+    logger.info('ffprobe-static not found, using system ffprobe');
+  }
+}
 
 // ============================================
 // TIPOS INTERNOS
@@ -185,42 +200,74 @@ async function downloadFromYouTube(url: string): Promise<DownloadResult> {
 
 /**
  * Download usando ytdl-core
+ * Baixa video e audio separadamente (DASH) para máxima qualidade,
+ * depois merge com FFmpeg. Streams muxados do YouTube limitam a 720p.
  */
 async function downloadWithYtdl(url: string, outputPath: string): Promise<VideoMetadata> {
-  logger.info({ url, outputPath }, 'Downloading with ytdl-core');
+  logger.info({ url, outputPath }, 'Downloading with ytdl-core (separate streams)');
 
-  // Obter informações do vídeo
   const info = await ytdl.getInfo(url);
 
-  // Filtrar formato de melhor qualidade (video+audio)
-  const format = ytdl.chooseFormat(info.formats, {
+  // Selecionar melhor video-only e audio-only (DASH = máxima qualidade)
+  const videoFormat = ytdl.chooseFormat(info.formats, {
     quality: 'highestvideo',
-    filter: 'videoandaudio',
+    filter: 'videoonly',
+  });
+  const audioFormat = ytdl.chooseFormat(info.formats, {
+    quality: 'highestaudio',
+    filter: 'audioonly',
   });
 
-  if (!format) {
-    throw new Error('No suitable format found');
+  if (!videoFormat || !audioFormat) {
+    throw new Error('No suitable video/audio formats found');
   }
 
-  // Download do stream
-  const videoStream = ytdl(url, { format });
-  const fileStream = createWriteStream(outputPath);
+  logger.info(
+    { videoItag: videoFormat.itag, videoRes: `${videoFormat.width}x${videoFormat.height}`, audioItag: audioFormat.itag },
+    'Selected DASH formats'
+  );
 
-  await pipeline(videoStream, fileStream);
+  // Download video e audio em paralelo para arquivos temporários
+  const videoTmp = outputPath.replace('.mp4', '-video.mp4');
+  const audioTmp = outputPath.replace('.mp4', '-audio.mp4');
 
-  // Extrair metadata básica
+  await Promise.all([
+    pipeline(ytdl(url, { format: videoFormat }), createWriteStream(videoTmp)),
+    pipeline(ytdl(url, { format: audioFormat }), createWriteStream(audioTmp)),
+  ]);
+
+  logger.info('Video and audio streams downloaded, merging with FFmpeg');
+
+  // Merge video + audio com FFmpeg (copy, sem re-encode)
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(videoTmp)
+      .input(audioTmp)
+      .outputOptions(['-c', 'copy', '-movflags', '+faststart'])
+      .output(outputPath)
+      .on('end', () => resolve())
+      .on('error', (err: Error) => reject(new Error(`FFmpeg merge failed: ${err.message}`)))
+      .run();
+  });
+
+  // Limpar arquivos temporários
+  await Promise.all([
+    fs.unlink(videoTmp).catch(() => {}),
+    fs.unlink(audioTmp).catch(() => {}),
+  ]);
+
   const videoDetails = info.videoDetails;
   const metadata: VideoMetadata = {
     id: videoDetails.videoId,
     title: videoDetails.title,
     duration: parseInt(videoDetails.lengthSeconds),
-    width: format.width || 1920,
-    height: format.height || 1080,
+    width: videoFormat.width || 1920,
+    height: videoFormat.height || 1080,
     url: videoDetails.video_url,
     thumbnail: videoDetails.thumbnails[0]?.url,
   };
 
-  logger.info({ metadata, outputPath }, 'Download with ytdl-core completed');
+  logger.info({ metadata, outputPath, resolution: `${metadata.width}x${metadata.height}` }, 'Download with ytdl-core completed (full quality)');
   return metadata;
 }
 
@@ -242,13 +289,11 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
     // Chamar yt-dlp diretamente (sem script intermediário)
     // Isso garante que o processo aguarde o download completo (incluindo HLS streaming)
     const result = await execa('yt-dlp', [
-      '-f', 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+      '-f', 'bestvideo+bestaudio/best',
       '--merge-output-format', 'mp4',
       '--no-playlist',
       '--no-check-certificates',
-      '--force-overwrites', // Forçar redownload mesmo se arquivo existir
-      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      '--extractor-args', 'youtube:player_client=android',
+      '--force-overwrites',
       '-o', outputPath,
       url
     ], {
@@ -269,7 +314,14 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
 
     if (result.failed || result.exitCode !== 0) {
       logger.error({ stdout: result.stdout, stderr: result.stderr }, 'yt-dlp output on failure');
-      throw new Error(`yt-dlp failed with exit code ${result.exitCode}: ${result.stderr || result.stdout}`);
+
+      const fallbackMessage = result.exitCode === undefined
+        ? 'yt-dlp command not found or failed to start'
+        : '';
+
+      throw new Error(
+        `yt-dlp failed with exit code ${result.exitCode ?? 'undefined'}: ${result.stderr || result.stdout || fallbackMessage}`
+      );
     }
 
     // Verificar IMEDIATAMENTE se o arquivo existe

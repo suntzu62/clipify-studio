@@ -9,12 +9,18 @@ import { createLogger } from '../config/logger.js';
 import { env } from '../config/env.js';
 
 const logger = createLogger('check-db-clips');
-const supabase = createClient(env.supabase.url, env.supabase.serviceKey);
+const supabase = env.supabase.url && env.supabase.serviceKey
+  ? createClient(env.supabase.url, env.supabase.serviceKey)
+  : null;
 
 async function checkDatabaseClips() {
   logger.info('Checking clips in Supabase database...');
 
   try {
+    if (!supabase) {
+      throw new Error('Supabase is not configured (SUPABASE_URL/SUPABASE_SERVICE_KEY)');
+    }
+
     // Buscar alguns clips do banco
     const { data: clips, error } = await supabase
       .from('clips')

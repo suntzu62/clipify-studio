@@ -27,6 +27,10 @@ export const jobs = {
     const result = await pool.query(
       `INSERT INTO jobs (id, user_id, source_type, youtube_url, upload_path, target_duration, clip_count, status, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         status = EXCLUDED.status,
+         error = NULL,
+         updated_at = NOW()
        RETURNING *`,
       [
         data.id,

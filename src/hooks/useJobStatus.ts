@@ -86,6 +86,44 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     }
   }, [startConnection, isJobTerminal, jobStatus]);
 
+  // Fallback: when job becomes terminal (completed) but has no clips, do one final GET fetch
+  useEffect(() => {
+    if (!enabled || !jobId || enrichedDataFetched) return;
+    if (!isJobTerminal(jobStatus)) return;
+
+    const hasClips = jobStatus?.result?.clips && jobStatus.result.clips.length > 0;
+    if (hasClips) {
+      setEnrichedDataFetched(true);
+      return;
+    }
+
+    console.log('[useJobStatus] Job terminal but no clips, fetching enriched data as fallback');
+
+    const fetchFallback = async () => {
+      try {
+        const enrichedJob: Job = await getJobStatus(jobId, getSupabaseToken);
+        console.log('[useJobStatus] Fallback enriched data fetched:', enrichedJob);
+
+        setJobStatus(prevStatus => ({
+          ...prevStatus,
+          ...enrichedJob,
+          result: {
+            ...prevStatus?.result,
+            ...enrichedJob.result,
+            clips: enrichedJob.result?.clips || prevStatus?.result?.clips || []
+          }
+        } as JobStatus));
+
+        setEnrichedDataFetched(true);
+      } catch (error) {
+        console.error('[useJobStatus] Fallback fetch failed:', error);
+        setEnrichedDataFetched(true);
+      }
+    };
+
+    fetchFallback();
+  }, [enabled, jobId, jobStatus?.status, enrichedDataFetched, isJobTerminal, getSupabaseToken]);
+
   // Periodic enrichment polling - fetch clips every 20 seconds while job is active
   useEffect(() => {
     // Don't poll if job is terminal (completed or failed)

@@ -6,6 +6,7 @@ import { createLogger } from '../config/logger.js';
 import type { HighlightSegment, Transcript, Clip, SubtitlePreferences } from '../types/index.js';
 import { DEFAULT_SUBTITLE_PREFERENCES } from '../types/index.js';
 import { generateASS, adjustFontSize } from '../utils/subtitle-optimizer.js';
+import { detectFacesInClip, calculateSmartCropX, getVideoDimensions } from './face-detection.js';
 
 const logger = createLogger('rendering');
 
@@ -36,6 +37,15 @@ interface RenderedClip {
   duration: number;
   segment: HighlightSegment;
 }
+
+type RenderClipOptions = {
+  format: NonNullable<RenderOptions['format']>;
+  resolution: NonNullable<RenderOptions['resolution']>;
+  addSubtitles: NonNullable<RenderOptions['addSubtitles']>;
+  font: NonNullable<RenderOptions['font']>;
+  preset: NonNullable<RenderOptions['preset']>;
+  subtitlePreferences: SubtitlePreferences;
+};
 
 /**
  * Renderiza múltiplos clipes a partir dos highlights
@@ -137,7 +147,7 @@ async function renderSingleClip(
   transcript: Transcript,
   outputDir: string,
   clipId: string,
-  options: Required<RenderOptions>
+  options: RenderClipOptions
 ): Promise<RenderedClip> {
   const { start, end } = segment;
   const duration = end - start;
@@ -157,14 +167,29 @@ async function renderSingleClip(
     const scaleParams = 'flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp';
 
     if (options.format === '9:16') {
-      // Vertical format (1080x1920) - Estratégia OTIMIZADA para máxima qualidade
-      // 1. CROP PRIMEIRO no tamanho original (minimiza upscale)
-      // 2. SCALE depois apenas o necessário
-      // Para vídeo 16:9 (1920x1080) -> crop mantendo altura: width = ih*9/16
+      // Vertical format (1080x1920) - Smart face-based cropping
+      // 1. Detect faces to find optimal crop X position
+      // 2. CROP at that position (or center if no face)
+      // 3. SCALE to target resolution
+      let cropX = '(iw-ih*9/16)/2'; // default: center crop
+
+      try {
+        const dims = await getVideoDimensions(videoPath);
+        const faces = await detectFacesInClip(videoPath, start, end, 3);
+        const cropOffset = calculateSmartCropX(faces, dims.width, dims.height, 9 / 16);
+
+        if (!cropOffset.fallback) {
+          cropX = cropOffset.x.toString();
+          logger.info({ clipId, cropX, faceCount: faces.length }, 'Using face-based smart crop');
+        } else {
+          logger.info({ clipId }, 'No faces detected, using center crop');
+        }
+      } catch (error: any) {
+        logger.warn({ clipId, error: error.message }, 'Face detection failed, using center crop fallback');
+      }
+
       vfFilters.push(
-        // Crop PRIMEIRO para 9:16 no tamanho original (menos zoom)
-        `crop=ih*9/16:ih:(iw-ih*9/16)/2:0`,
-        // SCALE depois com Lanczos (upscale mínimo necessário)
+        `crop=ih*9/16:ih:${cropX}:0`,
         `scale=${width}:${height}:${scaleParams}`
       );
     } else if (options.format === '1:1') {

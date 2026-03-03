@@ -57,16 +57,18 @@ export interface CardPaymentResult {
 }
 
 export interface UsageLimits {
-  canUse: boolean;
-  plan: Plan;
-  subscription: Subscription | null;
-  usage: {
-    clips_used: number;
-    clips_limit: number;
-    clips_remaining: number;
-    minutes_used: number;
-    minutes_limit: number;
-    minutes_remaining: number;
+  planName: string;
+  clips: {
+    used: number;
+    limit: number;
+    remaining: number;
+    canCreate: boolean;
+  };
+  minutes: {
+    used: number;
+    limit: number;
+    remaining: number;
+    canProcess: boolean;
   };
 }
 

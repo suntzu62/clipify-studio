@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogOut, Play, Settings, Video, Plus, CheckCircle2, Youtube, Sparkles, TrendingUp, User, ChevronDown } from 'lucide-react';
+import { Card, CardContent, CardDescription } from '@/components/ui/card';
+import { LogOut, Play, Settings, Video, Plus, CheckCircle2, Youtube, Sparkles, TrendingUp, User, ChevronDown, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   DropdownMenu,
@@ -37,6 +38,44 @@ import NewProjectDialog from '@/components/projects/NewProjectDialog';
 import { ProjectCardPro } from '@/components/projects/ProjectCardPro';
 import { listProjects, deleteProject, updateProject, type Project } from '@/services/projects';
 import { useToast } from '@/hooks/use-toast';
+import { MouseSpotlight } from '@/components/landing';
+
+/* ── Framer variants ── */
+const sidebarVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
+};
+const sidebarItemVariants = {
+  hidden: { opacity: 0, x: -15, rotateY: -10 },
+  visible: { opacity: 1, x: 0, rotateY: 0, transition: { type: 'spring', stiffness: 260, damping: 20 } },
+};
+
+const gridContainerVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.08 } },
+};
+const gridItemVariants = {
+  hidden: { opacity: 0, y: 40, rotateX: 8 },
+  visible: { opacity: 1, y: 0, rotateX: 0, transition: { type: 'spring', stiffness: 200, damping: 22 } },
+};
+
+const benefitVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.12 } },
+};
+const benefitItemVariants = {
+  hidden: { opacity: 0, y: 30 },
+  visible: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 220, damping: 20 } },
+};
+
+const stepVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.15 } },
+};
+const stepItemVariants = {
+  hidden: { opacity: 0, x: -20 },
+  visible: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 200, damping: 18 } },
+};
 
 const Projects = () => {
   const { user } = useAuth();
@@ -56,11 +95,11 @@ const Projects = () => {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => {
     try {
       setLoading(true);
       console.log('[Projects] Authenticated user:', user?.id, user?.email);
-      const data = await listProjects();
+      const data = await listProjects(user?.id);
       console.log('[Projects] Fetched projects:', data.length, 'items');
       console.log('[Projects] Project data:', data);
       setItems(data);
@@ -71,11 +110,11 @@ const Projects = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast, user?.email, user?.id]);
 
   useEffect(() => {
     fetchProjects();
-  }, []);
+  }, [fetchProjects]);
 
   // Handle edit project
   const handleEditProject = (project: Project) => {
@@ -155,19 +194,22 @@ const Projects = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      {/* Header — glass */}
+      <header className="border-b border-white/10 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60 sticky top-0 z-30">
         <div className="container mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             <Link to="/clip-lab" className="flex items-center space-x-2 hover:opacity-90 transition-opacity">
-              <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">
+              <motion.div
+                whileHover={{ scale: 1.1, rotate: 5 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center"
+              >
                 <span className="text-white font-bold text-sm">C</span>
-              </div>
+              </motion.div>
               <span className="text-xl font-bold text-foreground">Cortaí</span>
             </Link>
 
             <div className="flex items-center space-x-4">
-              {/* User Menu Dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center space-x-2">
@@ -207,45 +249,64 @@ const Projects = () => {
 
       <div className="container mx-auto px-6 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
-          {/* Sidebar Navigation */}
+          {/* Sidebar — 3D staggered */}
           <aside className="lg:w-64 flex-shrink-0">
-            <nav className="space-y-2">
-              <Link
-                to="/dashboard"
-                className="flex items-center justify-between px-3 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              >
-                <div className="flex items-center space-x-3">
-                  <Play className="w-5 h-5" />
-                  <span>Dashboard</span>
-                </div>
-              </Link>
-              <Link
-                to="/projects"
-                className="flex items-center justify-between px-3 py-2 rounded-md bg-primary/10 text-primary font-medium"
-              >
-                <div className="flex items-center space-x-3">
-                  <Video className="w-5 h-5 fill-current" />
-                  <span>Meus Projetos</span>
-                </div>
-                <Badge variant="secondary" className="ml-auto">
-                  {items.length}
-                </Badge>
-              </Link>
-              <Link
-                to="/settings"
-                className="flex items-center justify-between px-3 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              >
-                <div className="flex items-center space-x-3">
-                  <Settings className="w-5 h-5" />
-                  <span>Configurações</span>
-                </div>
-              </Link>
-            </nav>
+            <motion.nav
+              className="space-y-2"
+              style={{ perspective: 600 }}
+              variants={sidebarVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              <motion.div variants={sidebarItemVariants}>
+                <Link
+                  to="/dashboard"
+                  className="flex items-center justify-between px-3 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  <div className="flex items-center space-x-3">
+                    <Play className="w-5 h-5" />
+                    <span>Dashboard</span>
+                  </div>
+                </Link>
+              </motion.div>
+              <motion.div variants={sidebarItemVariants}>
+                <Link
+                  to="/projects"
+                  className="flex items-center justify-between px-3 py-2 rounded-md bg-primary/10 text-primary font-medium shadow-[0_0_15px_-3px] shadow-primary/20"
+                >
+                  <div className="flex items-center space-x-3">
+                    <Video className="w-5 h-5 fill-current" />
+                    <span>Meus Projetos</span>
+                  </div>
+                  <Badge variant="secondary" className="ml-auto">
+                    {items.length}
+                  </Badge>
+                </Link>
+              </motion.div>
+              <motion.div variants={sidebarItemVariants}>
+                <Link
+                  to="/settings"
+                  className="flex items-center justify-between px-3 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  <div className="flex items-center space-x-3">
+                    <Settings className="w-5 h-5" />
+                    <span>Configurações</span>
+                  </div>
+                </Link>
+              </motion.div>
+            </motion.nav>
           </aside>
 
-          {/* Main Content */}
-          <main className="flex-1">
-            <div className="flex items-center justify-between mb-8">
+          {/* Main Content — MouseSpotlight */}
+          <MouseSpotlight className="flex-1">
+            {/* Page header — 3D entrance */}
+            <motion.div
+              className="flex items-center justify-between mb-8"
+              initial={{ opacity: 0, y: 20, rotateX: 10 }}
+              animate={{ opacity: 1, y: 0, rotateX: 0 }}
+              transition={{ type: 'spring', stiffness: 180, damping: 20 }}
+              style={{ perspective: 800 }}
+            >
               <div>
                 <h1 className="text-3xl font-bold text-foreground mb-2">
                   Meus Projetos
@@ -254,137 +315,177 @@ const Projects = () => {
                   Gerencie todos os seus projetos de conversão de vídeos
                 </p>
               </div>
-              <Button className="flex items-center space-x-2" onClick={() => setDialogOpen(true)}>
-                <Plus className="w-4 h-4" />
-                <span>Novo Projeto</span>
-              </Button>
-            </div>
+              <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.95 }}>
+                <Button className="flex items-center space-x-2 btn-premium" onClick={() => setDialogOpen(true)}>
+                  <Plus className="w-4 h-4" />
+                  <span>Novo video</span>
+                </Button>
+              </motion.div>
+            </motion.div>
 
             {loading ? (
-              <Card className="text-center py-12">
-                <CardContent>
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                  <CardDescription>Carregando projetos...</CardDescription>
-                </CardContent>
-              </Card>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.3 }}
+              >
+                <Card className="text-center py-12 glass-card border-white/10">
+                  <CardContent>
+                    <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+                    <CardDescription>Carregando projetos...</CardDescription>
+                  </CardContent>
+                </Card>
+              </motion.div>
             ) : items.length === 0 ? (
-              <div className="max-w-3xl mx-auto">
-                <Card className="overflow-hidden">
+              <motion.div
+                className="max-w-3xl mx-auto"
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 160, damping: 20, delay: 0.1 }}
+              >
+                <Card className="overflow-hidden glass-card border-white/10">
                   <CardContent className="p-0">
                     {/* Hero Section */}
-                    <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-background p-8 sm:p-12 text-center">
-                      <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-primary mb-6">
-                        <Video className="w-10 h-10 text-white" />
-                      </div>
-                      <h2 className="text-3xl font-bold text-foreground mb-3">
-                        Transforme Vídeos em Clipes Virais
-                      </h2>
-                      <p className="text-lg text-muted-foreground mb-8 max-w-xl mx-auto">
-                        Comece criando seu primeiro projeto e descubra como é fácil gerar conteúdo engajador para suas redes sociais
-                      </p>
-                      <Button
-                        size="lg"
-                        className="text-base px-8 shadow-lg hover:shadow-xl transition-all"
-                        onClick={() => setDialogOpen(true)}
+                    <div className="relative bg-gradient-to-br from-primary/10 via-primary/5 to-background p-8 sm:p-12 text-center overflow-hidden">
+                      <div className="spotlight absolute inset-0 pointer-events-none" />
+                      <motion.div
+                        className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-primary mb-6 animate-float animate-glow-pulse"
+                        initial={{ scale: 0, rotate: -20 }}
+                        animate={{ scale: 1, rotate: 0 }}
+                        transition={{ type: 'spring', stiffness: 300, damping: 15, delay: 0.2 }}
                       >
-                        <Plus className="w-5 h-5 mr-2" />
-                        Criar Primeiro Projeto
-                      </Button>
+                        <Video className="w-10 h-10 text-white" />
+                      </motion.div>
+                      <motion.h2
+                        className="text-3xl font-bold text-foreground mb-3"
+                        initial={{ opacity: 0, y: 15, rotateX: 8 }}
+                        animate={{ opacity: 1, y: 0, rotateX: 0 }}
+                        transition={{ delay: 0.3, duration: 0.5 }}
+                        style={{ perspective: 600 }}
+                      >
+                        Transforme Vídeos em Clipes Virais
+                      </motion.h2>
+                      <motion.p
+                        className="text-lg text-muted-foreground mb-8 max-w-xl mx-auto"
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.4, duration: 0.5 }}
+                      >
+                        Comece criando seu primeiro projeto e descubra como é fácil gerar conteúdo engajador para suas redes sociais
+                      </motion.p>
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.5, type: 'spring', stiffness: 200 }}
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        <Button
+                          size="lg"
+                          className="text-base px-8 shadow-lg hover:shadow-xl transition-all btn-premium"
+                          onClick={() => setDialogOpen(true)}
+                        >
+                          <Plus className="w-5 h-5 mr-2" />
+                          Criar Primeiro Projeto
+                        </Button>
+                      </motion.div>
                     </div>
 
-                    {/* Benefits Section */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-8 sm:p-12 bg-background">
-                      <div className="space-y-3">
-                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10">
-                          <Youtube className="w-6 h-6 text-primary" />
-                        </div>
-                        <h3 className="font-semibold text-foreground">Cole um link do YouTube</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Escolha qualquer vídeo do YouTube e nossa IA identifica os melhores momentos automaticamente
-                        </p>
-                      </div>
-                      <div className="space-y-3">
-                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10">
-                          <Sparkles className="w-6 h-6 text-primary" />
-                        </div>
-                        <h3 className="font-semibold text-foreground">Gere até 8 clipes virais</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Receba clipes prontos com legendas animadas, transcrição e sugestões de títulos e hashtags
-                        </p>
-                      </div>
-                      <div className="space-y-3">
-                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10">
-                          <TrendingUp className="w-6 h-6 text-primary" />
-                        </div>
-                        <h3 className="font-semibold text-foreground">Publique no TikTok & Instagram</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Compartilhe diretamente para suas redes ou baixe os vídeos em formato vertical otimizado
-                        </p>
-                      </div>
-                    </div>
+                    {/* Benefits Section — staggered */}
+                    <motion.div
+                      className="grid grid-cols-1 md:grid-cols-3 gap-6 p-8 sm:p-12 bg-background"
+                      variants={benefitVariants}
+                      initial="hidden"
+                      whileInView="visible"
+                      viewport={{ once: true, amount: 0.3 }}
+                    >
+                      {[
+                        { icon: Youtube, title: 'Cole um link do YouTube', desc: 'Escolha qualquer vídeo do YouTube e nossa IA identifica os melhores momentos automaticamente' },
+                        { icon: Sparkles, title: 'Gere até 8 clipes virais', desc: 'Receba clipes prontos com legendas animadas, transcrição e sugestões de títulos e hashtags' },
+                        { icon: TrendingUp, title: 'Publique no TikTok & Instagram', desc: 'Compartilhe diretamente para suas redes ou baixe os vídeos em formato vertical otimizado' },
+                      ].map((b) => (
+                        <motion.div key={b.title} variants={benefitItemVariants} className="space-y-3">
+                          <motion.div
+                            className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10"
+                            whileHover={{ rotate: [0, -12, 12, 0], scale: 1.15 }}
+                            transition={{ duration: 0.4 }}
+                          >
+                            <b.icon className="w-6 h-6 text-primary" />
+                          </motion.div>
+                          <h3 className="font-semibold text-foreground">{b.title}</h3>
+                          <p className="text-sm text-muted-foreground">{b.desc}</p>
+                        </motion.div>
+                      ))}
+                    </motion.div>
 
-                    {/* Onboarding Checklist */}
-                    <div className="border-t border-border p-8 sm:p-12 bg-muted/30">
+                    {/* Onboarding Checklist — staggered */}
+                    <div className="border-t border-white/10 p-8 sm:p-12 bg-muted/30">
                       <h3 className="font-semibold text-foreground mb-4 flex items-center">
                         <CheckCircle2 className="w-5 h-5 mr-2 text-primary" />
                         Primeiros Passos
                       </h3>
-                      <div className="space-y-3">
-                        <div className="flex items-start space-x-3 text-sm">
-                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-xs">
-                            1
-                          </div>
-                          <p className="text-muted-foreground pt-0.5">
-                            <span className="font-medium text-foreground">Criar seu primeiro projeto</span> — Cole um link do YouTube para começar
-                          </p>
-                        </div>
-                        <div className="flex items-start space-x-3 text-sm">
-                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-semibold text-xs">
-                            2
-                          </div>
-                          <p className="text-muted-foreground pt-0.5">
-                            Aguarde a IA processar e gerar os clipes (leva ~2-3 minutos)
-                          </p>
-                        </div>
-                        <div className="flex items-start space-x-3 text-sm">
-                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-semibold text-xs">
-                            3
-                          </div>
-                          <p className="text-muted-foreground pt-0.5">
-                            Baixe ou publique seus clipes direto nas redes sociais
-                          </p>
-                        </div>
-                      </div>
+                      <motion.div
+                        className="space-y-3"
+                        variants={stepVariants}
+                        initial="hidden"
+                        whileInView="visible"
+                        viewport={{ once: true, amount: 0.3 }}
+                      >
+                        {[
+                          { n: '1', highlight: true, text: <><span className="font-medium text-foreground">Criar seu primeiro projeto</span> — Cole um link do YouTube para começar</> },
+                          { n: '2', highlight: false, text: 'Aguarde a IA processar e gerar os clipes (leva ~2-3 minutos)' },
+                          { n: '3', highlight: false, text: 'Baixe ou publique seus clipes direto nas redes sociais' },
+                        ].map((s) => (
+                          <motion.div key={s.n} variants={stepItemVariants} className="flex items-start space-x-3 text-sm">
+                            <div className={`flex-shrink-0 w-6 h-6 rounded-full ${s.highlight ? 'bg-primary/10' : 'bg-muted'} flex items-center justify-center ${s.highlight ? 'text-primary' : 'text-muted-foreground'} font-semibold text-xs`}>
+                              {s.n}
+                            </div>
+                            <p className="text-muted-foreground pt-0.5">{s.text}</p>
+                          </motion.div>
+                        ))}
+                      </motion.div>
                     </div>
                   </CardContent>
                 </Card>
-              </div>
+              </motion.div>
             ) : (
               <>
-                {/* Header com contador e filtros */}
-                <div className="flex items-center justify-between mb-6">
+                {/* Header com contador */}
+                <motion.div
+                  className="flex items-center justify-between mb-6"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.15, duration: 0.4 }}
+                >
                   <div>
                     <h2 className="text-xl font-bold">
                       {items.length} {items.length === 1 ? 'Projeto' : 'Projetos'}
                     </h2>
                     <p className="text-sm text-muted-foreground">
                       {items.filter(p => p.status === 'completed').length} concluídos, {' '}
-                      {items.filter(p => p.status === 'active').length} em processamento
+                      {items.filter(p => p.status === 'active' || p.status === 'queued').length} em processamento
                     </p>
                   </div>
-                </div>
+                </motion.div>
 
-                {/* Grid de projetos com cards visuais */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {/* Grid — 3D staggered perspective */}
+                <motion.div
+                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+                  style={{ perspective: 1200 }}
+                  variants={gridContainerVariants}
+                  initial="hidden"
+                  animate="visible"
+                >
                   {items.map((project) => (
-                    <ProjectCardPro
-                      key={project.id}
-                      project={project}
-                      onEdit={handleEditProject}
-                      onDelete={handleDeleteProject}
-                    />
+                    <motion.div key={project.id} variants={gridItemVariants}>
+                      <ProjectCardPro
+                        project={project}
+                        onEdit={handleEditProject}
+                        onDelete={handleDeleteProject}
+                      />
+                    </motion.div>
                   ))}
-                </div>
+                </motion.div>
               </>
             )}
 
@@ -456,7 +557,7 @@ const Projects = () => {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-          </main>
+          </MouseSpotlight>
         </div>
       </div>
     </div>

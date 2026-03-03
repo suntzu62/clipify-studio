@@ -59,11 +59,24 @@ export const TimeframeConfigSchema = z.object({
 
 export type TimeframeConfig = z.infer<typeof TimeframeConfigSchema>;
 
+const ProjectSourceSchema = z.discriminatedUnion('sourceType', [
+  z.object({
+    sourceType: z.literal('youtube'),
+    youtubeUrl: z.string().url(),
+    uploadPath: z.string().optional(),
+    fileName: z.string().optional(),
+  }),
+  z.object({
+    sourceType: z.literal('upload'),
+    uploadPath: z.string().min(1),
+    fileName: z.string().optional(),
+    youtubeUrl: z.string().url().optional(),
+  }),
+]);
+
 export const ProjectConfigSchema = z.object({
   tempId: z.string(),
-  youtubeUrl: z.string().url(),
   userId: z.string(),
-  sourceType: z.enum(['youtube', 'upload']),
   clipSettings: ClipSettingsSchema,
   subtitlePreferences: SubtitlePreferencesSchema,
   timeframe: TimeframeConfigSchema.optional(),
@@ -71,15 +84,23 @@ export const ProjectConfigSchema = z.object({
   specificMoments: z.string().optional(),
   createdAt: z.date(),
   expiresAt: z.date(),
-});
+}).and(ProjectSourceSchema);
 
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
-export const CreateTempConfigSchema = z.object({
-  youtubeUrl: z.string().url(),
-  userId: z.string(),
-  sourceType: z.enum(['youtube', 'upload']),
-});
+export const CreateTempConfigSchema = z.discriminatedUnion('sourceType', [
+  z.object({
+    sourceType: z.literal('youtube'),
+    youtubeUrl: z.string().url(),
+    userId: z.string(),
+  }),
+  z.object({
+    sourceType: z.literal('upload'),
+    uploadPath: z.string().min(1),
+    fileName: z.string().optional(),
+    userId: z.string(),
+  }),
+]);
 
 export type CreateTempConfigInput = z.infer<typeof CreateTempConfigSchema>;
 
@@ -112,8 +133,14 @@ export interface JobData {
   sourceType: 'youtube' | 'upload';
   youtubeUrl?: string;
   uploadPath?: string;
+  fileName?: string;
   targetDuration: number;
   clipCount: number;
+  clipSettings?: ClipSettings;
+  subtitlePreferences?: SubtitlePreferences;
+  timeframe?: TimeframeConfig;
+  genre?: string;
+  specificMoments?: string;
   createdAt: Date;
 }
 

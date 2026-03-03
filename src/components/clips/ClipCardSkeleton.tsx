@@ -71,36 +71,44 @@ export const ClipCardSkeleton = ({ index, className }: ClipCardSkeletonProps) =>
   );
 };
 
-// Compact version for grid layouts
+// Compact horizontal version matching new ClipCardPro layout
 export const ClipCardSkeletonCompact = ({ index }: ClipCardSkeletonProps) => {
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden bg-[#12121a] border border-white/10">
       <CardContent className="p-0">
-        {/* Video Thumbnail with shimmer */}
-        <AspectRatio ratio={9/16} className="relative overflow-hidden bg-muted">
-          {/* Shimmer effect */}
-          <div className="absolute inset-0">
-            <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+        <div className="flex flex-row h-[220px]">
+          {/* Left: Thumbnail skeleton */}
+          <div className="relative w-[130px] flex-shrink-0 overflow-hidden bg-muted">
+            <div className="absolute inset-0">
+              <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-white/10 animate-pulse flex items-center justify-center">
+                <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            </div>
+            {/* Score skeleton */}
+            <div className="absolute bottom-0 left-0 right-0 p-2">
+              <Skeleton className="h-8 w-full rounded-lg" />
+            </div>
           </div>
 
-          {/* Loading indicator */}
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center p-4">
-            <div className="w-12 h-12 rounded-full bg-muted-foreground/20 animate-pulse flex items-center justify-center">
-              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          {/* Right: Content skeleton */}
+          <div className="flex-1 flex flex-col justify-between p-3">
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-4/5" />
+              <Skeleton className="h-3 w-full" />
             </div>
-            <div className="space-y-1">
-              <Skeleton className="h-3 w-24 mx-auto" />
-              <Skeleton className="h-2 w-32 mx-auto" />
+            <div className="flex gap-1.5">
+              <Skeleton className="h-6 w-14 rounded-md" />
+              <Skeleton className="h-6 w-14 rounded-md" />
+              <Skeleton className="h-6 w-14 rounded-md" />
             </div>
-          </div>
-        </AspectRatio>
-
-        {/* Compact info */}
-        <div className="p-3 space-y-2">
-          <Skeleton className="h-4 w-full" />
-          <div className="flex gap-1">
-            <Skeleton className="h-3 w-12 rounded-full" />
-            <Skeleton className="h-3 w-16 rounded-full" />
+            <div className="flex gap-2">
+              <Skeleton className="h-8 flex-1 rounded-md" />
+              <Skeleton className="h-8 w-16 rounded-md" />
+              <Skeleton className="h-8 w-8 rounded-md" />
+            </div>
           </div>
         </div>
       </CardContent>

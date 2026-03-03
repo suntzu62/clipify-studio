@@ -1,6 +1,9 @@
+import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { FloatingOrbs } from './FloatingOrbs';
+import { AnimatedText } from './AnimatedText';
 
 interface CTAProps {
   onGetStarted?: () => void;
@@ -9,57 +12,88 @@ interface CTAProps {
 
 export const CTA = ({ onGetStarted, className }: CTAProps) => {
   return (
-    <section className={cn('py-24 bg-gradient-hero text-white', className)}>
-      <div className="container mx-auto px-6">
+    <section className={cn('relative py-24 bg-gradient-hero text-white overflow-hidden', className)}>
+      <FloatingOrbs variant="light" />
+
+      <div className="container mx-auto px-6 relative z-10">
         <div className="max-w-4xl mx-auto text-center space-y-8">
           {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/20 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/20 backdrop-blur-sm animate-float"
+          >
             <Sparkles className="w-4 h-4" />
             <span className="text-sm font-medium">
               Junte-se a milhares de criadores
             </span>
-          </div>
+          </motion.div>
 
           {/* Heading */}
-          <h2 className="text-4xl md:text-5xl font-bold leading-tight">
-            Pronto para transformar seus vídeos em{' '}
-            <span className="underline decoration-wavy decoration-white/40">
-              clipes virais
-            </span>
-            ?
-          </h2>
+          <AnimatedText
+            text="Pronto para transformar seus vídeos em clipes virais?"
+            as="h2"
+            className="text-4xl md:text-5xl font-bold leading-tight"
+            highlightWords={{
+              'virais?': 'underline decoration-wavy decoration-white/40',
+            }}
+          />
 
           {/* Description */}
-          <p className="text-lg md:text-xl text-white/90 max-w-2xl mx-auto leading-relaxed">
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.4, duration: 0.5 }}
+            className="text-lg md:text-xl text-white/90 max-w-2xl mx-auto leading-relaxed"
+          >
             Comece gratuitamente hoje e veja como é fácil criar conteúdo que
             engaja e converte.
-          </p>
+          </motion.p>
 
           {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-            <Button
-              size="lg"
-              variant="secondary"
-              className="text-base font-semibold shadow-xl hover:scale-105 transition-transform"
-              onClick={onGetStarted}
-            >
-              Começar Gratuitamente
-              <ArrowRight className="ml-2 w-5 h-5" />
-            </Button>
-            <Button
-              size="lg"
-              variant="ghost"
-              className="text-base font-semibold text-white hover:bg-white/10 border border-white/30"
-            >
-              Ver Demonstração
-            </Button>
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.6, duration: 0.5 }}
+            className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4"
+          >
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }}>
+              <Button
+                size="lg"
+                variant="secondary"
+                className="text-base font-semibold shadow-xl btn-premium"
+                onClick={onGetStarted}
+              >
+                Começar Gratuitamente
+                <ArrowRight className="ml-2 w-5 h-5" />
+              </Button>
+            </motion.div>
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }}>
+              <Button
+                size="lg"
+                variant="ghost"
+                className="text-base font-semibold text-white hover:bg-white/10 border border-white/30"
+              >
+                Ver Demonstração
+              </Button>
+            </motion.div>
+          </motion.div>
 
           {/* Trust Badge */}
-          <p className="text-sm text-white/70 pt-4">
+          <motion.p
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.8, duration: 0.5 }}
+            className="text-sm text-white/70 pt-4"
+          >
             Sem cartão de crédito necessário • Cancele quando quiser •
             Suporte em português
-          </p>
+          </motion.p>
         </div>
       </div>
     </section>

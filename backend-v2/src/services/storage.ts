@@ -10,6 +10,13 @@ const supabase = env.supabase.url && env.supabase.serviceKey
   ? createClient(env.supabase.url, env.supabase.serviceKey)
   : null;
 
+function requireSupabase() {
+  if (!supabase) {
+    throw new Error('Supabase storage is not configured');
+  }
+  return supabase;
+}
+
 interface UploadResult {
   path: string;
   publicUrl: string;
@@ -89,9 +96,10 @@ export async function uploadFiles(
  */
 export async function downloadFile(bucket: string, path: string): Promise<Blob> {
   logger.info({ bucket, path }, 'Downloading file from storage');
+  const client = requireSupabase();
 
   try {
-    const { data, error } = await supabase.storage.from(bucket).download(path);
+    const { data, error } = await client.storage.from(bucket).download(path);
 
     if (error) {
       if (error.message.includes('not found')) {
@@ -117,9 +125,10 @@ export async function listFiles(
   prefix: string
 ): Promise<Array<{ name: string; size: number; createdAt: string }>> {
   logger.info({ bucket, prefix }, 'Listing files from storage');
+  const client = requireSupabase();
 
   try {
-    const { data, error } = await supabase.storage.from(bucket).list(prefix);
+    const { data, error } = await client.storage.from(bucket).list(prefix);
 
     if (error) {
       throw error;
@@ -145,9 +154,10 @@ export async function listFiles(
  */
 export async function deleteFile(bucket: string, path: string): Promise<void> {
   logger.info({ bucket, path }, 'Deleting file from storage');
+  const client = requireSupabase();
 
   try {
-    const { error } = await supabase.storage.from(bucket).remove([path]);
+    const { error } = await client.storage.from(bucket).remove([path]);
 
     if (error) {
       throw error;
@@ -165,9 +175,10 @@ export async function deleteFile(bucket: string, path: string): Promise<void> {
  */
 export async function deleteFiles(bucket: string, paths: string[]): Promise<void> {
   logger.info({ bucket, count: paths.length }, 'Deleting multiple files');
+  const client = requireSupabase();
 
   try {
-    const { error } = await supabase.storage.from(bucket).remove(paths);
+    const { error } = await client.storage.from(bucket).remove(paths);
 
     if (error) {
       throw error;
@@ -184,6 +195,10 @@ export async function deleteFiles(bucket: string, paths: string[]): Promise<void
  * Verifica se um arquivo existe
  */
 export async function fileExists(bucket: string, path: string): Promise<boolean> {
+  if (!supabase) {
+    return false;
+  }
+
   try {
     const { data, error } = await supabase.storage.from(bucket).download(path);
 

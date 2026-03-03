@@ -16,7 +16,7 @@ export function DualInputHero({ className, onOpenDemo, prefillUrl }: DualInputHe
   const [activeTab, setActiveTab] = useState<'url' | 'upload'>('url');
 
   return (
-    <Card className={cn("border-2 border-dashed border-muted-foreground/25 bg-gradient-card", className)}>
+    <Card className={cn("border border-primary/15 glass-card glass-card-hover shadow-card transition-all duration-300", className)}>
       <CardContent className="p-8">
         <div className="text-center mb-6">
           <h2 className="text-2xl font-bold mb-2">Transforme seu conteúdo em clipes virais</h2>

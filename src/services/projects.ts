@@ -1,17 +1,19 @@
-import { supabase } from "@/integrations/supabase/client";
 import { getUserJobs } from "@/lib/storage";
 import { Job } from "@/lib/jobs-api";
+import { createProjectTitle } from "@/lib/youtube-metadata";
 
 export type Project = {
   id: string;
   user_id: string;
   youtube_url: string | null;
   title: string | null;
+  display_title?: string | null;
   status: string;
   progress: number | null;
   source: string | null;
   storage_path: string | null;
   file_name: string | null;
+  clips_ready_count?: number;
   created_at: string;
   updated_at: string | null;
 };
@@ -22,61 +24,129 @@ export type CreateProjectInput = {
   settings?: Record<string, unknown>;
 };
 
+type BackendJob = {
+  id: string;
+  user_id: string;
+  youtube_url: string | null;
+  title: string | null;
+  display_title?: string | null;
+  status: string;
+  progress: number | null;
+  source_type: string | null;
+  upload_path: string | null;
+  video_path: string | null;
+  clips_ready_count?: number;
+  created_at: string;
+  updated_at: string | null;
+};
+
 // Convert Job from localStorage to Project format
 function jobToProject(job: Job, userId: string): Project {
+  const fallbackTitle = job.youtubeUrl ? createProjectTitle(job.youtubeUrl) : null;
   return {
     id: job.id,
     user_id: userId,
     youtube_url: job.youtubeUrl || null,
-    title: null,
+    title: fallbackTitle,
+    display_title: fallbackTitle,
     status: job.status,
     progress: job.progress || 0,
     source: job.youtubeUrl ? 'youtube' : 'upload',
     storage_path: job.storagePath || null,
     file_name: job.fileName || null,
+    clips_ready_count: job.result?.clips?.length || 0,
     created_at: job.createdAt,
     updated_at: null,
   };
 }
 
-export async function listProjects() {
-  // Get authenticated user from Supabase (para obter email/userId mesmo sem usar o banco)
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+const API_KEY = import.meta.env.VITE_API_KEY || '93560857g';
 
-  // Se não tiver usuário no Supabase Auth, usar userId fixo de desenvolvimento
-  const userId = user?.id || 'dev-user';
+function normalizeProjectStatus(status: string | null | undefined): string {
+  const value = (status || '').toLowerCase();
+  if (value === 'processing' || value === 'active') return 'active';
+  if (value === 'pending' || value === 'queued' || value === 'waiting') return 'queued';
+  if (value === 'completed') return 'completed';
+  if (value === 'failed') return 'failed';
+  return 'queued';
+}
+
+function fallbackVideoNameFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('youtu.be')) {
+      const id = parsed.pathname.replace('/', '').trim();
+      return id ? `Vídeo ${id}` : 'Vídeo YouTube';
+    }
+
+    const v = parsed.searchParams.get('v');
+    if (v) return `Vídeo ${v}`;
+
+    const shorts = parsed.pathname.match(/\/shorts\/([^/?]+)/);
+    if (shorts?.[1]) return `Vídeo ${shorts[1]}`;
+
+    return createProjectTitle(url);
+  } catch {
+    return createProjectTitle(url || '');
+  }
+}
+
+function sortProjectsByDateDesc(items: Project[]): Project[] {
+  return [...items].sort((a, b) => {
+    const aTime = new Date(a.created_at).getTime();
+    const bTime = new Date(b.created_at).getTime();
+    return bTime - aTime;
+  });
+}
+
+export async function listProjects(currentUserId?: string) {
+  const userId = currentUserId || 'dev-user';
 
   console.log('[listProjects] Fetching projects for user:', userId);
 
   try {
     // Buscar jobs do backend PostgreSQL via API
-    const response = await fetch('http://localhost:3001/jobs', {
+    const response = await fetch(
+      `${BACKEND_URL}/jobs?userId=${encodeURIComponent(userId)}&includeLegacy=true`,
+      {
       headers: {
-        'x-api-key': import.meta.env.VITE_API_KEY || '93560857g',
+        'x-api-key': API_KEY,
       },
-    });
+      }
+    );
 
     if (!response.ok) {
       throw new Error(`API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as BackendJob[];
     console.log('[listProjects] Found projects from API:', data.length);
 
     // Mapear os dados do backend para o formato Project
-    return data.map((job: any): Project => ({
+    const mapped = data.map((job): Project => {
+      const fallbackTitle = fallbackVideoNameFromUrl(job.youtube_url);
+      const resolvedTitle = job.title || job.display_title || fallbackTitle;
+
+      return {
       id: job.id,
       user_id: job.user_id,
       youtube_url: job.youtube_url,
-      title: job.title,
-      status: job.status,
+      title: resolvedTitle,
+      display_title: job.display_title || fallbackTitle,
+      status: normalizeProjectStatus(job.status),
       progress: job.progress,
       source: job.source_type,
       storage_path: job.upload_path || job.video_path,
       file_name: null,
+      clips_ready_count: Number(job.clips_ready_count || 0),
       created_at: job.created_at,
       updated_at: job.updated_at,
-    }));
+    };
+    });
+
+    return sortProjectsByDateDesc(mapped);
   } catch (error) {
     console.error('[listProjects] API error, falling back to localStorage:', error);
 
@@ -84,28 +154,21 @@ export async function listProjects() {
     const localJobs = getUserJobs(userId);
     console.log('[listProjects] Found projects in localStorage:', localJobs.length);
 
-    return localJobs.map(job => jobToProject(job, userId));
+    const mapped = localJobs.map(job => jobToProject(job, userId));
+    return sortProjectsByDateDesc(mapped);
   }
 }
 
-export async function createProject(input: CreateProjectInput) {
-  // Get authenticated user from Supabase (para obter email/userId mesmo sem usar o banco)
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-  // Se não tiver usuário no Supabase Auth, usar userId fixo de desenvolvimento
-  const userId = user?.id || 'dev-user';
-
+export async function createProject(input: CreateProjectInput, currentUserId?: string) {
+  const userId = currentUserId || 'dev-user';
   console.log('[createProject] Creating project via local API for user:', userId);
 
   // Call the local backend API to create the job
-  const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-  const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
-
-  const response = await fetch(`${baseUrl}/jobs`, {
+  const response = await fetch(`${BACKEND_URL}/jobs`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
+      'x-api-key': API_KEY,
     },
     body: JSON.stringify({
       userId: userId,
@@ -122,20 +185,22 @@ export async function createProject(input: CreateProjectInput) {
     throw new Error(errorData.message || 'Failed to create project');
   }
 
-  const data = await response.json();
-  console.log('[createProject] Project created:', data.jobId);
+    const data = (await response.json()) as { jobId: string };
+    console.log('[createProject] Project created:', data.jobId);
 
   // Create project object
   const project: Project = {
     id: data.jobId,
     user_id: userId,
     youtube_url: input.youtube_url,
-    title: input.title ?? null,
+    title: input.title?.trim() || fallbackVideoNameFromUrl(input.youtube_url),
+    display_title: fallbackVideoNameFromUrl(input.youtube_url),
     status: 'queued',
     progress: 0,
     source: 'youtube',
     storage_path: null,
     file_name: null,
+    clips_ready_count: 0,
     created_at: new Date().toISOString(),
     updated_at: null,
   };
@@ -145,7 +210,7 @@ export async function createProject(input: CreateProjectInput) {
     const { saveUserJob } = await import('@/lib/storage');
     const job: Job = {
       id: project.id,
-      status: project.status as any,
+      status: 'queued',
       progress: project.progress || 0,
       youtubeUrl: project.youtube_url || undefined,
       storagePath: project.storage_path || undefined,
@@ -153,7 +218,7 @@ export async function createProject(input: CreateProjectInput) {
       createdAt: project.created_at,
       neededMinutes: 10,
     };
-    saveUserJob(session.user.id, job);
+    saveUserJob(userId, job);
     console.log('[createProject] Saved to localStorage');
   } catch (storageError) {
     console.warn('[createProject] Failed to save to localStorage:', storageError);
@@ -163,14 +228,11 @@ export async function createProject(input: CreateProjectInput) {
 }
 
 export async function updateProject(id: string, updates: { title?: string }) {
-  const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-  const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
-
-  const response = await fetch(`${baseUrl}/jobs/${id}`, {
+  const response = await fetch(`${BACKEND_URL}/jobs/${id}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
+      'x-api-key': API_KEY,
     },
     body: JSON.stringify(updates),
   });
@@ -184,13 +246,10 @@ export async function updateProject(id: string, updates: { title?: string }) {
 }
 
 export async function deleteProject(id: string) {
-  const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-  const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
-
-  const response = await fetch(`${baseUrl}/jobs/${id}`, {
+  const response = await fetch(`${BACKEND_URL}/jobs/${id}`, {
     method: 'DELETE',
     headers: {
-      'x-api-key': apiKey,
+      'x-api-key': API_KEY,
     },
   });
 
@@ -199,4 +258,3 @@ export async function deleteProject(id: string) {
     throw new Error(errorData.message || 'Failed to delete project');
   }
 }
-

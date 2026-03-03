@@ -8,10 +8,24 @@ import {
   PublishStatus,
   SocialPlatformType,
 } from './base-platform.js';
-import FormData from 'form-data';
-import { createReadStream, statSync } from 'fs';
+import { statSync } from 'fs';
 
 const logger = createLogger('instagram-platform');
+
+function parseJsonObject(payload: unknown, context: string): Record<string, unknown> {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(`Invalid ${context} payload`);
+  }
+  return payload as Record<string, unknown>;
+}
+
+function readStringField(payload: Record<string, unknown>, field: string, context: string): string {
+  const value = payload[field];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`Missing ${field} in ${context} payload`);
+  }
+  return value;
+}
 
 /**
  * Instagram Graph API Integration
@@ -65,8 +79,8 @@ export class InstagramPlatform extends SocialPlatform {
         throw new Error('Failed to exchange code for token');
       }
 
-      const tokenData = await tokenResponse.json();
-      const shortLivedToken = tokenData.access_token;
+      const tokenData = parseJsonObject(await tokenResponse.json(), 'token');
+      const shortLivedToken = readStringField(tokenData, 'access_token', 'token');
 
       // Step 2: Exchange short-lived token for long-lived token
       const longLivedResponse = await fetch(
@@ -83,29 +97,32 @@ export class InstagramPlatform extends SocialPlatform {
         throw new Error('Failed to get long-lived token');
       }
 
-      const longLivedData = await longLivedResponse.json();
+      const longLivedData = parseJsonObject(await longLivedResponse.json(), 'long-lived token');
+      const longLivedToken = readStringField(longLivedData, 'access_token', 'long-lived token');
 
       // Step 3: Get Instagram Business Account ID
       const meResponse = await fetch(
-        `${this.baseUrl}/me?fields=id,name&access_token=${longLivedData.access_token}`
+        `${this.baseUrl}/me?fields=id,name&access_token=${longLivedToken}`
       );
 
-      const meData = await meResponse.json();
+      const meData = parseJsonObject(await meResponse.json(), 'instagram me');
+      const accountId = readStringField(meData, 'id', 'instagram me');
+      const accountName = typeof meData.name === 'string' ? meData.name : 'Instagram';
 
       // Calculate expiration (long-lived tokens last 60 days)
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 60);
 
       return {
-        userId: meData.id,
+        userId: accountId,
         platform: 'instagram',
-        accessToken: longLivedData.access_token,
+        accessToken: longLivedToken,
         refreshToken: undefined, // Instagram doesn't use refresh tokens
         expiresAt,
-        accountId: meData.id,
-        accountName: meData.name,
+        accountId,
+        accountName,
         metadata: {
-          tokenType: longLivedData.token_type,
+          tokenType: typeof longLivedData.token_type === 'string' ? longLivedData.token_type : undefined,
         },
       };
     } catch (error: any) {
@@ -132,7 +149,8 @@ export class InstagramPlatform extends SocialPlatform {
         throw new Error('Failed to refresh token');
       }
 
-      const data = await response.json();
+      const data = parseJsonObject(await response.json(), 'refresh token');
+      const accessToken = readStringField(data, 'access_token', 'refresh token');
 
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 60);
@@ -140,7 +158,7 @@ export class InstagramPlatform extends SocialPlatform {
       return {
         userId: this.credentials?.userId || '',
         platform: 'instagram',
-        accessToken: data.access_token,
+        accessToken,
         expiresAt,
         accountId: this.credentials?.accountId,
         accountName: this.credentials?.accountName,
@@ -173,13 +191,14 @@ export class InstagramPlatform extends SocialPlatform {
 
       // Step 2: Publish the container
       const publishResult = await this.publishMediaContainer(containerId);
+      const publishedId = readStringField(publishResult, 'id', 'media publish');
 
       logger.info({ publishResult }, 'Instagram Reel published successfully');
 
       return {
         success: true,
-        platformId: publishResult.id,
-        url: `https://www.instagram.com/reel/${publishResult.id}/`,
+        platformId: publishedId,
+        url: `https://www.instagram.com/reel/${publishedId}/`,
         metadata: {
           containerId,
           ...publishResult,
@@ -233,14 +252,14 @@ export class InstagramPlatform extends SocialPlatform {
       throw new Error(`Failed to create media container: ${JSON.stringify(error)}`);
     }
 
-    const data = await response.json();
-    return data.id;
+    const data = parseJsonObject(await response.json(), 'media container');
+    return readStringField(data, 'id', 'media container');
   }
 
   /**
    * Publish media container
    */
-  private async publishMediaContainer(containerId: string): Promise<any> {
+  private async publishMediaContainer(containerId: string): Promise<Record<string, unknown>> {
     const params = new URLSearchParams({
       creation_id: containerId,
       access_token: this.credentials!.accessToken,
@@ -256,7 +275,7 @@ export class InstagramPlatform extends SocialPlatform {
       throw new Error(`Failed to publish media: ${JSON.stringify(error)}`);
     }
 
-    return response.json();
+    return parseJsonObject(await response.json(), 'media publish');
   }
 
   /**
@@ -276,13 +295,16 @@ export class InstagramPlatform extends SocialPlatform {
         throw new Error('Failed to get media status');
       }
 
-      const data = await response.json();
+      const data = parseJsonObject(await response.json(), 'publish status');
+      const platformIdFromApi = readStringField(data, 'id', 'publish status');
+      const permalink = typeof data.permalink === 'string' ? data.permalink : undefined;
+      const timestamp = typeof data.timestamp === 'string' ? data.timestamp : new Date().toISOString();
 
       return {
-        platformId: data.id,
+        platformId: platformIdFromApi,
         status: 'published',
-        url: data.permalink,
-        publishedAt: new Date(data.timestamp),
+        url: permalink,
+        publishedAt: new Date(timestamp),
       };
     } catch (error: any) {
       logger.error({ error: error.message, platformId }, 'Failed to get publish status');

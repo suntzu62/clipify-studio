@@ -1,42 +1,46 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getAuthHeader } from "@/lib/auth-token";
-import { getUsage as getUsageClient, ensureQuota, incrementUsage } from "@/lib/usage";
-import { createCheckout, openPortal } from "@/lib/stripe";
 import { initPosthog } from "@/lib/posthog";
+import {
+  getUsageLimits,
+  createCardPayment,
+  getCurrentSubscription,
+  cancelSubscription,
+  translateStatus,
+  getStatusBadgeVariant,
+  type UsageLimits,
+  type Subscription,
+} from "@/lib/mercadopago";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  createCheckoutSession, 
-  createCustomerPortalSession, 
-  getUsage, 
-  getPlanDisplayName, 
-  getPlanPrice, 
-  getPlanFeatures,
-  UsageData 
-} from "@/lib/billing";
+import { Check } from "lucide-react";
 
 const Billing = () => {
-  const { user, getToken } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
-  const [usage, setUsage] = useState<UsageData | null>(null);
+  const [usage, setUsage] = useState<UsageLimits | null>(null);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [planName, setPlanName] = useState("Grátis");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const loadUsage = async () => {
     if (!user) return;
-    
+
     try {
       setLoading(true);
-      const token = await getToken();
-      if (!token) throw new Error("No session token available");
-      
-      const usageData = await getUsage(token);
+      const [usageData, subData] = await Promise.all([
+        getUsageLimits(),
+        getCurrentSubscription(),
+      ]);
       setUsage(usageData);
+      setPlanName(usageData.planName);
+      setSubscription(subData.subscription);
     } catch (error) {
       console.error("Error loading usage:", error);
       toast({
@@ -54,30 +58,13 @@ const Billing = () => {
     loadUsage();
   }, [user]);
 
-  // Exemplo de uso com novos helpers
-  const onSubscribePro = async () => {
-    const headers = await getAuthHeader(getToken);
-    const { url } = await createCheckout('pro', headers);
-    window.open(url, '_blank');
-  };
-
-  const handleCheckout = async (plan: "pro" | "scale") => {
+  const handleCheckout = async (planId: string) => {
     if (!user) return;
-    
+
     try {
-      setCreating(plan);
-      const token = await getToken();
-      if (!token) throw new Error("No session token available");
-      
-      const { url } = await createCheckoutSession(plan, token);
-      
-      // Open in new tab
-      window.open(url, '_blank');
-      
-      toast({
-        title: "Redirecionando...",
-        description: "Abrindo checkout do Stripe em nova aba.",
-      });
+      setCreating(planId);
+      const { checkoutUrl } = await createCardPayment(planId, "monthly");
+      window.location.href = checkoutUrl;
     } catch (error) {
       console.error("Checkout error:", error);
       toast({
@@ -90,55 +77,79 @@ const Billing = () => {
     }
   };
 
-  const handleCustomerPortal = async () => {
-    if (!user) return;
-    
+  const handleCancel = async () => {
+    if (!subscription) return;
+
     try {
-      const token = await getToken();
-      if (!token) throw new Error("No session token available");
-      
-      const { url } = await createCustomerPortalSession(token);
-      
-      // Open in new tab
-      window.open(url, '_blank');
-      
+      setCancelling(true);
+      await cancelSubscription(subscription.id);
       toast({
-        title: "Redirecionando...",
-        description: "Abrindo portal de gerenciamento em nova aba.",
+        title: "Assinatura cancelada",
+        description: "Sua assinatura foi cancelada. Você pode continuar usando até o fim do período.",
       });
+      await loadUsage();
     } catch (error) {
-      console.error("Portal error:", error);
+      console.error("Cancel error:", error);
       toast({
         title: "Erro",
-        description: "Não foi possível acessar o portal de gerenciamento.",
+        description: "Não foi possível cancelar a assinatura.",
         variant: "destructive",
       });
+    } finally {
+      setCancelling(false);
     }
   };
 
   const plans = [
     {
-      id: "free",
-      name: "Gratuito",
+      id: "plan_free",
+      name: "Grátis",
       price: "R$ 0",
+      period: "",
       description: "Perfeito para começar",
-      features: getPlanFeatures("free"),
+      features: [
+        "5 clips por mês",
+        "30 minutos de vídeo",
+        "Legendas básicas",
+        "Marca d'água CortAI",
+      ],
     },
     {
-      id: "pro",
+      id: "plan_pro",
       name: "Pro",
-      price: "R$ 49,99",
-      description: "Para criadores profissionais",
-      features: getPlanFeatures("pro"),
+      price: "R$ 50",
+      period: "/mês",
+      description: "Para criadores de conteúdo",
+      highlight: true,
+      features: [
+        "50 clips por mês",
+        "5 horas de vídeo",
+        "Sem marca d'água",
+        "Legendas avançadas",
+        "Templates premium",
+        "Suporte prioritário",
+      ],
     },
     {
-      id: "scale",
-      name: "Scale",
-      price: "R$ 199,99",
+      id: "plan_enterprise",
+      name: "Enterprise",
+      price: "R$ 150",
+      period: "/mês",
       description: "Para agências e empresas",
-      features: getPlanFeatures("scale"),
+      features: [
+        "500 clips por mês",
+        "25 horas de vídeo",
+        "Sem marca d'água",
+        "Todas as features",
+        "API access",
+        "Branding customizado",
+        "Suporte dedicado",
+      ],
     },
   ];
+
+  const currentPlanId = subscription?.plan_id || "plan_free";
+  const isFreeTier = !subscription || subscription.plan_id === "plan_free";
 
   if (loading) {
     return (
@@ -170,54 +181,63 @@ const Billing = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2">
-                    Plano Atual: {getPlanDisplayName(usage.plan)}
-                    <Badge variant={usage.status === "active" ? "default" : "secondary"}>
-                      {usage.status === "active" ? "Ativo" : "Inativo"}
-                    </Badge>
+                    Plano Atual: {planName}
+                    {subscription && (
+                      <Badge variant={getStatusBadgeVariant(subscription.status)}>
+                        {translateStatus(subscription.status)}
+                      </Badge>
+                    )}
+                    {!subscription && (
+                      <Badge variant="secondary">Grátis</Badge>
+                    )}
                   </CardTitle>
                   <CardDescription>
-                    {usage.periodEnd && (
-                      <>Renovação em: {new Date(usage.periodEnd).toLocaleDateString("pt-BR")}</>
+                    {subscription?.current_period_end && (
+                      <>Renovação em: {new Date(subscription.current_period_end).toLocaleDateString("pt-BR")}</>
                     )}
                   </CardDescription>
                 </div>
-                {usage.plan !== "free" && (
-                  <Button onClick={handleCustomerPortal} variant="outline">
-                    Gerenciar Assinatura
+                {!isFreeTier && subscription && subscription.status === "active" && (
+                  <Button
+                    onClick={handleCancel}
+                    variant="outline"
+                    disabled={cancelling}
+                  >
+                    {cancelling ? "Cancelando..." : "Cancelar Assinatura"}
                   </Button>
                 )}
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Minutes Usage */}
+              {/* Clips Usage */}
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span>Minutos de Processamento</span>
-                  <span>{usage.minutesUsed} / {usage.minutesQuota}</span>
+                  <span>Clips Gerados</span>
+                  <span>{usage.clips.used} / {usage.clips.limit}</span>
                 </div>
-                <Progress 
-                  value={(usage.minutesUsed / usage.minutesQuota) * 100} 
+                <Progress
+                  value={usage.clips.limit > 0 ? (usage.clips.used / usage.clips.limit) * 100 : 0}
                   className="h-2"
                 />
                 <p className="text-xs text-muted-foreground">
-                  {usage.minutesRemaining} minutos restantes
+                  {usage.clips.remaining} clips restantes
                 </p>
               </div>
 
               <Separator />
 
-              {/* Shorts Usage */}
+              {/* Minutes Usage */}
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span>Shorts Gerados</span>
-                  <span>{usage.shortsUsed} / {usage.shortsQuota}</span>
+                  <span>Minutos de Processamento</span>
+                  <span>{usage.minutes.used} / {usage.minutes.limit}</span>
                 </div>
-                <Progress 
-                  value={(usage.shortsUsed / usage.shortsQuota) * 100} 
+                <Progress
+                  value={usage.minutes.limit > 0 ? (usage.minutes.used / usage.minutes.limit) * 100 : 0}
                   className="h-2"
                 />
                 <p className="text-xs text-muted-foreground">
-                  {usage.shortsRemaining} shorts restantes
+                  {usage.minutes.remaining} minutos restantes
                 </p>
               </div>
 
@@ -232,62 +252,75 @@ const Billing = () => {
 
         {/* Plans Grid */}
         <div className="grid md:grid-cols-3 gap-6">
-          {plans.map((plan) => (
-            <Card 
-              key={plan.id}
-              className={`relative ${
-                usage?.plan === plan.id 
-                  ? "border-primary shadow-lg" 
-                  : ""
-              }`}
-            >
-              {usage?.plan === plan.id && (
-                <Badge className="absolute -top-2 left-1/2 transform -translate-x-1/2">
-                  Plano Atual
-                </Badge>
-              )}
-              
-              <CardHeader className="text-center">
-                <CardTitle className="text-2xl">{plan.name}</CardTitle>
-                <div className="text-3xl font-bold text-primary">
-                  {plan.price}
-                  {plan.id !== "free" && <span className="text-sm font-normal">/mês</span>}
-                </div>
-                <CardDescription>{plan.description}</CardDescription>
-              </CardHeader>
-              
-              <CardContent className="space-y-4">
-                <ul className="space-y-2">
-                  {plan.features.map((feature, index) => (
-                    <li key={index} className="flex items-center gap-2 text-sm">
-                      <div className="w-1 h-1 bg-primary rounded-full" />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-                
-                <div className="pt-4">
-                  {plan.id === "free" ? (
-                    <Button disabled className="w-full">
-                      {usage?.plan === "free" ? "Plano Atual" : "Gratuito"}
-                    </Button>
-                  ) : usage?.plan === plan.id ? (
-                    <Button onClick={handleCustomerPortal} variant="outline" className="w-full">
-                      Gerenciar
-                    </Button>
-                  ) : (
-                    <Button 
-                      onClick={() => handleCheckout(plan.id as "pro" | "scale")}
-                      disabled={creating === plan.id}
-                      className="w-full"
-                    >
-                      {creating === plan.id ? "Processando..." : `Assinar ${plan.name}`}
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+          {plans.map((plan) => {
+            const isCurrent = currentPlanId === plan.id;
+            const isHighlight = "highlight" in plan && plan.highlight;
+
+            return (
+              <Card
+                key={plan.id}
+                className={`relative ${
+                  isHighlight
+                    ? "border-primary shadow-lg"
+                    : isCurrent
+                      ? "border-primary/50"
+                      : ""
+                }`}
+              >
+                {isHighlight && (
+                  <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-primary to-primary/80 text-white text-center py-1.5 text-sm font-medium rounded-t-lg">
+                    Mais Popular
+                  </div>
+                )}
+                {isCurrent && !isHighlight && (
+                  <Badge className="absolute -top-2 left-1/2 transform -translate-x-1/2">
+                    Plano Atual
+                  </Badge>
+                )}
+
+                <CardHeader className={`text-center ${isHighlight ? "pt-12" : ""}`}>
+                  <CardTitle className="text-2xl">{plan.name}</CardTitle>
+                  <div className="text-3xl font-bold text-primary">
+                    {plan.price}
+                    {plan.period && <span className="text-sm font-normal text-muted-foreground">{plan.period}</span>}
+                  </div>
+                  <CardDescription>{plan.description}</CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  <ul className="space-y-2">
+                    {plan.features.map((feature, index) => (
+                      <li key={index} className="flex items-center gap-2 text-sm">
+                        <Check className="h-4 w-4 text-primary flex-shrink-0" />
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="pt-4">
+                    {plan.id === "plan_free" ? (
+                      <Button disabled className="w-full">
+                        {isCurrent ? "Plano Atual" : "Gratuito"}
+                      </Button>
+                    ) : isCurrent ? (
+                      <Button variant="outline" className="w-full" disabled>
+                        Plano Atual
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={() => handleCheckout(plan.id)}
+                        disabled={creating === plan.id}
+                        variant={isHighlight ? "default" : "outline"}
+                        className="w-full"
+                      >
+                        {creating === plan.id ? "Processando..." : `Assinar ${plan.name}`}
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
         {/* Additional Info */}
@@ -297,16 +330,16 @@ const Billing = () => {
           </CardHeader>
           <CardContent className="space-y-4 text-sm text-muted-foreground">
             <p>
-              • Os planos são cobrados mensalmente e renovados automaticamente.
+              • Os planos são cobrados mensalmente via MercadoPago e renovados automaticamente.
             </p>
             <p>
-              • Você pode cancelar ou alterar seu plano a qualquer momento através do portal de gerenciamento.
+              • Você pode cancelar seu plano a qualquer momento. O acesso continua até o fim do período pago.
             </p>
             <p>
               • As quotas de uso são resetadas no início de cada ciclo de cobrança.
             </p>
             <p>
-              • Suporte técnico está disponível para todos os planos via email: suporte@cortai.com
+              • Pagamento seguro via MercadoPago — cartão de crédito, PIX e boleto.
             </p>
           </CardContent>
         </Card>

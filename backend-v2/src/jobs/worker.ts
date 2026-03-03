@@ -1,5 +1,4 @@
 import { Worker } from 'bullmq';
-import IORedis from 'ioredis';
 import { env } from '../config/env.js';
 import { createLogger } from '../config/logger.js';
 import { processVideo } from './processor.js';
@@ -8,13 +7,12 @@ import type { JobData, JobResult } from '../types/index.js';
 const logger = createLogger('worker');
 
 // Conexão Redis
-const connection = new IORedis({
+const connection = {
   host: env.redis.host,
   port: env.redis.port,
   password: env.redis.password,
   db: env.redis.db,
-  maxRetriesPerRequest: null,
-});
+};
 
 // Worker unificado
 export const worker = new Worker<JobData, JobResult>(

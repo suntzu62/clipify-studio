@@ -14,6 +14,9 @@ interface AnalysisOptions {
   clipCount?: number; // Desired number of clips
   minDuration?: number; // Minimum clip duration
   maxDuration?: number; // Maximum clip duration
+  model?: 'ClipAnything' | 'Smart' | 'Fast';
+  genre?: string;
+  specificMoments?: string;
 }
 
 /**
@@ -29,6 +32,9 @@ export async function analyzeHighlights(
     clipCount = 8,
     minDuration = 30,
     maxDuration = 90,
+    model = 'ClipAnything',
+    genre,
+    specificMoments,
   } = options;
 
   logger.info(
@@ -36,7 +42,10 @@ export async function analyzeHighlights(
       segments: transcript.segments.length,
       duration: transcript.duration,
       targetDuration,
-      clipCount
+      clipCount,
+      model,
+      genre,
+      hasSpecificMoments: Boolean(specificMoments),
     },
     'Starting highlight analysis'
   );
@@ -87,7 +96,8 @@ export async function analyzeHighlights(
       transcript.duration,
       targetDuration,
       clipCount,
-      detectedScenes.length
+      detectedScenes.length,
+      buildUserFocusContext({ model, genre, specificMoments })
     );
 
     logger.debug('Sending scenes to OpenAI for ranking and metadata generation');
@@ -177,6 +187,9 @@ async function fallbackAIAnalysis(
     clipCount = 8,
     minDuration = 30,
     maxDuration = 90,
+    model = 'ClipAnything',
+    genre,
+    specificMoments,
   } = options;
 
   logger.info('Using fallback AI-based analysis');
@@ -188,7 +201,8 @@ async function fallbackAIAnalysis(
     targetDuration,
     clipCount,
     minDuration,
-    maxDuration
+    maxDuration,
+    buildUserFocusContext({ model, genre, specificMoments })
   );
 
   const completion = await openai.chat.completions.create({
@@ -247,7 +261,8 @@ function buildRankingPrompt(
   totalDuration: number,
   targetDuration: number,
   clipCount: number,
-  totalScenes: number
+  totalScenes: number,
+  userFocusContext: string
 ): string {
   return `Você é um especialista em análise de conteúdo de vídeo para redes sociais (TikTok, Instagram Reels, YouTube Shorts).
 
@@ -255,6 +270,8 @@ Analise as ${totalScenes} cenas detectadas abaixo e RANQUEIE as ${clipCount} MEL
 
 CENAS DETECTADAS (já otimizadas com padding para transições suaves):
 ${scenesText}
+
+${userFocusContext}
 
 CRITÉRIOS DE RANKING (ordem de importância):
 1. **Gancho Forte no Início** (0-5s): Frase de impacto, pergunta, número, afirmação polêmica
@@ -300,7 +317,8 @@ function buildAnalysisPrompt(
   targetDuration: number,
   clipCount: number,
   minDuration: number,
-  maxDuration: number
+  maxDuration: number,
+  userFocusContext: string
 ): string {
   return `Você é um especialista em análise de conteúdo de vídeo para redes sociais (TikTok, Instagram Reels, YouTube Shorts).
 
@@ -308,6 +326,8 @@ Analise esta transcrição de vídeo e identifique os ${clipCount} MELHORES mome
 
 TRANSCRIÇÃO:
 ${transcriptText}
+
+${userFocusContext}
 
 CRITÉRIOS IMPORTANTES:
 - Cada clipe deve ter entre ${minDuration}-${maxDuration} segundos (idealmente ~${targetDuration}s)
@@ -343,6 +363,39 @@ Responda APENAS com um JSON válido neste formato:
 Duração total do vídeo: ${Math.floor(totalDuration / 60)}min ${Math.floor(totalDuration % 60)}s
 
 Retorne APENAS o JSON, sem nenhum texto adicional antes ou depois.`;
+}
+
+function buildUserFocusContext(input: {
+  model?: 'ClipAnything' | 'Smart' | 'Fast';
+  genre?: string;
+  specificMoments?: string;
+}): string {
+  const hints: string[] = [];
+
+  if (input.model) {
+    if (input.model === 'Fast') {
+      hints.push('- Modo de clipping: Fast (priorize ganchos óbvios e cenas com alta clareza).');
+    } else if (input.model === 'Smart') {
+      hints.push('- Modo de clipping: Smart (equilibre qualidade, diversidade e velocidade).');
+    } else {
+      hints.push('- Modo de clipping: ClipAnything (priorize momentos com maior potencial viral).');
+    }
+  }
+
+  if (input.genre) {
+    hints.push(`- Gênero/contexto informado pelo usuário: ${input.genre}.`);
+  }
+
+  if (input.specificMoments) {
+    hints.push(`- Objetivo do usuário: ${input.specificMoments}.`);
+  }
+
+  if (hints.length === 0) {
+    return '';
+  }
+
+  return `FOCO E RESTRIÇÕES ADICIONAIS DO USUÁRIO:
+${hints.join('\n')}`;
 }
 
 /**

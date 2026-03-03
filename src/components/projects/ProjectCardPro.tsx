@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
@@ -12,6 +13,8 @@ import {
 import { Play, Clock, CheckCircle2, AlertCircle, Loader2, MoreVertical, Edit, Trash2 } from 'lucide-react';
 import type { Project } from '@/services/projects';
 import { cn } from '@/lib/utils';
+import { createProjectTitle } from '@/lib/youtube-metadata';
+import { TiltCard } from '@/components/landing';
 
 interface ProjectCardProProps {
   project: Project;
@@ -34,7 +37,9 @@ export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProp
 
   // Determinar status visual
   const getStatusInfo = () => {
-    switch (project.status) {
+    const normalizedStatus = (project.status || '').toLowerCase();
+
+    switch (normalizedStatus) {
       case 'completed':
         return {
           icon: <CheckCircle2 className="w-3 h-3" />,
@@ -43,6 +48,10 @@ export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProp
           badgeVariant: 'default' as const
         };
       case 'active':
+      case 'processing':
+      case 'queued':
+      case 'pending':
+      case 'waiting':
         return {
           icon: <Loader2 className="w-3 h-3 animate-spin" />,
           label: 'Processando',
@@ -94,169 +103,198 @@ export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProp
   // Extrair título limpo do YouTube URL ou usar file_name
   const getProjectTitle = () => {
     if (project.title) return project.title;
-    if (project.file_name) return project.file_name.replace(/\.[^/.]+$/, ''); // Remove extensão
+    if (project.display_title) return project.display_title;
+    if (project.youtube_url) return createProjectTitle(project.youtube_url);
+    if (project.file_name) return project.file_name.replace(/\.[^/.]+$/, '');
     return 'Projeto sem título';
   };
 
   return (
-    <div className="relative group">
-      {/* Actions Menu */}
-      <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/10"
-              onClick={(e) => e.preventDefault()}
-            >
-              <MoreVertical className="h-4 w-4 text-white" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            {onEdit && (
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdit(project);
-                }}
+    <TiltCard tiltDegree={8} glare>
+      <div className="relative group">
+        {/* Actions Menu */}
+        <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/10"
+                onClick={(e) => e.preventDefault()}
               >
-                <Edit className="w-4 h-4 mr-2" />
-                Editar projeto
-              </DropdownMenuItem>
-            )}
-            {onDelete && (
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(project);
-                }}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Excluir projeto
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <Link to={`/projects/${project.id}`} className="block">
-        <Card className="overflow-hidden bg-gradient-to-br from-background to-muted/20 border-2 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl hover:scale-[1.02]">
-          <CardContent className="p-0">
-            {/* Thumbnail Area */}
-            <AspectRatio ratio={16/9} className="relative">
-            <div className="bg-gradient-to-br from-primary/20 to-primary/5 h-full flex items-center justify-center relative overflow-hidden">
-              {thumbnailUrl ? (
-                <img
-                  src={thumbnailUrl}
-                  alt={getProjectTitle()}
-                  className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                  onError={(e) => {
-                    // Fallback se imagem não carregar
-                    e.currentTarget.style.display = 'none';
+                <MoreVertical className="h-4 w-4 text-white" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {onEdit && (
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(project);
                   }}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center p-4">
-                  <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mb-3 group-hover:bg-primary/30 transition-colors">
-                    <Play className="w-8 h-8 text-primary ml-1" />
-                  </div>
-                  <p className="text-xs text-muted-foreground">Vídeo do Projeto</p>
-                </div>
-              )}
-
-              {/* Overlay gradient no bottom */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
-              {/* Score Badge (só se completo) */}
-              {project.status === 'completed' && score > 0 && (
-                <div className="absolute top-3 left-3">
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-black/70 backdrop-blur-md border border-white/10">
-                    <span className="text-2xl font-black text-white">{score}</span>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-white/70 leading-none">SCORE</span>
-                      <span className="text-xs font-semibold text-green-400 leading-none">
-                        {score >= 90 ? 'Viral' : score >= 80 ? 'Ótimo' : 'Bom'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Status Badge */}
-              <div className="absolute top-3 right-3">
-                <Badge
-                  variant={statusInfo.badgeVariant}
-                  className={cn(
-                    "backdrop-blur-md border border-white/10 shadow-lg flex items-center gap-1.5",
-                    project.status === 'completed' && "bg-green-500/90 text-white hover:bg-green-500",
-                    project.status === 'active' && "bg-blue-500/90 text-white hover:bg-blue-500",
-                    project.status === 'failed' && "bg-red-500/90 text-white hover:bg-red-500"
-                  )}
                 >
-                  {statusInfo.icon}
-                  {statusInfo.label}
-                </Badge>
-              </div>
+                  <Edit className="w-4 h-4 mr-2" />
+                  Editar projeto
+                </DropdownMenuItem>
+              )}
+              {onDelete && (
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(project);
+                  }}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Excluir projeto
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
 
-              {/* Progress Bar (se em processamento) */}
-              {project.status === 'active' && project.progress !== null && project.progress > 0 && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
-                  <div
-                    className="h-full bg-primary transition-all duration-300"
-                    style={{ width: `${project.progress}%` }}
+        <Link to={`/projects/${project.id}`} className="block">
+          <Card className="overflow-hidden glass-card glass-card-hover border-2 border-white/10 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl">
+            <CardContent className="p-0">
+              {/* Thumbnail Area */}
+              <AspectRatio ratio={16/9} className="relative">
+              <div className="bg-gradient-to-br from-primary/20 to-primary/5 h-full flex items-center justify-center relative overflow-hidden">
+                {thumbnailUrl ? (
+                  <img
+                    src={thumbnailUrl}
+                    alt={getProjectTitle()}
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
                   />
-                </div>
-              )}
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-center p-4">
+                    <motion.div
+                      animate={{ y: [0, -5, 0] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                      className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mb-3 group-hover:bg-primary/30 transition-colors"
+                    >
+                      <Play className="w-8 h-8 text-primary ml-1" />
+                    </motion.div>
+                    <p className="text-xs text-muted-foreground">Vídeo do Projeto</p>
+                  </div>
+                )}
 
-              {/* Play Overlay on Hover */}
-              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                <div className="w-16 h-16 bg-white/95 rounded-full flex items-center justify-center shadow-2xl transform scale-75 group-hover:scale-100 transition-transform">
-                  <Play className="w-8 h-8 text-primary ml-1" />
+                {/* Overlay gradient no bottom */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                {/* Score Badge (só se completo) */}
+                {project.status === 'completed' && score > 0 && (
+                  <motion.div
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 20, delay: 0.1 }}
+                    className="absolute top-3 left-3"
+                  >
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 neon-glow">
+                      <span className="text-2xl font-black text-white">{score}</span>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-white/70 leading-none">SCORE</span>
+                        <span className="text-xs font-semibold text-green-400 leading-none">
+                          {score >= 90 ? 'Viral' : score >= 80 ? 'Ótimo' : 'Bom'}
+                        </span>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Status Badge */}
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.2 }}
+                  className="absolute top-3 right-3"
+                >
+                  <Badge
+                    variant={statusInfo.badgeVariant}
+                    className={cn(
+                      "backdrop-blur-md border border-white/10 shadow-lg flex items-center gap-1.5",
+                      project.status === 'completed' && "bg-green-500/90 text-white hover:bg-green-500",
+                      project.status === 'active' && "bg-blue-500/90 text-white hover:bg-blue-500",
+                      project.status === 'failed' && "bg-red-500/90 text-white hover:bg-red-500"
+                    )}
+                  >
+                    {statusInfo.icon}
+                    {statusInfo.label}
+                  </Badge>
+                </motion.div>
+
+                {/* Progress Bar (se em processamento) */}
+                {project.status === 'active' && project.progress !== null && project.progress > 0 && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
+                    <motion.div
+                      className="h-full bg-gradient-primary"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${project.progress}%` }}
+                      transition={{ duration: 0.8, ease: 'easeOut' }}
+                    />
+                  </div>
+                )}
+
+                {/* Play Overlay on Hover */}
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                  <motion.div
+                    whileHover={{ scale: 1.1 }}
+                    className="w-16 h-16 bg-white/95 rounded-full flex items-center justify-center shadow-2xl transform scale-75 group-hover:scale-100 transition-transform"
+                  >
+                    <Play className="w-8 h-8 text-primary ml-1" />
+                  </motion.div>
                 </div>
               </div>
-            </div>
-          </AspectRatio>
+            </AspectRatio>
 
-          {/* Info Section */}
-          <div className="p-4 space-y-2">
-            {/* Title */}
-            <h3 className="font-bold text-base leading-tight line-clamp-2 group-hover:text-primary transition-colors">
-              {getProjectTitle()}
-            </h3>
+            {/* Info Section */}
+            <div className="p-4 space-y-2">
+              {/* Title */}
+              <h3 className="font-bold text-base leading-tight line-clamp-2 group-hover:text-primary transition-colors">
+                {getProjectTitle()}
+              </h3>
 
-            {/* Meta Info */}
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                {getRelativeTime(project.created_at)}
-              </span>
-              {project.status === 'active' && project.progress !== null && (
-                <span className="font-medium text-primary">
-                  {project.progress}%
+              {/* Meta Info */}
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  {getRelativeTime(project.created_at)}
                 </span>
-              )}
-              {project.status === 'completed' && (
-                <span className="flex items-center gap-1 text-green-600 font-medium">
-                  <CheckCircle2 className="w-3 h-3" />
-                  Pronto
-                </span>
-              )}
-            </div>
-
-            {/* Source info */}
-            {project.source && (
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] px-2 py-0">
-                  {project.source === 'youtube' ? '📺 YouTube' : '📁 Upload'}
-                </Badge>
+                {project.status === 'active' && project.progress !== null && (
+                  <span className="font-medium text-primary">
+                    {project.progress}%
+                  </span>
+                )}
+                {project.status === 'completed' && (
+                  <span className="flex items-center gap-1 text-green-600 font-medium">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Pronto
+                  </span>
+                )}
               </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
-    </div>
+
+              {/* Source info */}
+              {(project.source || project.clips_ready_count !== undefined) && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {project.source && (
+                    <Badge variant="outline" className="text-[10px] px-2 py-0">
+                      {project.source === 'youtube' ? '📺 YouTube' : '📁 Upload'}
+                    </Badge>
+                  )}
+                  {typeof project.clips_ready_count === 'number' && (
+                    <Badge variant="secondary" className="text-[10px] px-2 py-0">
+                      {project.clips_ready_count} {project.clips_ready_count === 1 ? 'corte pronto' : 'cortes prontos'}
+                    </Badge>
+                  )}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
+      </div>
+    </TiltCard>
   );
 };

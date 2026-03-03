@@ -314,25 +314,23 @@ export async function createTempConfig(
   youtubeUrl: string,
   getToken?: () => Promise<string | null>
 ): Promise<{ tempId: string }> {
-  const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
 
-  if (useLocalAPI) {
+  if (useBackendAPI) {
+    const token = getToken ? await getToken() : null;
     const headers = {
       'Content-Type': 'application/json',
       'x-api-key': import.meta.env.VITE_API_KEY,
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     } as Record<string, string>;
 
     // Get user ID from token if available
     let userId = 'dev-user';
-    if (getToken) {
-      const token = await getToken();
-      if (token) {
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          userId = payload.sub || 'dev-user';
-        } catch {}
-      }
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        userId = payload.sub || 'dev-user';
+      } catch {}
     }
 
     const tempConfigData = {
@@ -379,6 +377,83 @@ export async function createTempConfig(
 }
 
 /**
+ * Start a queued job from a temporary configuration
+ * Supports backend-v2 local API flow.
+ */
+export async function startJobFromTempConfig(
+  tempId: string,
+  config: {
+    clipSettings: {
+      aiClipping: boolean;
+      model: 'ClipAnything' | 'Smart' | 'Fast';
+      targetDuration: number;
+      minDuration: number;
+      maxDuration: number;
+      clipCount: number;
+    };
+    subtitlePreferences: {
+      position: 'top' | 'center' | 'bottom';
+      format: 'single-line' | 'multi-line' | 'karaoke' | 'progressive';
+      font: 'Arial' | 'Inter' | 'Roboto' | 'Montserrat' | 'Poppins';
+      fontSize: number;
+      fontColor: string;
+      backgroundColor: string;
+      backgroundOpacity: number;
+      bold: boolean;
+      italic: boolean;
+      outline: boolean;
+      outlineColor: string;
+      outlineWidth: number;
+      shadow: boolean;
+      shadowColor: string;
+      maxCharsPerLine: number;
+      marginVertical: number;
+    };
+    timeframe?: {
+      startTime: number;
+      endTime: number;
+      duration: number;
+    };
+    genre?: string;
+    specificMoments?: string;
+  },
+  getToken?: () => Promise<string | null>
+): Promise<{ jobId: string; status: string; message?: string }> {
+  const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+
+  if (useBackendAPI) {
+    const token = getToken ? await getToken() : null;
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': import.meta.env.VITE_API_KEY,
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    } as Record<string, string>;
+
+    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs/temp/${tempId}/start`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(config),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to start job from temporary configuration';
+      throw new Error(`start-job-from-temp failed: ${resp.status} ${resp.statusText} - ${msg}`);
+    }
+
+    return {
+      jobId: (data as any).jobId,
+      status: (data as any).status || 'queued',
+      message: (data as any).message,
+    };
+  }
+
+  // In production deployments without backend-v2 temp start endpoint,
+  // the UI should fallback to the full configuration screen.
+  throw new Error('ONE_CLICK_NOT_AVAILABLE');
+}
+
+/**
  * Create a job from an uploaded file
  * Called after file is uploaded to Supabase Storage
  */
@@ -388,13 +463,14 @@ export async function createJobFromUpload(
   fileName: string,
   getToken?: () => Promise<string | null>
 ): Promise<{ jobId: string }> {
-  const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
 
-  if (useLocalAPI) {
+  if (useBackendAPI) {
+    const token = getToken ? await getToken() : null;
     const headers = {
       'Content-Type': 'application/json',
       'x-api-key': import.meta.env.VITE_API_KEY,
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     } as Record<string, string>;
 
     const jobData = {
@@ -459,13 +535,13 @@ export async function getJobStatus(
   jobId: string,
   getToken?: () => Promise<string | null>
 ): Promise<Job> {
-  // Use backend-v2 API in development
-  const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
 
-  if (useLocalAPI) {
+  if (useBackendAPI) {
+    const token = getToken ? await getToken() : null;
     const headers = {
       'x-api-key': import.meta.env.VITE_API_KEY,
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     } as Record<string, string>;
 
     const response = await fetch(

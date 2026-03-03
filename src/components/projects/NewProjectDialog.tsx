@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { createProject } from "@/services/projects";
 import { isValidYouTubeUrl } from "@/lib/youtube";
 import posthog from 'posthog-js';
+import { useAuth } from "@/contexts/AuthContext";
 
 const schema = z.object({
   youtube_url: z
@@ -29,6 +30,7 @@ type Props = {
 
 export default function NewProjectDialog({ open, onOpenChange, onCreated }: Props) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   const form = useForm<Schema>({
@@ -39,19 +41,25 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
   const handleSubmit = form.handleSubmit(async (values) => {
     try {
       setSubmitting(true);
-      await createProject({ youtube_url: values.youtube_url.trim(), title: values.title?.trim() });
+      await createProject(
+        { youtube_url: values.youtube_url.trim(), title: values.title?.trim() },
+        user?.id
+      );
       // Telemetry
       try {
         const urlLen = values.youtube_url.trim().length;
         posthog.capture('project created', { youtubeUrl_len: urlLen });
         posthog.capture('pipeline started', { source: 'ui' });
-      } catch {}
+      } catch {
+        // no-op: telemetry cannot break project creation
+      }
       toast({ title: "Projeto criado", description: "Seu projeto foi criado com sucesso." });
       onOpenChange(false);
       form.reset();
       onCreated?.();
-    } catch (err: any) {
-      toast({ title: "Erro ao criar projeto", description: err?.message ?? "Tente novamente.", variant: "destructive" });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Tente novamente.";
+      toast({ title: "Erro ao criar projeto", description: message, variant: "destructive" });
     } finally {
       setSubmitting(false);
     }
@@ -61,7 +69,7 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Novo Projeto</DialogTitle>
+          <DialogTitle>Novo video</DialogTitle>
           <DialogDescription>
             Informe a URL de um vídeo do YouTube para iniciar um novo projeto.
           </DialogDescription>

@@ -1,34 +1,129 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type CSSProperties } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
+import { Input } from '@/components/ui/input';
 import { saveUserJob } from '@/lib/storage';
 import type { Job } from '@/lib/jobs-api';
 import {
   ArrowLeft,
-  Sparkles,
-  Settings,
   Type,
-  Clock,
-  Tag,
+  Palette,
   Loader2,
-  Info,
-  Play,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
-  ProjectConfig,
-  DEFAULT_CLIP_SETTINGS,
-  DEFAULT_SUBTITLE_PREFERENCES,
+  type ProjectConfig,
+  type SubtitlePreferences,
 } from '@/types/project-config';
-import { ClipSettings } from '@/components/config/ClipSettings';
-import { SubtitleConfig } from '@/components/config/SubtitleConfig';
-import { GenreSelector } from '@/components/config/GenreSelector';
-import { SpecificMomentsInput } from '@/components/config/SpecificMomentsInput';
+
+const SUBTITLE_PRESETS: Array<{
+  id: string;
+  label: string;
+  hint: string;
+  values: Partial<SubtitlePreferences>;
+}> = [
+  {
+    id: 'viral',
+    label: 'Viral Boost',
+    hint: 'Alto contraste e impacto visual',
+    values: {
+      font: 'Montserrat',
+      fontSize: 36,
+      bold: true,
+      outline: true,
+      outlineWidth: 3,
+      shadow: true,
+      backgroundOpacity: 0.82,
+      format: 'multi-line',
+      position: 'bottom',
+    },
+  },
+  {
+    id: 'clean',
+    label: 'Clean Glass',
+    hint: 'Minimalista, elegante e legível',
+    values: {
+      font: 'Inter',
+      fontSize: 30,
+      bold: true,
+      outline: false,
+      shadow: true,
+      backgroundOpacity: 0.58,
+      format: 'single-line',
+      position: 'bottom',
+    },
+  },
+  {
+    id: 'cinema',
+    label: 'Cinema Neo',
+    hint: 'Drama com profundidade em 3D',
+    values: {
+      font: 'Poppins',
+      fontSize: 34,
+      bold: true,
+      italic: true,
+      outline: true,
+      outlineColor: '#080808',
+      shadow: true,
+      shadowColor: '#111111',
+      backgroundOpacity: 0.72,
+      format: 'progressive',
+      position: 'center',
+    },
+  },
+];
+
+const clampOpacity = (opacity: number) => Math.max(0, Math.min(1, opacity));
+
+const hexToRgba = (hex: string, opacity: number): string => {
+  const safe = hex.replace('#', '').trim();
+  const normalized = safe.length === 3 ? safe.split('').map((char) => `${char}${char}`).join('') : safe;
+
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return `rgba(0, 0, 0, ${clampOpacity(opacity)})`;
+  }
+
+  const int = parseInt(normalized, 16);
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${clampOpacity(opacity)})`;
+};
+
+const extractYoutubeId = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.hostname.includes('youtu.be')) {
+      const [id] = parsed.pathname.split('/').filter(Boolean);
+      return id || null;
+    }
+
+    const byQuery = parsed.searchParams.get('v');
+    if (byQuery) return byQuery;
+
+    const shorts = parsed.pathname.match(/\/shorts\/([^/?]+)/);
+    if (shorts?.[1]) return shorts[1];
+
+    const embed = parsed.pathname.match(/\/embed\/([^/?]+)/);
+    if (embed?.[1]) return embed[1];
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+};
 
 export default function ProjectConfigure() {
   const { tempId } = useParams<{ tempId: string }>();
@@ -39,6 +134,40 @@ export default function ProjectConfigure() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [config, setConfig] = useState<ProjectConfig | null>(null);
+  const [selectedPreset, setSelectedPreset] = useState('custom');
+
+  const updateSubtitlePreference = <K extends keyof SubtitlePreferences>(
+    key: K,
+    value: SubtitlePreferences[K]
+  ) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      subtitlePreferences: {
+        ...config.subtitlePreferences,
+        [key]: value,
+      },
+    });
+  };
+
+  const applySubtitlePreset = (values: Partial<SubtitlePreferences>) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      subtitlePreferences: {
+        ...config.subtitlePreferences,
+        ...values,
+      },
+    });
+  };
+
+  const handlePresetChange = (presetId: string) => {
+    setSelectedPreset(presetId);
+    const preset = SUBTITLE_PRESETS.find((item) => item.id === presetId);
+    if (preset) {
+      applySubtitlePreset(preset.values);
+    }
+  };
 
   // Carregar configuração temporária
   useEffect(() => {
@@ -71,11 +200,14 @@ export default function ProjectConfigure() {
         }
 
         setConfig(data);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Failed to load temp config:', error);
         toast({
           title: 'Erro ao carregar configuração',
-          description: error.message || 'A configuração pode ter expirado (1 hora). Tente criar um novo projeto.',
+          description: getErrorMessage(
+            error,
+            'A configuração pode ter expirado (1 hora). Tente criar um novo projeto.'
+          ),
           variant: 'destructive',
         });
         navigate('/dashboard');
@@ -86,12 +218,6 @@ export default function ProjectConfigure() {
 
     loadTempConfig();
   }, [tempId, user, navigate, toast]);
-
-  // Atualizar configuração local
-  const updateConfig = (updates: Partial<ProjectConfig>) => {
-    if (!config) return;
-    setConfig({ ...config, ...updates });
-  };
 
   // Iniciar processamento
   const handleStartProcessing = async () => {
@@ -162,11 +288,11 @@ export default function ProjectConfigure() {
 
       // Navegar imediatamente - ProjectDetail agora busca do backend se necessário
       navigate(`/projects/${jobId}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error starting processing:', error);
       toast({
         title: 'Erro ao iniciar processamento',
-        description: error.message || 'Erro desconhecido ao criar o job',
+        description: getErrorMessage(error, 'Erro desconhecido ao criar o job'),
         variant: 'destructive',
       });
     } finally {
@@ -189,204 +315,403 @@ export default function ProjectConfigure() {
     return null;
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-background/95 backdrop-blur">
-        <div className="container mx-auto px-6">
-          <div className="flex items-center justify-between h-16">
-            <Button
-              variant="ghost"
-              onClick={() => navigate('/dashboard')}
-              className="gap-2 hover:bg-primary/10"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Dashboard
-            </Button>
+  const youtubeId = extractYoutubeId(config.youtubeUrl);
+  const subtitlePreviewStyles: CSSProperties = {
+    fontFamily: config.subtitlePreferences.font,
+    color: config.subtitlePreferences.fontColor,
+    backgroundColor: hexToRgba(
+      config.subtitlePreferences.backgroundColor,
+      config.subtitlePreferences.backgroundOpacity
+    ),
+    fontSize: `${Math.max(16, Math.min(34, config.subtitlePreferences.fontSize - 2))}px`,
+    fontWeight: config.subtitlePreferences.bold ? 700 : 500,
+    fontStyle: config.subtitlePreferences.italic ? 'italic' : 'normal',
+    borderRadius: '14px',
+    padding: '10px 16px',
+    letterSpacing: '0.02em',
+    textShadow: config.subtitlePreferences.shadow
+      ? `0 6px 18px ${config.subtitlePreferences.shadowColor}`
+      : 'none',
+  };
 
-            <Badge variant="secondary" className="gap-2">
-              <Settings className="w-3 h-3" />
-              Configuração
-            </Badge>
-          </div>
+  if (config.subtitlePreferences.outline) {
+    subtitlePreviewStyles.WebkitTextStroke = `${config.subtitlePreferences.outlineWidth}px ${config.subtitlePreferences.outlineColor}`;
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0f0f14] text-white/90">
+      {/* Header — clean, minimal */}
+      <header className="border-b border-white/[0.06] bg-[#0f0f14]">
+        <div className="mx-auto flex h-14 max-w-[960px] items-center justify-between px-6">
+          <Button
+            variant="ghost"
+            onClick={() => navigate('/dashboard')}
+            className="gap-2 text-white/60 hover:bg-white/[0.04] hover:text-white/90"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Dashboard
+          </Button>
         </div>
       </header>
 
-      <div className="container mx-auto px-6 py-8 max-w-5xl">
-        {/* Hero Section */}
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold mb-3 flex items-center justify-center gap-2">
-            <Sparkles className="w-8 h-8 text-primary" />
-            Configure Seus Clipes
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Personalize como seu vídeo será processado antes de gerar os clipes
-          </p>
-        </div>
-
-        {/* Video Info */}
-        <Card className="mb-8 bg-gradient-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Play className="w-6 h-6 text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-sm mb-1">Vídeo Selecionado</h3>
-                <p className="text-xs text-muted-foreground truncate">
-                  {config.youtubeUrl}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Configuration Tabs */}
-        <Tabs defaultValue="clips" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="clips" className="gap-2">
-              <Settings className="w-4 h-4" />
-              Clipes
-            </TabsTrigger>
-            <TabsTrigger value="subtitles" className="gap-2">
-              <Type className="w-4 h-4" />
-              Legendas
-            </TabsTrigger>
-            <TabsTrigger value="advanced" className="gap-2">
-              <Tag className="w-4 h-4" />
-              Avançado
-            </TabsTrigger>
-            <TabsTrigger value="summary" className="gap-2">
-              <Info className="w-4 h-4" />
-              Resumo
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Clip Settings Tab */}
-          <TabsContent value="clips">
-            <ClipSettings
-              settings={config.clipSettings}
-              onChange={(settings) =>
-                updateConfig({ clipSettings: settings })
-              }
-            />
-          </TabsContent>
-
-          {/* Subtitle Settings Tab */}
-          <TabsContent value="subtitles">
-            <SubtitleConfig
-              preferences={config.subtitlePreferences}
-              onChange={(preferences) =>
-                updateConfig({ subtitlePreferences: preferences })
-              }
-            />
-          </TabsContent>
-
-          {/* Advanced Settings Tab */}
-          <TabsContent value="advanced" className="space-y-6">
-            {/* Genre Selector */}
-            <GenreSelector
-              value={config.genre || 'auto'}
-              onChange={(genre) => updateConfig({ genre })}
-            />
-
-            {/* Specific Moments */}
-            <SpecificMomentsInput
-              value={config.specificMoments || ''}
-              onChange={(specificMoments) =>
-                updateConfig({ specificMoments })
-              }
-            />
-          </TabsContent>
-
-          {/* Summary Tab */}
-          <TabsContent value="summary">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Info className="w-5 h-5 text-primary" />
-                  Resumo das Configurações
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-sm text-muted-foreground mb-1">
-                      Número de Clipes
-                    </p>
-                    <p className="text-2xl font-bold">
-                      {config.clipSettings.clipCount}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-sm text-muted-foreground mb-1">
-                      Duração Alvo
-                    </p>
-                    <p className="text-2xl font-bold">
-                      {config.clipSettings.targetDuration}s
-                    </p>
-                  </div>
-                  <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-sm text-muted-foreground mb-1">
-                      Posição das Legendas
-                    </p>
-                    <p className="text-xl font-bold capitalize">
-                      {config.subtitlePreferences.position}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-sm text-muted-foreground mb-1">
-                      Tamanho da Fonte
-                    </p>
-                    <p className="text-2xl font-bold">
-                      {config.subtitlePreferences.fontSize}px
-                    </p>
-                  </div>
-                </div>
-
-                <Alert>
-                  <Sparkles className="h-4 w-4" />
-                  <AlertTitle>Tudo Pronto!</AlertTitle>
-                  <AlertDescription>
-                    Suas configurações estão salvas e serão aplicadas durante o
-                    processamento. Clique em "Gerar Clipes Agora" para iniciar.
-                  </AlertDescription>
-                </Alert>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        {/* Action Button */}
-        <div className="mt-8 flex justify-center">
+      {/* Sticky CTA — narrower, follows scroll like OpusClip */}
+      <div className="sticky top-0 z-20 bg-[#0f0f14] pb-4 pt-6">
+        <div className="mx-auto max-w-[560px] px-6">
           <Button
             size="lg"
             onClick={handleStartProcessing}
             disabled={processing}
-            className="gap-2 text-lg px-8 py-6"
+            className="h-12 w-full rounded-xl bg-white text-[#0f0f14] text-sm font-semibold shadow-none hover:bg-white/90 disabled:bg-white/20 disabled:text-white/40"
           >
             {processing ? (
               <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Iniciando Processamento...
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Processando...
               </>
             ) : (
-              <>
-                <Sparkles className="w-5 h-5" />
-                Gerar Clipes Agora
-              </>
+              'Gerar clipes agora'
             )}
           </Button>
         </div>
-
-        {/* Info Footer */}
-        <div className="mt-6 text-center text-sm text-muted-foreground">
-          <p>
-            💡 Dica: Você pode voltar e ajustar as configurações a qualquer
-            momento antes de clicar em "Gerar Clipes"
-          </p>
-        </div>
       </div>
+
+      {/* Main — single column, centered, scrollable */}
+      <main className="mx-auto max-w-[960px] px-6 pb-8">
+        <div className="space-y-6">
+
+          {/* Video preview — small, centered like OpusClip */}
+          <div className="flex flex-col items-center gap-3">
+            {youtubeId ? (
+              <div className="w-full max-w-[420px] overflow-hidden rounded-lg border border-white/[0.08] bg-black">
+                <div className="aspect-video w-full">
+                  <iframe
+                    className="h-full w-full"
+                    src={`https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1`}
+                    title="Pré-visualização do vídeo"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="flex aspect-video w-full max-w-[420px] items-center justify-center rounded-lg border border-white/[0.08] bg-black/50 text-sm text-white/40">
+                Prévia indisponível para este link.
+              </div>
+            )}
+            <p className="text-center text-xs text-white/25">
+              Ao continuar, você confirma que este é seu conteúdo original.
+            </p>
+          </div>
+
+          {/* Clip settings — inline horizontal like OpusClip */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-white/50">
+            <div className="flex items-center gap-2">
+              <span>Estilo</span>
+              <Select value={selectedPreset} onValueChange={handlePresetChange}>
+                <SelectTrigger className="h-8 w-auto gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-white hover:text-white/80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="custom">Personalizado</SelectItem>
+                  {SUBTITLE_PRESETS.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span>Formato</span>
+              <Select
+                value={config.subtitlePreferences.format}
+                onValueChange={(value: SubtitlePreferences['format']) =>
+                  updateSubtitlePreference('format', value)
+                }
+              >
+                <SelectTrigger className="h-8 w-auto gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-white hover:text-white/80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="single-line">Linha única</SelectItem>
+                  <SelectItem value="multi-line">Múltiplas linhas</SelectItem>
+                  <SelectItem value="karaoke">Karaoke</SelectItem>
+                  <SelectItem value="progressive">Progressivo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span>Posição</span>
+              <Select
+                value={config.subtitlePreferences.position}
+                onValueChange={(value: SubtitlePreferences['position']) =>
+                  updateSubtitlePreference('position', value)
+                }
+              >
+                <SelectTrigger className="h-8 w-auto gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-white hover:text-white/80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="top">Topo</SelectItem>
+                  <SelectItem value="center">Centro</SelectItem>
+                  <SelectItem value="bottom">Inferior</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span>Fonte</span>
+              <Select
+                value={config.subtitlePreferences.font}
+                onValueChange={(value: SubtitlePreferences['font']) =>
+                  updateSubtitlePreference('font', value)
+                }
+              >
+                <SelectTrigger className="h-8 w-auto gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-white hover:text-white/80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Inter">Inter</SelectItem>
+                  <SelectItem value="Montserrat">Montserrat</SelectItem>
+                  <SelectItem value="Poppins">Poppins</SelectItem>
+                  <SelectItem value="Roboto">Roboto</SelectItem>
+                  <SelectItem value="Arial">Arial</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-white/[0.06]" />
+
+          {/* Subtitle customization — clean card */}
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6">
+            <h3 className="mb-5 flex items-center gap-2 text-sm font-medium text-white/70">
+              <Type className="h-4 w-4" />
+              Personalizar legendas
+            </h3>
+
+            <div className="space-y-5">
+              {/* Sliders row */}
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm text-white/50">Tamanho da fonte</Label>
+                    <span className="text-sm tabular-nums text-white/80">{config.subtitlePreferences.fontSize}px</span>
+                  </div>
+                  <Slider
+                    value={[config.subtitlePreferences.fontSize]}
+                    onValueChange={([value]) => updateSubtitlePreference('fontSize', value)}
+                    min={16}
+                    max={48}
+                    step={1}
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm text-white/50">Opacidade do fundo</Label>
+                    <span className="text-sm tabular-nums text-white/80">
+                      {Math.round(config.subtitlePreferences.backgroundOpacity * 100)}%
+                    </span>
+                  </div>
+                  <Slider
+                    value={[config.subtitlePreferences.backgroundOpacity * 100]}
+                    onValueChange={([value]) => updateSubtitlePreference('backgroundOpacity', value / 100)}
+                    min={0}
+                    max={100}
+                    step={5}
+                  />
+                </div>
+              </div>
+
+              {/* Color pickers row */}
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="text-sm text-white/50">Cor do texto</Label>
+                  <div className="flex items-center gap-3">
+                    <Input
+                      type="color"
+                      value={config.subtitlePreferences.fontColor}
+                      onChange={(event) => updateSubtitlePreference('fontColor', event.target.value)}
+                      className="h-9 w-12 cursor-pointer rounded-lg border-white/[0.08] bg-transparent p-0.5"
+                    />
+                    <span className="text-xs font-mono text-white/30">{config.subtitlePreferences.fontColor}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm text-white/50">Cor de fundo</Label>
+                  <div className="flex items-center gap-3">
+                    <Input
+                      type="color"
+                      value={config.subtitlePreferences.backgroundColor}
+                      onChange={(event) => updateSubtitlePreference('backgroundColor', event.target.value)}
+                      className="h-9 w-12 cursor-pointer rounded-lg border-white/[0.08] bg-transparent p-0.5"
+                    />
+                    <span className="text-xs font-mono text-white/30">{config.subtitlePreferences.backgroundColor}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Preset templates — phone mockup carousel like OpusClip */}
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6">
+            {/* Tab header */}
+            <div className="mb-5 flex items-center gap-6 border-b border-white/[0.06] pb-3">
+              <span className="border-b-2 border-white/80 pb-2.5 text-sm font-medium text-white/90">
+                Quick presets
+              </span>
+              <span className="pb-2.5 text-sm text-white/30 cursor-default">
+                Meus templates
+              </span>
+            </div>
+
+            {/* Phone mockup cards — horizontal scroll */}
+            <div className="flex items-start gap-4 overflow-x-auto pb-2">
+              {SUBTITLE_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => handlePresetChange(preset.id)}
+                  className="group flex flex-shrink-0 flex-col items-center gap-2.5"
+                >
+                  {/* Phone mockup (9:16 ratio) */}
+                  <div
+                    className={`relative flex h-[180px] w-[108px] flex-col items-center justify-end overflow-hidden rounded-xl border-2 bg-[#1a1a24] p-2 transition-all ${
+                      selectedPreset === preset.id
+                        ? 'border-white/30 shadow-[0_0_0_1px_rgba(255,255,255,0.1)]'
+                        : 'border-white/[0.06] group-hover:border-white/15'
+                    }`}
+                  >
+                    {/* Fake video content area */}
+                    <div className="absolute inset-0 bg-gradient-to-b from-[#2a2a3a] via-[#1a1a24] to-[#0f0f14]" />
+
+                    {/* Subtitle preview inside phone */}
+                    <div className="relative z-10 mb-2 w-full">
+                      <div
+                        className="rounded-md px-1.5 py-1 text-center"
+                        style={{
+                          fontFamily: preset.values.font,
+                          fontSize: '8px',
+                          fontWeight: preset.values.bold ? 700 : 400,
+                          fontStyle: preset.values.italic ? 'italic' : 'normal',
+                          color: '#ffffff',
+                          backgroundColor: 'rgba(0,0,0,0.7)',
+                          lineHeight: '1.3',
+                        }}
+                      >
+                        Momento viral detectado
+                      </div>
+                    </div>
+
+                    {/* Hover overlay */}
+                    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                      <span className="rounded-md bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white backdrop-blur-sm">
+                        Aplicar
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-xs text-white/60">{preset.label}</span>
+                </button>
+              ))}
+
+              {/* Custom option */}
+              <button
+                type="button"
+                onClick={() => handlePresetChange('custom')}
+                className="group flex flex-shrink-0 flex-col items-center gap-2.5"
+              >
+                <div
+                  className={`flex h-[180px] w-[108px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-all ${
+                    selectedPreset === 'custom'
+                      ? 'border-white/25 bg-white/[0.04]'
+                      : 'border-white/[0.08] group-hover:border-white/15'
+                  }`}
+                >
+                  <Palette className="h-5 w-5 text-white/25" />
+                  <span className="text-[11px] text-white/35">Personalizado</span>
+                </div>
+                <span className="text-xs text-white/60">Custom</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Live preview — phone mockup with subtitle overlay */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium text-white/50">Prévia da legenda</h3>
+            <div className="flex justify-center">
+              {/* Phone frame */}
+              <div className="relative h-[320px] w-[180px] rounded-[24px] border-2 border-white/[0.1] bg-black shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
+                {/* Fake video content */}
+                <div className="absolute inset-0 overflow-hidden rounded-[22px]">
+                  <div className="h-full w-full bg-gradient-to-b from-[#2d2040] via-[#1a1a2e] to-[#0a0a14]" />
+                  {/* Simulated content lines */}
+                  <div className="absolute left-4 right-4 top-10 space-y-2">
+                    <div className="h-1.5 w-3/4 rounded-full bg-white/[0.06]" />
+                    <div className="h-1.5 w-1/2 rounded-full bg-white/[0.04]" />
+                  </div>
+                  {/* Play icon */}
+                  <div className="absolute left-1/2 top-[35%] flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/[0.08]">
+                    <div className="ml-0.5 h-0 w-0 border-l-[10px] border-t-[6px] border-b-[6px] border-l-white/30 border-t-transparent border-b-transparent" />
+                  </div>
+                </div>
+
+                {/* Subtitle overlay — positioned based on user setting */}
+                <div
+                  className="absolute left-3 right-3 z-10 flex justify-center"
+                  style={{
+                    ...(config.subtitlePreferences.position === 'top' && { top: '28px' }),
+                    ...(config.subtitlePreferences.position === 'center' && { top: '50%', transform: 'translateY(-50%)' }),
+                    ...((config.subtitlePreferences.position === 'bottom' || !config.subtitlePreferences.position) && { bottom: '24px' }),
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: config.subtitlePreferences.font,
+                      color: config.subtitlePreferences.fontColor || '#ffffff',
+                      backgroundColor: hexToRgba(
+                        config.subtitlePreferences.backgroundColor || '#000000',
+                        config.subtitlePreferences.backgroundOpacity
+                      ),
+                      fontSize: `${Math.max(9, Math.min(14, Math.round(config.subtitlePreferences.fontSize * 0.35)))}px`,
+                      fontWeight: config.subtitlePreferences.bold ? 700 : 400,
+                      fontStyle: config.subtitlePreferences.italic ? 'italic' : 'normal',
+                      padding: '3px 6px',
+                      borderRadius: '4px',
+                      lineHeight: '1.4',
+                      textAlign: 'center' as const,
+                      display: 'inline-block',
+                      maxWidth: '100%',
+                      wordBreak: 'break-word' as const,
+                      letterSpacing: '0.01em',
+                      textShadow: config.subtitlePreferences.shadow
+                        ? `0 1px 4px ${config.subtitlePreferences.shadowColor || 'rgba(0,0,0,0.5)'}`
+                        : 'none',
+                      ...(config.subtitlePreferences.outline
+                        ? { WebkitTextStroke: `${Math.max(0.5, (config.subtitlePreferences.outlineWidth || 1) * 0.3)}px ${config.subtitlePreferences.outlineColor || '#000'}` }
+                        : {}),
+                    }}
+                  >
+                    Momento viral com legenda premium
+                  </span>
+                </div>
+
+                {/* Phone notch */}
+                <div className="absolute left-1/2 top-2 z-20 h-[4px] w-12 -translate-x-1/2 rounded-full bg-white/[0.08]" />
+                {/* Home indicator */}
+                <div className="absolute bottom-2 left-1/2 z-20 h-[3px] w-10 -translate-x-1/2 rounded-full bg-white/[0.12]" />
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom spacer */}
+          <div className="h-4" />
+        </div>
+      </main>
     </div>
   );
 }

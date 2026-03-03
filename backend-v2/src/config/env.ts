@@ -42,6 +42,14 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CALLBACK_URL: z.string().url().optional(),
 
+  // MercadoPago (accept both MERCADOPAGO_ and MERCADO_PAGO_ prefixes)
+  MERCADOPAGO_ACCESS_TOKEN: z.string().min(1).optional(),
+  MERCADOPAGO_PUBLIC_KEY: z.string().min(1).optional(),
+  MERCADOPAGO_SANDBOX_MODE: z.string().default('true'),
+  PAYMENTS_SUCCESS_URL: z.string().url().optional(),
+  PAYMENTS_FAILURE_URL: z.string().url().optional(),
+  UNLIMITED_ADMIN_EMAIL: z.string().email(),
+
   // Optional
   FFMPEG_PATH: z.string().optional(),
   YOUTUBE_API_KEY: z.string().optional(),
@@ -102,6 +110,19 @@ export const env = {
     clientId: parsed.data.GOOGLE_CLIENT_ID,
     clientSecret: parsed.data.GOOGLE_CLIENT_SECRET,
     callbackUrl: parsed.data.GOOGLE_CALLBACK_URL,
+  },
+
+  // MercadoPago
+  mercadoPago: {
+    accessToken: parsed.data.MERCADOPAGO_ACCESS_TOKEN,
+    publicKey: parsed.data.MERCADOPAGO_PUBLIC_KEY,
+    sandboxMode: parsed.data.MERCADOPAGO_SANDBOX_MODE === 'true',
+    successUrl: parsed.data.PAYMENTS_SUCCESS_URL,
+    failureUrl: parsed.data.PAYMENTS_FAILURE_URL,
+  },
+
+  billing: {
+    unlimitedAdminEmail: parsed.data.UNLIMITED_ADMIN_EMAIL.toLowerCase(),
   },
 
   // Optional

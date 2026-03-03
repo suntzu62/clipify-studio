@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  ArrowLeft,
   LogOut,
   User,
   Bell,
@@ -40,10 +41,28 @@ import { toast } from 'sonner';
 import { useUserSettings } from '@/hooks/useUserSettings';
 import { getUsage, type UsageDTO } from '@/lib/usage';
 import { api } from '@/lib/api-client';
+import { TiltCard, MouseSpotlight } from '@/components/landing';
 
-const fadeInUp = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0 }
+/* ── Framer variants ── */
+const headerVariants = {
+  hidden: { opacity: 0, y: 25, rotateX: 12 },
+  visible: {
+    opacity: 1, y: 0, rotateX: 0,
+    transition: { type: 'spring', stiffness: 180, damping: 20 },
+  },
+};
+
+const containerVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.08, delayChildren: 0.15 } },
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 35, rotateX: 8 },
+  visible: {
+    opacity: 1, y: 0, rotateX: 0,
+    transition: { type: 'spring', stiffness: 200, damping: 22 },
+  },
 };
 
 const SettingToggle = ({
@@ -148,145 +167,172 @@ const Settings = () => {
 
   return (
     <div className="min-h-screen">
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        {/* Header */}
+      <MouseSpotlight className="max-w-4xl mx-auto px-6 py-8">
+        {/* Header — 3D entrance */}
         <motion.div
           className="mb-8"
+          style={{ perspective: 800 }}
           initial="hidden"
           animate="visible"
-          variants={fadeInUp}
+          variants={headerVariants}
         >
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center">
+            <motion.div whileHover={{ x: -4 }} whileTap={{ scale: 0.95 }}>
+              <Button
+                variant="ghost"
+                onClick={() => navigate(-1)}
+                className="gap-2 text-white/50 hover:text-white hover:bg-white/5 h-9 px-3 -ml-3"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Voltar
+              </Button>
+            </motion.div>
+          </div>
+          <div className="flex items-center gap-3 mb-2">
+            <motion.div
+              className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center"
+              whileHover={{ rotate: 90, scale: 1.1 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+            >
               <SettingsIcon className="w-5 h-5 text-white" />
-            </div>
+            </motion.div>
             <h1 className="text-2xl font-bold text-white">Configuracoes</h1>
           </div>
           <p className="text-white/60">Gerencie sua conta e preferencias</p>
         </motion.div>
 
-        <div className="space-y-6">
+        {/* Cards — 3D staggered with perspective */}
+        <motion.div
+          className="space-y-6"
+          style={{ perspective: 1000 }}
+          initial="hidden"
+          animate="visible"
+          variants={containerVariants}
+        >
           {/* Profile Card */}
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={fadeInUp}
-            transition={{ delay: 0.1 }}
-          >
-            <GlassCard className="p-6">
-              <div className="flex items-start gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
-                  <User className="w-8 h-8 text-white" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-lg font-semibold text-white mb-1">Perfil</h2>
-                  <div className="space-y-2">
-                    <div className="text-sm text-white/70">
-                      {user?.full_name || 'Nome nao informado'}
-                    </div>
-                    <div className="flex items-center gap-2 text-white/60 text-sm">
-                      <Mail className="w-4 h-4" />
-                      <span className="truncate">{user?.email}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-white/60 text-sm">
-                      <Calendar className="w-4 h-4" />
-                      <span>
-                        Membro desde {user?.created_at
-                          ? new Date(user.created_at).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
-                          : 'N/A'}
-                      </span>
+          <motion.div variants={cardVariants}>
+            <TiltCard tiltDegree={5} glare>
+              <GlassCard className="p-6 glass-card-hover">
+                <div className="flex items-start gap-4">
+                  <motion.div
+                    className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0"
+                    whileHover={{ scale: 1.1, rotate: 5 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+                  >
+                    <User className="w-8 h-8 text-white" />
+                  </motion.div>
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-lg font-semibold text-white mb-1">Perfil</h2>
+                    <div className="space-y-2">
+                      <div className="text-sm text-white/70">
+                        {user?.full_name || 'Nome nao informado'}
+                      </div>
+                      <div className="flex items-center gap-2 text-white/60 text-sm">
+                        <Mail className="w-4 h-4" />
+                        <span className="truncate">{user?.email}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-white/60 text-sm">
+                        <Calendar className="w-4 h-4" />
+                        <span>
+                          Membro desde {user?.created_at
+                            ? new Date(user.created_at).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+                            : 'N/A'}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+                    <DialogTrigger asChild>
+                      <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.95 }}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+                        >
+                          Editar
+                        </Button>
+                      </motion.div>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Editar perfil</DialogTitle>
+                        <DialogDescription>
+                          Atualize seu nome exibido no aplicativo.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-2">
+                        <Label htmlFor="profile-name" className="text-white/70">
+                          Nome
+                        </Label>
+                        <Input
+                          id="profile-name"
+                          value={profileName}
+                          onChange={(event) => setProfileName(event.target.value)}
+                          placeholder="Seu nome"
+                          className="bg-white/5 border-white/10 text-white"
+                        />
+                      </div>
+                      <DialogFooter>
+                        <Button onClick={handleProfileSave} disabled={savingProfile}>
+                          {savingProfile ? 'Salvando...' : 'Salvar'}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </div>
-                <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                    >
-                      Editar
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Editar perfil</DialogTitle>
-                      <DialogDescription>
-                        Atualize seu nome exibido no aplicativo.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-2">
-                      <Label htmlFor="profile-name" className="text-white/70">
-                        Nome
-                      </Label>
-                      <Input
-                        id="profile-name"
-                        value={profileName}
-                        onChange={(event) => setProfileName(event.target.value)}
-                        placeholder="Seu nome"
-                        className="bg-white/5 border-white/10 text-white"
-                      />
-                    </div>
-                    <DialogFooter>
-                      <Button onClick={handleProfileSave} disabled={savingProfile}>
-                        {savingProfile ? 'Salvando...' : 'Salvar'}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </GlassCard>
+              </GlassCard>
+            </TiltCard>
           </motion.div>
 
           {/* Subscription Card */}
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={fadeInUp}
-            transition={{ delay: 0.15 }}
-          >
-            <GlassCard className="p-6 border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
-                    <Zap className="w-6 h-6 text-white" />
+          <motion.div variants={cardVariants}>
+            <TiltCard tiltDegree={6} glare>
+              <GlassCard className="p-6 border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 glass-card-hover">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <motion.div
+                      className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center animate-glow-pulse"
+                      whileHover={{ rotate: [0, -15, 15, 0], scale: 1.15 }}
+                      transition={{ duration: 0.4 }}
+                    >
+                      <Zap className="w-6 h-6 text-white" />
+                    </motion.div>
+                    <div>
+                      <h3 className="font-semibold text-white">Plano {planLabel}</h3>
+                      <p className="text-sm text-white/60">
+                        {usageLoading
+                          ? 'Carregando uso...'
+                          : `${usage?.minutesRemaining ?? 0} minutos restantes`}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-white">Plano {planLabel}</h3>
-                    <p className="text-sm text-white/60">
-                      {usageLoading
-                        ? 'Carregando uso...'
-                        : `${usage?.minutesRemaining ?? 0} minutos restantes`}
-                    </p>
-                  </div>
+                  <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.95 }}>
+                    <Button
+                      onClick={() => navigate('/billing')}
+                      className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-semibold btn-premium"
+                    >
+                      Fazer Upgrade
+                    </Button>
+                  </motion.div>
                 </div>
-                <Button
-                  onClick={() => navigate('/billing')}
-                  className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-semibold"
-                >
-                  Fazer Upgrade
-                </Button>
-              </div>
-            </GlassCard>
+              </GlassCard>
+            </TiltCard>
           </motion.div>
 
-          {/* Settings Sections */}
-          <motion.div
-            className="grid gap-3"
-            initial="hidden"
-            animate="visible"
-            variants={{
-              visible: { transition: { staggerChildren: 0.05 } }
-            }}
-          >
-            <motion.div variants={fadeInUp}>
-              <GlassCard className="p-5">
+          {/* Notifications */}
+          <motion.div variants={cardVariants}>
+            <TiltCard tiltDegree={4} glare>
+              <GlassCard className="p-5 glass-card-hover">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 p-[1px]">
+                  <motion.div
+                    className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 p-[1px]"
+                    whileHover={{ rotate: [0, -12, 12, 0], scale: 1.15 }}
+                    transition={{ duration: 0.4 }}
+                  >
                     <div className="w-full h-full rounded-xl bg-[#0a0a0f] flex items-center justify-center">
                       <Bell className="w-5 h-5 text-white" />
                     </div>
-                  </div>
+                  </motion.div>
                   <div className="flex-1">
                     <h3 className="font-medium text-white">Notificacoes</h3>
                     <p className="text-sm text-white/50">Ajuste alertas do processamento</p>
@@ -323,16 +369,23 @@ const Settings = () => {
                   />
                 </div>
               </GlassCard>
-            </motion.div>
+            </TiltCard>
+          </motion.div>
 
-            <motion.div variants={fadeInUp}>
-              <GlassCard className="p-5">
+          {/* Privacy */}
+          <motion.div variants={cardVariants}>
+            <TiltCard tiltDegree={4} glare>
+              <GlassCard className="p-5 glass-card-hover">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 p-[1px]">
+                  <motion.div
+                    className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 p-[1px]"
+                    whileHover={{ rotate: [0, -12, 12, 0], scale: 1.15 }}
+                    transition={{ duration: 0.4 }}
+                  >
                     <div className="w-full h-full rounded-xl bg-[#0a0a0f] flex items-center justify-center">
                       <Shield className="w-5 h-5 text-white" />
                     </div>
-                  </div>
+                  </motion.div>
                   <div className="flex-1">
                     <h3 className="font-medium text-white">Privacidade</h3>
                     <p className="text-sm text-white/50">Gerencie dados e compartilhamento</p>
@@ -369,16 +422,23 @@ const Settings = () => {
                   />
                 </div>
               </GlassCard>
-            </motion.div>
+            </TiltCard>
+          </motion.div>
 
-            <motion.div variants={fadeInUp}>
-              <GlassCard className="p-5">
+          {/* Appearance */}
+          <motion.div variants={cardVariants}>
+            <TiltCard tiltDegree={4} glare>
+              <GlassCard className="p-5 glass-card-hover">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 p-[1px]">
+                  <motion.div
+                    className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 p-[1px]"
+                    whileHover={{ rotate: [0, -12, 12, 0], scale: 1.15 }}
+                    transition={{ duration: 0.4 }}
+                  >
                     <div className="w-full h-full rounded-xl bg-[#0a0a0f] flex items-center justify-center">
                       <Palette className="w-5 h-5 text-white" />
                     </div>
-                  </div>
+                  </motion.div>
                   <div className="flex-1">
                     <h3 className="font-medium text-white">Aparencia</h3>
                     <p className="text-sm text-white/50">Controle detalhes visuais</p>
@@ -415,16 +475,23 @@ const Settings = () => {
                   />
                 </div>
               </GlassCard>
-            </motion.div>
+            </TiltCard>
+          </motion.div>
 
-            <motion.div variants={fadeInUp}>
-              <GlassCard className="p-5">
+          {/* Language */}
+          <motion.div variants={cardVariants}>
+            <TiltCard tiltDegree={4} glare>
+              <GlassCard className="p-5 glass-card-hover">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-yellow-500 p-[1px]">
+                  <motion.div
+                    className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-yellow-500 p-[1px]"
+                    whileHover={{ rotate: [0, -12, 12, 0], scale: 1.15 }}
+                    transition={{ duration: 0.4 }}
+                  >
                     <div className="w-full h-full rounded-xl bg-[#0a0a0f] flex items-center justify-center">
                       <Globe className="w-5 h-5 text-white" />
                     </div>
-                  </div>
+                  </motion.div>
                   <div className="flex-1">
                     <h3 className="font-medium text-white">Idioma</h3>
                     <p className="text-sm text-white/50">Selecione o idioma da interface</p>
@@ -447,36 +514,35 @@ const Settings = () => {
                   </SelectContent>
                 </Select>
               </GlassCard>
-            </motion.div>
+            </TiltCard>
           </motion.div>
 
           {/* Danger Zone */}
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={fadeInUp}
-            transition={{ delay: 0.4 }}
-          >
-            <GlassCard className="p-6 border-red-500/20">
-              <h3 className="text-lg font-semibold text-red-400 mb-4">Zona de Perigo</h3>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-white/80">Sair da conta</p>
-                  <p className="text-sm text-white/50">Voce sera desconectado de todos os dispositivos</p>
+          <motion.div variants={cardVariants}>
+            <TiltCard tiltDegree={3} glare>
+              <GlassCard className="p-6 border-red-500/20 glass-card-hover">
+                <h3 className="text-lg font-semibold text-red-400 mb-4">Zona de Perigo</h3>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white/80">Sair da conta</p>
+                    <p className="text-sm text-white/50">Voce sera desconectado de todos os dispositivos</p>
+                  </div>
+                  <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.95 }}>
+                    <Button
+                      variant="outline"
+                      onClick={handleSignOut}
+                      className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50"
+                    >
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Sair
+                    </Button>
+                  </motion.div>
                 </div>
-                <Button
-                  variant="outline"
-                  onClick={handleSignOut}
-                  className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50"
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Sair
-                </Button>
-              </div>
-            </GlassCard>
+              </GlassCard>
+            </TiltCard>
           </motion.div>
-        </div>
-      </div>
+        </motion.div>
+      </MouseSpotlight>
     </div>
   );
 };
