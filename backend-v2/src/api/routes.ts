@@ -11,6 +11,7 @@ import {
   DEFAULT_CLIP_SETTINGS,
   DEFAULT_SUBTITLE_PREFERENCES,
   type ProjectConfig,
+  type SubtitlePreferences,
 } from '../types/index.js';
 import { addVideoJob, getJobStatus, cancelJob, getQueueHealth, videoQueue } from '../jobs/queue.js';
 import { clips as dbClips } from '../services/database.service.js';
@@ -916,7 +917,7 @@ export async function registerRoutes(app: FastifyInstance) {
       targetDuration: finalConfig.clipSettings.targetDuration,
       clipCount: finalConfig.clipSettings.clipCount,
       clipSettings: finalConfig.clipSettings,
-      subtitlePreferences: finalConfig.subtitlePreferences,
+      subtitlePreferences: finalConfig.subtitlePreferences as SubtitlePreferences,
       timeframe: finalConfig.timeframe,
       genre: finalConfig.genre,
       specificMoments: finalConfig.specificMoments,
