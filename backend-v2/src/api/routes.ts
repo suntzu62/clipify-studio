@@ -107,6 +107,11 @@ export async function registerRoutes(app: FastifyInstance) {
   await registerPaymentsRoutes(app);
 
   // ============================================
+  // ADMIN ROUTES
+  // ============================================
+  await registerAdminRoutes(app);
+
+  // ============================================
   // HEALTH CHECK
   // ============================================
   app.get('/health', async () => {
