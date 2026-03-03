@@ -26,7 +26,6 @@ export default defineConfig(({ mode }) => ({
           vendor: ['react', 'react-dom'],
           router: ['react-router-dom'],
           query: ['@tanstack/react-query'],
-          auth: ['@clerk/clerk-react'],
           supabase: ['@supabase/supabase-js'],
         },
         assetFileNames: (assetInfo) => {
