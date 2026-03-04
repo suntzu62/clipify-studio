@@ -17,7 +17,6 @@ const schema = z.object({
     .string()
     .min(1, "Informe a URL do YouTube")
     .refine((v) => isValidYouTubeUrl(v), "URL do YouTube inválida"),
-  title: z.string().max(200, "Máx 200 caracteres").optional(),
 });
 
 type Schema = z.infer<typeof schema>;
@@ -35,14 +34,14 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
 
   const form = useForm<Schema>({
     resolver: zodResolver(schema),
-    defaultValues: { youtube_url: "", title: "" },
+    defaultValues: { youtube_url: "" },
   });
 
   const handleSubmit = form.handleSubmit(async (values) => {
     try {
       setSubmitting(true);
       await createProject(
-        { youtube_url: values.youtube_url.trim(), title: values.title?.trim() },
+        { youtube_url: values.youtube_url.trim() },
         user?.id
       );
       // Telemetry
@@ -71,7 +70,7 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
         <DialogHeader>
           <DialogTitle>Novo video</DialogTitle>
           <DialogDescription>
-            Informe a URL de um vídeo do YouTube para iniciar um novo projeto.
+            Cole a URL do YouTube para gerar seus clipes.
           </DialogDescription>
         </DialogHeader>
 
@@ -85,20 +84,6 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
                   <FormLabel>URL do YouTube</FormLabel>
                   <FormControl>
                     <Input placeholder="https://www.youtube.com/watch?v=..." {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="title"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Título (opcional)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Como deseja nomear o projeto" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
