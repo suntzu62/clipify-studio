@@ -13,12 +13,15 @@ import('./index.css');
 preloadCriticalResources();
 addResourceHints();
 
-// Register service worker for caching
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+// Disable legacy service worker cache to avoid stale/broken assets in production
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.getRegistrations()
+      .then((registrations) => {
+        registrations.forEach((registration) => registration.unregister());
+      })
       .catch(() => {
-        // Silently fail if service worker registration fails
+        // Ignore cleanup failures
       });
   });
 }
