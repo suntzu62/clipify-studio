@@ -7,6 +7,7 @@ const Callback = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    const success = searchParams.get('success');
     const accessToken = searchParams.get('access_token');
     const refreshToken = searchParams.get('refresh_token');
     const error = searchParams.get('error');
@@ -33,6 +34,18 @@ const Callback = () => {
 
       // Redirecionar para dashboard e recarregar para atualizar o AuthContext
       window.location.href = '/dashboard';
+      return;
+    }
+
+    // Novo fluxo: backend salva tokens em cookies httpOnly e envia apenas success=true
+    if (success === 'true') {
+      toast({
+        title: 'Login realizado com sucesso!',
+        description: 'Bem-vindo ao Cortaí',
+      });
+
+      window.location.href = '/dashboard';
+      return;
     } else {
       toast({
         title: 'Erro ao fazer login',
