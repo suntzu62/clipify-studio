@@ -377,8 +377,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
       // Redirecionar para frontend sem tokens na URL (mais seguro)
       const frontendUrl = env.frontendUrl;
-      const redirectUrl = new URL('/auth/callback', frontendUrl);
-      redirectUrl.searchParams.set('success', 'true');
+      const redirectUrl = new URL('/dashboard', frontendUrl);
 
       return reply.redirect(redirectUrl.toString());
     } catch (error: any) {
