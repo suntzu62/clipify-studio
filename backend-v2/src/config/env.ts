@@ -12,6 +12,7 @@ const envSchema = z.object({
   API_KEY: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   BASE_URL: z.string().url().optional(),
+  FRONTEND_URL: z.string().url().optional(),
 
   // Database
   DATABASE_URL: z.string().url().optional(),
@@ -72,6 +73,7 @@ export const env = {
   apiKey: parsed.data.API_KEY,
   jwtSecret: parsed.data.JWT_SECRET,
   baseUrl: parsed.data.BASE_URL || `http://localhost:${parsed.data.PORT}`,
+  frontendUrl: parsed.data.FRONTEND_URL || (parsed.data.NODE_ENV === 'development' ? 'http://localhost:8080' : parsed.data.BASE_URL || `http://localhost:${parsed.data.PORT}`),
   isDevelopment: parsed.data.NODE_ENV === 'development',
   isProduction: parsed.data.NODE_ENV === 'production',
 

@@ -376,7 +376,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       });
 
       // Redirecionar para frontend sem tokens na URL (mais seguro)
-      const frontendUrl = env.isDevelopment ? 'http://localhost:8080' : env.baseUrl;
+      const frontendUrl = env.frontendUrl;
       const redirectUrl = new URL('/auth/callback', frontendUrl);
       redirectUrl.searchParams.set('success', 'true');
 
@@ -385,7 +385,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       logger.error({ error }, 'Google OAuth callback failed');
 
       // Redirecionar para login com erro
-      const frontendUrl = env.isDevelopment ? 'http://localhost:8080' : env.baseUrl;
+      const frontendUrl = env.frontendUrl;
       const errorUrl = new URL('/auth/login', frontendUrl);
       errorUrl.searchParams.set('error', 'google_oauth_failed');
 
