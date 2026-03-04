@@ -1,0 +1,37 @@
+name: cortai-growth
+version: 1.0.0
+description: >
+  Squad de crescimento do CortAI — cobre estratégia de aquisição, marketing de conteúdo,
+  community building e growth experiments. Foco no mercado brasileiro de criadores de conteúdo.
+  Canais: YouTube, TikTok, Instagram, LinkedIn, Product Hunt, SEO.
+
+author: CortAI
+license: private
+slashPrefix: cortai-growth
+
+aios:
+  minVersion: "4.0.0"
+  type: squad
+
+components:
+  agents:
+    - agents/growth-strategist.md
+    - agents/content-creator.md
+    - agents/community-manager.md
+  tasks:
+    - tasks/growth-experiment.md
+    - tasks/content-plan.md
+    - tasks/landing-page-copy.md
+    - tasks/email-sequence.md
+    - tasks/product-hunt-launch.md
+    - tasks/seo-article.md
+
+tags:
+  - growth
+  - marketing
+  - content
+  - community
+  - seo
+  - product-hunt
+  - brazil
+  - criadores-de-conteudo

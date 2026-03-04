@@ -39,6 +39,7 @@ Copie para `clipify-studio/backend-v2/.env` e ajuste:
 - Redis: `REDIS_URL` ou `REDIS_HOST`/`REDIS_PORT`
 - IA: `OPENAI_API_KEY` (Whisper/transcrição real)
 - Pagamentos: `MERCADOPAGO_*`
+- Billing: `UNLIMITED_ADMIN_EMAIL` (obrigatório; usuário que não consome cota)
 - Observabilidade: `SENTRY_DSN` (opcional)
 - Notificações de email:
   - `NOTIFICATIONS_EMAIL_ENABLED`
@@ -80,6 +81,18 @@ SMOKE_CREATE_USER=1 SMOKE_EXPECT_UPLOADS_DISABLED=false bash scripts/smoke.sh
 ```bash
 QA_CREATE_USER=1 bash scripts/qa-3-4.sh
 ```
+
+O QA valida, entre outros pontos:
+- débito automático de uso após job concluído (`clips` e `minutes`)
+- idempotência de `/increment-usage`
+- bloqueio por limite (`403 LIMIT_EXCEEDED`)
+
+Trial:
+- fora do escopo atual de lançamento (não há endpoint `/trial/start` no backend v2).
+
+Regra especial de billing:
+- `UNLIMITED_ADMIN_EMAIL` define o único usuário com acesso ilimitado (não consome cota).
+- sem essa variável o backend não inicia (validação de ambiente).
 
 ### Smoke UI frontend
 

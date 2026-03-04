@@ -1,0 +1,33 @@
+name: cortai-finance
+version: 1.0.0
+description: >
+  Squad financeiro do CortAI — cobre unit economics, modelagem de MRR, análise de custos
+  de infraestrutura (OpenAI + Render + Supabase), e estratégia de precificação para o
+  mercado brasileiro. Foco em viabilidade financeira de early-stage SaaS.
+
+author: CortAI
+license: private
+slashPrefix: cortai-finance
+
+aios:
+  minVersion: "4.0.0"
+  type: squad
+
+components:
+  agents:
+    - agents/cfo-advisor.md
+    - agents/pricing-strategist.md
+  tasks:
+    - tasks/unit-economics.md
+    - tasks/mrr-projection.md
+    - tasks/cost-analysis.md
+    - tasks/pricing-review.md
+
+tags:
+  - finance
+  - unit-economics
+  - mrr
+  - pricing
+  - saas-metrics
+  - brazil
+  - mercadopago

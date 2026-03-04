@@ -1,0 +1,32 @@
+name: cortai-product
+version: 1.0.0
+description: >
+  Squad de produto do CortAI — cobre planejamento de features, análise de mercado,
+  priorização de roadmap e design de UX/UI. Foco no mercado de criadores BR e
+  concorrentes Opus Clip, Captions, Vizard, Submagic.
+
+author: CortAI
+license: private
+slashPrefix: cortai-product
+
+aios:
+  minVersion: "4.0.0"
+  type: squad
+
+components:
+  tasks:
+    - tasks/feature-prd.md
+    - tasks/competitor-analysis.md
+    - tasks/user-interview.md
+    - tasks/roadmap-review.md
+
+config:
+  context: config/product-context.md
+
+tags:
+  - product-management
+  - ux-design
+  - market-research
+  - saas
+  - video-creation
+  - brazil-market

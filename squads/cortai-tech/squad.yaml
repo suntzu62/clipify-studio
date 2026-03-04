@@ -1,0 +1,49 @@
+name: cortai-tech
+version: 1.0.0
+description: >
+  Squad técnico do CortAI — cobre desenvolvimento backend (Fastify + BullMQ),
+  frontend (React + shadcn/ui), mobile (Expo), QA (Vitest) e DevOps (Render.com).
+  Expertise: pipeline de 7 estágios, Git submodule discipline, PostgreSQL migrations.
+
+author: CortAI
+license: private
+slashPrefix: cortai-tech
+
+aios:
+  minVersion: "4.0.0"
+  type: squad
+
+components:
+  tasks:
+    - tasks/new-pipeline-stage.md
+    - tasks/new-api-endpoint.md
+    - tasks/new-frontend-page.md
+    - tasks/migration-create.md
+    - tasks/staging-deploy.md
+    - tasks/production-deploy.md
+  checklists:
+    - checklists/pre-pr-checklist.md
+    - checklists/pre-production-checklist.md
+  templates:
+    - templates/story-template.md
+    - templates/migration-template.md
+    - templates/api-endpoint-template.md
+  workflows: []
+
+config:
+  tech-stack: config/tech-stack.md
+  source-tree: config/source-tree.md
+
+tags:
+  - fastify
+  - react
+  - expo
+  - bullmq
+  - postgresql
+  - redis
+  - ffmpeg
+  - openai
+  - anthropic
+  - supabase
+  - render-com
+  - git-submodule

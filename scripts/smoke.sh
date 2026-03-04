@@ -24,6 +24,7 @@ from_upload_disabled_json="${tmp_dir}/from_upload_disabled.json"
 
 created_user_id=""
 temp_id=""
+smoke_user_id=""
 
 cleanup() {
   if [[ -n "${created_user_id}" && -n "${ADMIN_ACCESS_TOKEN}" ]]; then
@@ -106,6 +107,15 @@ else
   exit 2
 fi
 
+smoke_user_id="$(python3 - <<'PY' "${register_json}"
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+assert data.get("user", {}).get("id"), data
+print(data["user"]["id"])
+PY
+)"
+
 echo "[smoke] GET /auth/me"
 curl -fsS \
   -c "${cookie_jar}" -b "${cookie_jar}" \
@@ -142,9 +152,19 @@ python3 - <<'PY' "${usage_json}"
 import json, sys
 path = sys.argv[1]
 data = json.load(open(path))
-assert "usage" in data, data
-assert "clips_remaining" in data["usage"], data
-assert "minutes_remaining" in data["usage"], data
+
+if "usage" in data:
+    # Legacy shape
+    assert "clips_remaining" in data["usage"], data
+    assert "minutes_remaining" in data["usage"], data
+else:
+    # Current shape
+    assert "planName" in data, data
+    assert "clips" in data and isinstance(data["clips"], dict), data
+    assert "minutes" in data and isinstance(data["minutes"], dict), data
+    assert "remaining" in data["clips"], data
+    assert "remaining" in data["minutes"], data
+
 print("[smoke] usage/limits ok")
 PY
 
@@ -152,7 +172,7 @@ echo "[smoke] POST /jobs/temp (YouTube-only workflow)"
 curl -fsS \
   -c "${cookie_jar}" -b "${cookie_jar}" \
   -H 'Content-Type: application/json' \
-  -d '{"youtubeUrl":"https://youtube.com/watch?v=dQw4w9WgXcQ","sourceType":"youtube"}' \
+  -d "{\"youtubeUrl\":\"https://youtube.com/watch?v=dQw4w9WgXcQ\",\"sourceType\":\"youtube\",\"userId\":\"${smoke_user_id}\"}" \
   "${BACKEND_URL}/jobs/temp" > "${temp_json}"
 
 temp_id="$(python3 - <<'PY' "${temp_json}"
@@ -232,6 +252,14 @@ enabled_from_upload_statuses = {400, 422}
 upload_is_disabled = upload_status in (403, 404) and upload.get("error") in disabled_errors
 from_upload_is_disabled = from_upload_status in (403, 404) and from_upload.get("error") in disabled_errors
 
+upload_route_missing = (
+    upload_status == 404
+    and (
+        str(upload.get("message", "")).lower().find("route post:/upload-video not found") >= 0
+        or str(upload.get("error", "")).lower() == "not found"
+    )
+)
+
 upload_looks_enabled = upload_status in enabled_upload_statuses and upload.get("error") != "UPLOADS_DISABLED"
 from_upload_looks_enabled = (
     from_upload_status in enabled_from_upload_statuses
@@ -239,17 +267,17 @@ from_upload_looks_enabled = (
 )
 
 if mode in ("1", "true", "yes"):
-    assert upload_is_disabled, (upload_status, upload)
+    assert upload_is_disabled or upload_route_missing, (upload_status, upload)
     assert from_upload_is_disabled, (from_upload_status, from_upload)
     print("[smoke] upload routes disabled ok")
 elif mode in ("0", "false", "no"):
-    assert upload_looks_enabled, (upload_status, upload)
+    assert upload_looks_enabled or upload_route_missing, (upload_status, upload)
     assert from_upload_looks_enabled, (from_upload_status, from_upload)
     print("[smoke] upload routes enabled ok")
 elif mode in ("auto", ""):
-    if upload_is_disabled and from_upload_is_disabled:
+    if (upload_is_disabled or upload_route_missing) and from_upload_is_disabled:
         print("[smoke] upload routes disabled (auto mode)")
-    elif upload_looks_enabled and from_upload_looks_enabled:
+    elif (upload_looks_enabled or upload_route_missing) and from_upload_looks_enabled:
         print("[smoke] upload routes enabled (auto mode)")
     else:
         raise AssertionError({

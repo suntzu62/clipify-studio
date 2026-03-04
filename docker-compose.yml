@@ -88,6 +88,7 @@ services:
       BETA_MODE: "false"
       BETA_ALLOWLIST_EMAILS: ""
       NOTIFICATIONS_EMAIL_ENABLED: "false"
+      UNLIMITED_ADMIN_EMAIL: gabrielfootze@gmail.com
     working_dir: /app
     volumes:
       - ./clipify-studio/backend-v2:/app
@@ -95,7 +96,7 @@ services:
     depends_on:
       - postgres
       - redis
-    command: sh -c "npm install && npm run build && npm run start"
+    command: sh -c "npm install && npm run dev"
 
   # Frontend (Vite)
   frontend:

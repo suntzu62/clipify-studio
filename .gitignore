@@ -24,3 +24,32 @@ Thumbs.db
 
 # Local worktrees / leftovers
 clipify-studio-wt-staging/
+
+# Environment & Secrets (AIOS)
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Dependencies (AIOS)
+node_modules
+
+# Build & Logs (AIOS)
+*.log
+
+# IDE & OS (AIOS)
+.idea/
+*.swp
+
+# AIOS Local (AIOS)
+.aios-core/local/
+.aios-core/core/cache/
+.claude/settings.local.json
+.aios/install-log.txt
+
+# AIOS: IDEs não utilizados no CortAI (usar só Claude Code)
+.cursor/
+.codex/
+.gemini/
+.antigravity/
+.synapse/

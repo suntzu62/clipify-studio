@@ -1,0 +1,85 @@
+name: cortai-executive
+version: 1.0.0
+description: >
+  Squad executivo do CortAI — CEO com visão integrada de produto, crescimento, tecnologia e finanças.
+  Responsável por decisões estratégicas cross-squad, OKRs, PMF assessment, roadmap priorization,
+  investor narrative e wartime protocols. Orquestra todos os outros squads do CortAI.
+
+author: CortAI
+license: private
+slashPrefix: cortai-executive
+
+aios:
+  minVersion: "4.0.0"
+  type: squad
+
+authority:
+  level: executive
+  scope: cross-squad
+  squads_under_direction:
+    - cortai-tech
+    - cortai-product
+    - cortai-growth
+    - cortai-finance
+
+components:
+  agents:
+    - agents/ceo.md
+
+  knowledge:
+    - knowledge/founder-frameworks.md
+
+  tasks:
+    - tasks/metrics-review.md
+    - tasks/okr-planning.md
+    - tasks/squad-briefing.md
+    - tasks/pmf-assessment.md
+    - tasks/investor-narrative.md
+
+expert_references:
+  - name: Paul Graham
+    domain: Startups, Growth, Founder Philosophy
+    key_concepts: [startup-equals-growth, do-things-that-dont-scale, default-alive, talk-to-users]
+
+  - name: Sam Altman
+    domain: Founder Playbook, YC Doctrine
+    key_concepts: [concentration, momentum, decisive-action, long-term-thinking]
+
+  - name: Ben Horowitz
+    domain: CEO Execution, Wartime Leadership
+    key_concepts: [wartime-ceo, peacetime-ceo, hard-things, good-pm-bad-pm]
+
+  - name: Peter Thiel
+    domain: Competitive Strategy, Monopoly Thinking
+    key_concepts: [zero-to-one, 10x-better, last-mover-advantage, secrets]
+
+  - name: Andrew Grove
+    domain: OKRs, Management
+    key_concepts: [okr-framework, 70-percent-success, high-output-management]
+
+  - name: Ash Maurya
+    domain: Lean Startup, Validation
+    key_concepts: [running-lean, lean-canvas, problem-solution-fit, pmf-stages]
+
+  - name: Jim Collins
+    domain: Business Strategy, Long-Term Thinking
+    key_concepts: [hedgehog-concept, flywheel, level-5-leadership, good-to-great]
+
+  - name: Reid Hoffman
+    domain: Network Effects, Scaling
+    key_concepts: [blitzscaling, network-effects, data-flywheel, competitive-dynamics]
+
+tags:
+  - ceo
+  - strategy
+  - executive
+  - okr
+  - pmf
+  - pivot
+  - fundraising
+  - cross-squad
+  - solo-founder
+  - wartime
+  - roadmap
+  - north-star
+  - default-alive
