@@ -10,6 +10,7 @@ async function request<T = any>(method: string, path: string, body?: any): Promi
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers,
+    credentials: 'include',
     body: body ? JSON.stringify(body) : undefined,
   });
 

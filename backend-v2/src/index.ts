@@ -58,12 +58,23 @@ app.addHook('onRequest', async (request, reply) => {
   const cookieToken = (request.cookies as { access_token?: string } | undefined)?.access_token;
 
   // 1) API key explicita (recomendado para integrações internas)
+  //    Still try to decode JWT cookie so request.user is available for
+  //    admin and other user-scoped endpoints.
   if (xApiKey && xApiKey === env.apiKey) {
+    for (const token of [cookieToken, bearerToken]) {
+      if (!token || token === env.apiKey) continue;
+      const decoded = verifyToken(token);
+      if (decoded) { (request as any).user = decoded; break; }
+    }
     return;
   }
 
   // 2) Compatibilidade: Bearer <api-key>
   if (bearerToken && bearerToken === env.apiKey) {
+    if (cookieToken) {
+      const decoded = verifyToken(cookieToken);
+      if (decoded) (request as any).user = decoded;
+    }
     return;
   }
 

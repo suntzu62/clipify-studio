@@ -9,13 +9,43 @@ import { createLogger } from '../config/logger.js';
 const logger = createLogger('admin-routes');
 
 /**
- * Middleware: require admin email after JWT auth
+ * Safe query — returns 0 / empty rows if table doesn't exist
+ */
+async function safeCount(sql: string): Promise<number> {
+  try {
+    const { rows } = await pool.query(sql);
+    return parseInt(rows[0]?.count ?? '0', 10);
+  } catch {
+    return 0;
+  }
+}
+
+async function safeQuery<T = any>(sql: string, params?: any[]): Promise<T[]> {
+  try {
+    const { rows } = await pool.query(sql, params);
+    return rows;
+  } catch (error: any) {
+    logger.warn({ error: error.message, sql: sql.slice(0, 80) }, 'Admin query failed (table may not exist)');
+    return [];
+  }
+}
+
+/**
+ * Middleware: require admin email after JWT auth.
+ * The onRequest hook may have already decoded the JWT from the cookie and set
+ * request.user. If so, skip authenticateJWT to avoid a duplicate 401 when only
+ * the X-API-Key header passed the global gate.
  */
 async function requireAdmin(request: FastifyRequest, reply: FastifyReply) {
-  await authenticateJWT(request, reply);
-  if (reply.sent) return;
+  if (!request.user) {
+    await authenticateJWT(request, reply);
+    if (reply.sent) return;
+  }
 
   const email = request.user?.email?.toLowerCase();
+  if (!email) {
+    return reply.code(401).send({ error: 'Unauthorized', message: 'Authentication required for admin' });
+  }
   if (email !== env.billing.unlimitedAdminEmail) {
     return reply.code(403).send({ error: 'Forbidden', message: 'Admin access required' });
   }
@@ -28,36 +58,36 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   app.get('/admin/stats', { preHandler: requireAdmin }, async (_request, reply) => {
     try {
       const [
-        usersResult,
-        newUsersResult,
-        jobsResult,
-        activeJobsResult,
-        failedJobsResult,
-        clipsResult,
-        paidSubsResult,
-        mrrResult,
+        totalUsers,
+        newUsers7d,
+        totalJobs,
+        activeJobs,
+        failedJobs,
+        totalClips,
+        paidSubscribers,
+        mrrRows,
         queueHealth,
       ] = await Promise.all([
-        pool.query('SELECT COUNT(*)::int AS count FROM profiles'),
-        pool.query("SELECT COUNT(*)::int AS count FROM profiles WHERE created_at > NOW() - INTERVAL '7 days'"),
-        pool.query('SELECT COUNT(*)::int AS count FROM jobs'),
-        pool.query("SELECT COUNT(*)::int AS count FROM jobs WHERE status = 'active'"),
-        pool.query("SELECT COUNT(*)::int AS count FROM jobs WHERE status = 'failed'"),
-        pool.query('SELECT COUNT(*)::int AS count FROM clips'),
-        pool.query("SELECT COUNT(*)::int AS count FROM subscriptions WHERE status = 'active' AND plan_id != 'plan_free'"),
-        pool.query("SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM payments WHERE status = 'approved' AND created_at > date_trunc('month', NOW())"),
+        safeCount('SELECT COUNT(*)::int AS count FROM profiles'),
+        safeCount("SELECT COUNT(*)::int AS count FROM profiles WHERE created_at > NOW() - INTERVAL '7 days'"),
+        safeCount('SELECT COUNT(*)::int AS count FROM jobs'),
+        safeCount("SELECT COUNT(*)::int AS count FROM jobs WHERE status = 'active'"),
+        safeCount("SELECT COUNT(*)::int AS count FROM jobs WHERE status = 'failed'"),
+        safeCount('SELECT COUNT(*)::int AS count FROM clips'),
+        safeCount("SELECT COUNT(*)::int AS count FROM subscriptions WHERE status = 'active' AND plan_id != 'plan_free'"),
+        safeQuery("SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM payments WHERE status = 'approved' AND created_at > date_trunc('month', NOW())"),
         getQueueHealth(),
       ]);
 
       return reply.send({
-        totalUsers: usersResult.rows[0]?.count ?? 0,
-        newUsers7d: newUsersResult.rows[0]?.count ?? 0,
-        totalJobs: jobsResult.rows[0]?.count ?? 0,
-        activeJobs: activeJobsResult.rows[0]?.count ?? 0,
-        failedJobs: failedJobsResult.rows[0]?.count ?? 0,
-        totalClips: clipsResult.rows[0]?.count ?? 0,
-        paidSubscribers: paidSubsResult.rows[0]?.count ?? 0,
-        mrr: parseFloat(mrrResult.rows[0]?.total ?? '0'),
+        totalUsers,
+        newUsers7d,
+        totalJobs,
+        activeJobs,
+        failedJobs,
+        totalClips,
+        paidSubscribers,
+        mrr: parseFloat((mrrRows[0] as any)?.total ?? '0'),
         queue: queueHealth,
       });
     } catch (error: any) {
@@ -71,7 +101,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   // ============================================
   app.get('/admin/users', { preHandler: requireAdmin }, async (_request, reply) => {
     try {
-      const result = await pool.query(`
+      // Try with subscription join first, fall back to profiles-only
+      let rows = await safeQuery(`
         SELECT
           p.id, p.email, p.full_name, p.created_at, p.updated_at,
           s.plan_id, s.status AS sub_status
@@ -80,7 +111,15 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         ORDER BY p.created_at DESC
       `);
 
-      return reply.send(result.rows);
+      if (rows.length === 0) {
+        // Fallback: just profiles without join
+        rows = await safeQuery(`
+          SELECT id, email, full_name, created_at, updated_at, NULL AS plan_id, NULL AS sub_status
+          FROM profiles ORDER BY created_at DESC
+        `);
+      }
+
+      return reply.send(rows);
     } catch (error: any) {
       logger.error({ error: error.message }, 'Error fetching admin users');
       return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
@@ -110,8 +149,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       sql += ' ORDER BY j.created_at DESC LIMIT $' + (params.length + 1);
       params.push(limit);
 
-      const result = await pool.query(sql, params);
-      return reply.send(result.rows);
+      const rows = await safeQuery(sql, params);
+      return reply.send(rows);
     } catch (error: any) {
       logger.error({ error: error.message }, 'Error fetching admin jobs');
       return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
@@ -126,7 +165,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const limit = Math.min(parseInt(query.limit || '50', 10), 200);
 
     try {
-      const result = await pool.query(`
+      const rows = await safeQuery(`
         SELECT pay.*, p.email AS user_email
         FROM payments pay
         LEFT JOIN profiles p ON pay.user_id = p.id::text
@@ -134,7 +173,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         LIMIT $1
       `, [limit]);
 
-      return reply.send(result.rows);
+      return reply.send(rows);
     } catch (error: any) {
       logger.error({ error: error.message }, 'Error fetching admin payments');
       return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
