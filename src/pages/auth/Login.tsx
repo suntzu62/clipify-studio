@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Separator } from '@/components/ui/separator';
 import { Chrome } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { getBackendUrl } from '@/lib/backend-url';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -60,8 +61,8 @@ const Login = () => {
   };
 
   const handleGoogleSignIn = () => {
-    // Redirecionar para o backend que vai redirecionar para o Google
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    // Redireciona para o backend, que inicia OAuth do Google
+    const backendUrl = getBackendUrl();
     window.location.href = `${backendUrl}/auth/google`;
   };
 
