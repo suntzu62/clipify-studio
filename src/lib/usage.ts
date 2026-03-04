@@ -11,7 +11,20 @@ export type UsageDTO = {
 };
 
 export async function getUsage(headers?: Record<string, string>) {
-  return invokeFn<UsageDTO>('get-usage', { method: 'POST', headers });
+  try {
+    return await invokeFn<UsageDTO>('get-usage', { method: 'POST', headers });
+  } catch (error) {
+    console.warn('[usage] get-usage failed, using fallback usage payload:', error);
+    return {
+      plan: 'free',
+      status: 'active',
+      minutesUsed: 0,
+      minutesQuota: 10,
+      minutesRemaining: 10,
+      remaining: 10,
+      periodEnd: '',
+    };
+  }
 }
 
 export async function ensureQuota(neededMinutes: number, headers?: Record<string, string>) {
@@ -33,4 +46,3 @@ export async function incrementUsage(
     headers,
   });
 }
-
