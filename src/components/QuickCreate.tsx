@@ -143,7 +143,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
 
     try {
       const normalizedUrl = normalizeYoutubeUrl(url);
-      const { tempId } = await createTempConfig(normalizedUrl, getToken);
+      const { tempId } = await createTempConfig(normalizedUrl, getToken, userId);
 
       const shouldUseOneClick = effectiveOneClickMode && isOneClickAvailable;
 

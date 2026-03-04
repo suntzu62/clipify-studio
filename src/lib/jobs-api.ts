@@ -142,17 +142,24 @@ export async function enqueueFromUrl(
     const jobId = (data as any)?.jobId || (data as any)?.id;
     return { jobId };
   } else {
-    // Production: use Supabase functions
+    // Production: use backend API
     const headers = {
       'Content-Type': 'application/json',
-      apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
+      'x-api-key': import.meta.env.VITE_API_KEY,
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
-    const resp = await fetch('https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/enqueue-pipeline', {
+    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ youtubeUrl: url, neededMinutes: 10 }),
+      body: JSON.stringify({
+        sourceType: 'youtube',
+        youtubeUrl: normalizeYoutubeUrl(url),
+        userId: 'prod-user',
+        targetDuration: 60,
+        clipCount: 5,
+      }),
+      credentials: 'include',
     });
 
     const data = await resp.json().catch(() => ({}));
@@ -245,10 +252,10 @@ export async function enqueuePipeline(
 
     throw new Error('Max retries exceeded');
   } else {
-    // Production: use Supabase functions
+    // Production: use backend API
     const headers = {
       'Content-Type': 'application/json',
-      apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
+      'x-api-key': import.meta.env.VITE_API_KEY,
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
@@ -257,14 +264,17 @@ export async function enqueuePipeline(
 
     while (retryCount <= maxRetries) {
       try {
-        const resp = await fetch('https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/enqueue-pipeline', {
+        const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            youtubeUrl,
-            neededMinutes,
-            meta: { targetDuration }
+            sourceType: 'youtube',
+            youtubeUrl: normalizeYoutubeUrl(youtubeUrl),
+            userId: 'prod-user',
+            targetDuration: parseInt(targetDuration),
+            clipCount: 5,
           }),
+          credentials: 'include',
         });
 
         const data = await resp.json().catch(() => ({}));
@@ -312,7 +322,8 @@ export async function enqueuePipeline(
  */
 export async function createTempConfig(
   youtubeUrl: string,
-  getToken?: () => Promise<string | null>
+  getToken?: () => Promise<string | null>,
+  userIdFallback?: string
 ): Promise<{ tempId: string }> {
   const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
 
@@ -325,7 +336,7 @@ export async function createTempConfig(
     } as Record<string, string>;
 
     // Get user ID from token if available
-    let userId = 'dev-user';
+    let userId = userIdFallback || 'dev-user';
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
@@ -343,6 +354,7 @@ export async function createTempConfig(
       method: 'POST',
       headers,
       body: JSON.stringify(tempConfigData),
+      credentials: 'include',
     });
 
     const data = await resp.json().catch(() => ({}));
@@ -353,17 +365,22 @@ export async function createTempConfig(
 
     return { tempId: (data as any).tempId };
   } else {
-    // Production: similar to dev, but adjust endpoint
+    // Production: use backend API
     const headers = {
       'Content-Type': 'application/json',
-      apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
+      'x-api-key': import.meta.env.VITE_API_KEY,
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
-    const resp = await fetch('https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/create-temp-config', {
+    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs/temp`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ youtubeUrl }),
+      body: JSON.stringify({
+        sourceType: 'youtube',
+        youtubeUrl: normalizeYoutubeUrl(youtubeUrl),
+        userId: userIdFallback || 'prod-user',
+      }),
+      credentials: 'include',
     });
 
     const data = await resp.json().catch(() => ({}));
@@ -556,15 +573,15 @@ export async function getJobStatus(
 
     return await response.json();
   } else {
-    // Production: use Supabase functions
+    // Production: use backend API
     const headers = {
       ...(await getAuthHeader(getToken)),
-      apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpYmpxcXVjbWJydHVpcnlzZXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2Mzg3OTYsImV4cCI6MjA3MjIxNDc5Nn0.afpoQtOXH62pi5LuC8lOXPmxnx71Nn3BJBXXtVzp3Os',
+      'x-api-key': import.meta.env.VITE_API_KEY,
     } as Record<string, string>;
     
     const response = await fetch(
-      `https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/job-status?id=${jobId}`,
-      { headers }
+      `${import.meta.env.VITE_BACKEND_URL}/jobs/${jobId}`,
+      { headers, credentials: 'include' }
     );
 
     if (!response.ok) {
