@@ -9,6 +9,8 @@ import { env } from '../config/env.js';
 const logger = createLogger('auth-routes');
 
 export async function registerAuthRoutes(app: FastifyInstance) {
+  const cookieSameSite = env.isProduction ? 'none' : 'lax';
+
   // ============================================
   // REGISTER - Criar nova conta
   // ============================================
@@ -34,7 +36,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       reply.setCookie('access_token', result.accessToken, {
         httpOnly: true,
         secure: env.isProduction,
-        sameSite: 'lax',
+        sameSite: cookieSameSite,
         maxAge: 7 * 24 * 60 * 60, // 7 days
         path: '/',
       });
@@ -42,7 +44,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       reply.setCookie('refresh_token', result.refreshToken, {
         httpOnly: true,
         secure: env.isProduction,
-        sameSite: 'lax',
+        sameSite: cookieSameSite,
         maxAge: 30 * 24 * 60 * 60, // 30 days
         path: '/',
       });
@@ -88,7 +90,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       reply.setCookie('access_token', result.accessToken, {
         httpOnly: true,
         secure: env.isProduction,
-        sameSite: 'lax',
+        sameSite: cookieSameSite,
         maxAge: 7 * 24 * 60 * 60, // 7 days
         path: '/',
       });
@@ -96,7 +98,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       reply.setCookie('refresh_token', result.refreshToken, {
         httpOnly: true,
         secure: env.isProduction,
-        sameSite: 'lax',
+        sameSite: cookieSameSite,
         maxAge: 30 * 24 * 60 * 60, // 30 days
         path: '/',
       });
@@ -362,7 +364,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       reply.setCookie('access_token', result.accessToken, {
         httpOnly: true,
         secure: env.isProduction,
-        sameSite: 'lax',
+        sameSite: cookieSameSite,
         maxAge: 7 * 24 * 60 * 60, // 7 days
         path: '/',
       });
@@ -370,7 +372,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       reply.setCookie('refresh_token', result.refreshToken, {
         httpOnly: true,
         secure: env.isProduction,
-        sameSite: 'lax',
+        sameSite: cookieSameSite,
         maxAge: 30 * 24 * 60 * 60, // 30 days
         path: '/',
       });
