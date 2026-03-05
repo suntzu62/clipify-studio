@@ -957,15 +957,27 @@ export async function registerRoutes(app: FastifyInstance) {
 
     // 4. Save subtitle preferences to Redis (7 days TTL)
     const subtitleKey = `subtitle:${jobId}:global`;
-    await redis.set(
-      subtitleKey,
-      JSON.stringify(finalConfig.subtitlePreferences),
-      'EX',
-      60 * 60 * 24 * 7 // 7 days
-    );
+    try {
+      await redis.set(
+        subtitleKey,
+        JSON.stringify(finalConfig.subtitlePreferences),
+        'EX',
+        60 * 60 * 24 * 7 // 7 days
+      );
+    } catch (error) {
+      logger.warn({ jobId, tempId, error }, 'Failed to persist global subtitle preferences in Redis');
+    }
 
     // 5. Add job to queue
-    await addVideoJob(jobData);
+    try {
+      await addVideoJob(jobData);
+    } catch (error) {
+      logger.error({ jobId, tempId, error }, 'Failed to add job to queue');
+      return reply.status(503).send({
+        error: 'QUEUE_UNAVAILABLE',
+        message: 'Fila de processamento temporariamente indisponível. Tente novamente em alguns instantes.',
+      });
+    }
 
     // 6. Delete temporary configuration
     await deleteTempConfigSafely(tempId);
