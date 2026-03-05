@@ -6,9 +6,6 @@ import { logger } from './config/logger.js';
 import { registerRoutes } from './api/routes.js';
 import { verifyToken } from './services/auth.service.js';
 
-// Importar worker para iniciar processamento
-import './jobs/worker.js';
-
 // ============================================
 // CRIAR SERVIDOR FASTIFY
 // ============================================
@@ -124,6 +121,17 @@ try {
   logger.info(`🚀 Server running on http://localhost:${env.port}`);
   logger.info(`📝 Environment: ${env.nodeEnv}`);
   logger.info(`🔧 API Key authentication enabled`);
+
+  // Start worker without taking down the API if Redis/queue is unavailable.
+  try {
+    await import('./jobs/worker.js');
+    logger.info('👷 Worker loaded');
+  } catch (workerError: any) {
+    logger.error(
+      { error: workerError?.message || workerError },
+      'Worker failed to load; API will continue running with fallback processing'
+    );
+  }
 } catch (error) {
   logger.error(error, 'Failed to start server');
   process.exit(1);
