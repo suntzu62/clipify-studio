@@ -29,6 +29,37 @@ import * as mp from '../services/mercadopago.service.js';
 
 const logger = createLogger('routes');
 const dbJobs = db.jobs;
+const tempConfigFallbackStore = new Map<string, ProjectConfig>();
+
+async function saveTempConfigSafely(tempId: string, config: ProjectConfig): Promise<void> {
+  try {
+    await setTempConfig(tempId, config, 3600);
+  } catch (error) {
+    logger.warn({ tempId, error }, 'Redis unavailable, storing temp config in memory fallback');
+    tempConfigFallbackStore.set(tempId, config);
+  }
+}
+
+async function getTempConfigSafely(tempId: string): Promise<ProjectConfig | null> {
+  try {
+    const config = await getTempConfig(tempId);
+    if (config) return config as ProjectConfig;
+  } catch (error) {
+    logger.warn({ tempId, error }, 'Redis read failed, trying in-memory temp config fallback');
+  }
+
+  return tempConfigFallbackStore.get(tempId) || null;
+}
+
+async function deleteTempConfigSafely(tempId: string): Promise<void> {
+  try {
+    await deleteTempConfig(tempId);
+  } catch (error) {
+    logger.warn({ tempId, error }, 'Redis delete failed, cleaning only in-memory temp config fallback');
+  } finally {
+    tempConfigFallbackStore.delete(tempId);
+  }
+}
 
 function getRequestUserId(request: any): string | undefined {
   return request?.user?.userId;
@@ -827,7 +858,7 @@ export async function registerRoutes(app: FastifyInstance) {
         };
 
     // Save to Redis with 1 hour TTL
-    await setTempConfig(tempId, config, 3600);
+    await saveTempConfigSafely(tempId, config);
 
     logger.info({ tempId, userId: effectiveUserId, sourceType: sourceInput.sourceType }, 'Temporary config created');
 
@@ -839,7 +870,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const { tempId } = request.params as { tempId: string };
     const requestUserId = getRequestUserId(request);
 
-    const config = await getTempConfig(tempId);
+    const config = await getTempConfigSafely(tempId);
 
     if (!config) {
       return reply.status(404).send({
@@ -864,7 +895,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const requestUserId = getRequestUserId(request);
 
     // 1. Get temporary configuration
-    const tempConfig = await getTempConfig(tempId);
+    const tempConfig = await getTempConfigSafely(tempId);
 
     if (!tempConfig) {
       return reply.status(404).send({
@@ -937,7 +968,7 @@ export async function registerRoutes(app: FastifyInstance) {
     await addVideoJob(jobData);
 
     // 6. Delete temporary configuration
-    await deleteTempConfig(tempId);
+    await deleteTempConfigSafely(tempId);
 
     logger.info({ jobId, tempId, userId: tempConfig.userId }, 'Job started from temp config');
 
