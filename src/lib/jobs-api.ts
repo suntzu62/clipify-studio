@@ -1,4 +1,7 @@
 import { getAuthHeader } from './auth-token';
+import { getBackendUrl } from './backend-url';
+
+const BACKEND_URL = getBackendUrl();
 
 // Helper function to generate job ID (matching edge function)
 async function generateJobId(sourceIdentifier: string): Promise<string> {
@@ -99,7 +102,7 @@ export async function enqueueFromUrl(
 ) {
   // Use backend-v2 API in development
   const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+    Boolean(import.meta.env.VITE_API_KEY);
 
   if (useLocalAPI) {
     const headers = {
@@ -127,7 +130,7 @@ export async function enqueueFromUrl(
       clipCount: 5,
     };
 
-    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs`, {
+    const resp = await fetch(`${BACKEND_URL}/jobs`, {
       method: 'POST',
       headers,
       body: JSON.stringify(jobData),
@@ -149,7 +152,7 @@ export async function enqueueFromUrl(
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
-    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs`, {
+    const resp = await fetch(`${BACKEND_URL}/jobs`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -181,7 +184,7 @@ export async function enqueuePipeline(
 ) {
   // Use backend-v2 API in development
   const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+    Boolean(import.meta.env.VITE_API_KEY);
 
   if (useLocalAPI) {
     const headers = {
@@ -214,7 +217,7 @@ export async function enqueuePipeline(
 
     while (retryCount <= maxRetries) {
       try {
-        const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs`, {
+        const resp = await fetch(`${BACKEND_URL}/jobs`, {
           method: 'POST',
           headers,
           body: JSON.stringify(jobData),
@@ -264,7 +267,7 @@ export async function enqueuePipeline(
 
     while (retryCount <= maxRetries) {
       try {
-        const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs`, {
+        const resp = await fetch(`${BACKEND_URL}/jobs`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -325,7 +328,7 @@ export async function createTempConfig(
   getToken?: () => Promise<string | null>,
   userIdFallback?: string
 ): Promise<{ tempId: string }> {
-  const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
 
   if (useBackendAPI) {
     const token = getToken ? await getToken() : null;
@@ -350,7 +353,7 @@ export async function createTempConfig(
       sourceType: 'youtube',
     };
 
-    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs/temp`, {
+    const resp = await fetch(`${BACKEND_URL}/jobs/temp`, {
       method: 'POST',
       headers,
       body: JSON.stringify(tempConfigData),
@@ -372,7 +375,7 @@ export async function createTempConfig(
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
-    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs/temp`, {
+    const resp = await fetch(`${BACKEND_URL}/jobs/temp`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -436,7 +439,7 @@ export async function startJobFromTempConfig(
   },
   getToken?: () => Promise<string | null>
 ): Promise<{ jobId: string; status: string; message?: string }> {
-  const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
 
   if (useBackendAPI) {
     const token = getToken ? await getToken() : null;
@@ -446,7 +449,7 @@ export async function startJobFromTempConfig(
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     } as Record<string, string>;
 
-    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs/temp/${tempId}/start`, {
+    const resp = await fetch(`${BACKEND_URL}/jobs/temp/${tempId}/start`, {
       method: 'POST',
       headers,
       body: JSON.stringify(config),
@@ -480,7 +483,7 @@ export async function createJobFromUpload(
   fileName: string,
   getToken?: () => Promise<string | null>
 ): Promise<{ jobId: string }> {
-  const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
 
   if (useBackendAPI) {
     const token = getToken ? await getToken() : null;
@@ -498,7 +501,7 @@ export async function createJobFromUpload(
       clipCount: 5,
     };
 
-    const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/jobs/from-upload`, {
+    const resp = await fetch(`${BACKEND_URL}/jobs/from-upload`, {
       method: 'POST',
       headers,
       body: JSON.stringify(jobData),
@@ -522,7 +525,7 @@ export async function createJobFromUpload(
     } as Record<string, string>;
 
     // In production, the backend URL should come from environment
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://api.cortai.app';
+    const backendUrl = BACKEND_URL || 'https://api.cortai.app';
 
     const jobData = {
       userId,
@@ -552,7 +555,7 @@ export async function getJobStatus(
   jobId: string,
   getToken?: () => Promise<string | null>
 ): Promise<Job> {
-  const useBackendAPI = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
 
   if (useBackendAPI) {
     const token = getToken ? await getToken() : null;
@@ -562,7 +565,7 @@ export async function getJobStatus(
     } as Record<string, string>;
 
     const response = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL}/jobs/${jobId}`,
+      `${BACKEND_URL}/jobs/${jobId}`,
       { headers }
     );
 
@@ -580,7 +583,7 @@ export async function getJobStatus(
     } as Record<string, string>;
     
     const response = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL}/jobs/${jobId}`,
+      `${BACKEND_URL}/jobs/${jobId}`,
       { headers, credentials: 'include' }
     );
 

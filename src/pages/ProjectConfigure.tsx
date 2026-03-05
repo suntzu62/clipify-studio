@@ -8,6 +8,7 @@ import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
 import { saveUserJob } from '@/lib/storage';
 import type { Job } from '@/lib/jobs-api';
+import { getBackendUrl } from '@/lib/backend-url';
 import {
   ArrowLeft,
   Type,
@@ -175,7 +176,7 @@ export default function ProjectConfigure() {
 
     const loadTempConfig = async () => {
       try {
-        const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+        const baseUrl = getBackendUrl();
         const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
 
         const response = await fetch(
@@ -226,7 +227,7 @@ export default function ProjectConfigure() {
     setProcessing(true);
 
     try {
-      const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const baseUrl = getBackendUrl();
       const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
 
       // Enviar apenas os campos que o backend espera

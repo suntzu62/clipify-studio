@@ -36,6 +36,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { getUserJobs, updateJobStatus, saveUserJob } from '@/lib/storage';
 import { Job, createTempConfig } from '@/lib/jobs-api';
+import { getBackendUrl } from '@/lib/backend-url';
 import { useToast } from '@/hooks/use-toast';
 import { createProjectTitle } from '@/lib/youtube-metadata';
 import posthog from 'posthog-js';
@@ -147,7 +148,7 @@ export default function ProjectDetail() {
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       try {
-        const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+        const baseUrl = getBackendUrl();
         const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
 
         const response = await fetch(`${baseUrl}/jobs/${id}`, {
