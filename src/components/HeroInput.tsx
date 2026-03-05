@@ -103,7 +103,11 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
     try {
       setLoading(true);
       const tokenProvider = async () => await getToken();
-      const { tempId } = await createTempConfig(normalizeYoutubeUrl(value), tokenProvider);
+      const { tempId } = await createTempConfig(
+        normalizeYoutubeUrl(value),
+        tokenProvider,
+        user.id
+      );
 
       // Navigate to configuration page instead of direct processing
       navigate(`/projects/configure/${tempId}`);
