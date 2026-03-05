@@ -14,6 +14,7 @@ import {
   type SubtitlePreferences,
 } from '../types/index.js';
 import { addVideoJob, getJobStatus, cancelJob, getQueueHealth, videoQueue } from '../jobs/queue.js';
+import { processVideo } from '../jobs/processor.js';
 import { clips as dbClips } from '../services/database.service.js';
 import { createLogger } from '../config/logger.js';
 import { createClient } from '@supabase/supabase-js';
@@ -77,6 +78,24 @@ async function deleteTempConfigSafely(tempId: string): Promise<void> {
   } finally {
     tempConfigFallbackStore.delete(tempId);
   }
+}
+
+function launchInlineProcessing(jobData: JobData): void {
+  const inlineJob = {
+    id: jobData.jobId,
+    data: jobData,
+    attemptsMade: 0,
+    async updateProgress() {
+      // Progress is persisted by processor directly in DB.
+      return;
+    },
+  } as any;
+
+  setTimeout(() => {
+    processVideo(inlineJob).catch((error) => {
+      logger.error({ jobId: jobData.jobId, error }, 'Inline processing failed');
+    });
+  }, 0);
 }
 
 function getRequestUserId(request: any): string | undefined {
@@ -1010,11 +1029,8 @@ export async function registerRoutes(app: FastifyInstance) {
     try {
       await withTimeout(addVideoJob(jobData), 10000);
     } catch (error) {
-      logger.error({ jobId, tempId, error }, 'Failed to add job to queue');
-      return reply.status(503).send({
-        error: isTimeoutError(error) ? 'QUEUE_TIMEOUT' : 'QUEUE_UNAVAILABLE',
-        message: 'Fila de processamento temporariamente indisponivel. Tente novamente em alguns instantes.',
-      });
+      logger.warn({ jobId, tempId, error }, 'Queue unavailable, falling back to inline processing');
+      launchInlineProcessing(jobData);
     }
 
     // 6. Delete temporary configuration
