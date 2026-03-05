@@ -31,6 +31,24 @@ const logger = createLogger('routes');
 const dbJobs = db.jobs;
 const tempConfigFallbackStore = new Map<string, ProjectConfig>();
 
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'OPERATION_TIMEOUT';
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error('OPERATION_TIMEOUT')), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+}
+
 async function saveTempConfigSafely(tempId: string, config: ProjectConfig): Promise<void> {
   try {
     await setTempConfig(tempId, config, 3600);
@@ -895,7 +913,16 @@ export async function registerRoutes(app: FastifyInstance) {
     const requestUserId = getRequestUserId(request);
 
     // 1. Get temporary configuration
-    const tempConfig = await getTempConfigSafely(tempId);
+    let tempConfig: ProjectConfig | null = null;
+    try {
+      tempConfig = await withTimeout(getTempConfigSafely(tempId), 10000);
+    } catch (error) {
+      logger.error({ tempId, error }, 'Failed to fetch temp config');
+      return reply.status(503).send({
+        error: 'CONFIG_UNAVAILABLE',
+        message: 'Configuracao temporariamente indisponivel. Tente novamente.',
+      });
+    }
 
     if (!tempConfig) {
       return reply.status(404).send({
@@ -924,15 +951,26 @@ export async function registerRoutes(app: FastifyInstance) {
 
     const finalConfig = parsed.data;
 
-    if (
-      !(await enforceUsageLimits(
-        reply,
-        tempConfig.userId,
-        finalConfig.clipSettings.clipCount,
-        finalConfig.clipSettings.targetDuration
-      ))
-    ) {
-      return;
+    try {
+      if (
+        !(await withTimeout(
+          enforceUsageLimits(
+            reply,
+            tempConfig.userId,
+            finalConfig.clipSettings.clipCount,
+            finalConfig.clipSettings.targetDuration
+          ),
+          10000
+        ))
+      ) {
+        return;
+      }
+    } catch (error) {
+      logger.error({ tempId, userId: tempConfig.userId, error }, 'Usage limits check failed or timed out');
+      return reply.status(503).send({
+        error: 'LIMIT_CHECK_UNAVAILABLE',
+        message: 'Nao foi possivel validar limites agora. Tente novamente em instantes.',
+      });
     }
 
     // 3. Create JobData with complete configuration
@@ -970,12 +1008,12 @@ export async function registerRoutes(app: FastifyInstance) {
 
     // 5. Add job to queue
     try {
-      await addVideoJob(jobData);
+      await withTimeout(addVideoJob(jobData), 10000);
     } catch (error) {
       logger.error({ jobId, tempId, error }, 'Failed to add job to queue');
       return reply.status(503).send({
-        error: 'QUEUE_UNAVAILABLE',
-        message: 'Fila de processamento temporariamente indisponível. Tente novamente em alguns instantes.',
+        error: isTimeoutError(error) ? 'QUEUE_TIMEOUT' : 'QUEUE_UNAVAILABLE',
+        message: 'Fila de processamento temporariamente indisponivel. Tente novamente em alguns instantes.',
       });
     }
 
