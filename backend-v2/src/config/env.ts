@@ -98,6 +98,7 @@ export const env = {
     if (!redisUrl) {
       return {
         url: undefined as string | undefined,
+        username: undefined as string | undefined,
         host: parsed.data.REDIS_HOST,
         port: parseInt(parsed.data.REDIS_PORT, 10),
         password: parsed.data.REDIS_PASSWORD,
@@ -111,6 +112,7 @@ export const env = {
       const dbFromPath = url.pathname?.replace('/', '');
       return {
         url: redisUrl,
+        username: url.username || undefined,
         host: url.hostname || parsed.data.REDIS_HOST,
         port: Number(url.port || parsed.data.REDIS_PORT),
         password: url.password || parsed.data.REDIS_PASSWORD,
@@ -120,6 +122,7 @@ export const env = {
     } catch {
       return {
         url: undefined as string | undefined,
+        username: undefined as string | undefined,
         host: parsed.data.REDIS_HOST,
         port: parseInt(parsed.data.REDIS_PORT, 10),
         password: parsed.data.REDIS_PASSWORD,

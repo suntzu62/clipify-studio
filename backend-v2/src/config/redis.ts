@@ -7,6 +7,7 @@ const logger = createLogger('redis');
 // Shared Redis connection for general use
 export const redis = env.redis.url
   ? new IORedis(env.redis.url, {
+      ...(env.redis.username ? { username: env.redis.username } : {}),
       db: env.redis.db || 0,
       maxRetriesPerRequest: 3,
       ...(env.redis.tls ? { tls: {} } : {}),
@@ -20,6 +21,7 @@ export const redis = env.redis.url
       },
     })
   : new IORedis({
+      ...(env.redis.username ? { username: env.redis.username } : {}),
       host: env.redis.host,
       port: env.redis.port,
       password: env.redis.password,

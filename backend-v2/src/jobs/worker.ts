@@ -8,6 +8,7 @@ const logger = createLogger('worker');
 
 // Conexão Redis
 const connection = {
+  ...(env.redis.username ? { username: env.redis.username } : {}),
   host: env.redis.host,
   port: env.redis.port,
   password: env.redis.password,
