@@ -27,6 +27,7 @@ const envSchema = z.object({
   LOCAL_STORAGE_PATH: z.string().default('./uploads'),
 
   // Redis
+  REDIS_URL: z.string().optional(),
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.string().default('6379'),
   REDIS_PASSWORD: z.string().optional(),
@@ -92,12 +93,41 @@ export const env = {
   localStoragePath: parsed.data.LOCAL_STORAGE_PATH,
 
   // Redis
-  redis: {
-    host: parsed.data.REDIS_HOST,
-    port: parseInt(parsed.data.REDIS_PORT, 10),
-    password: parsed.data.REDIS_PASSWORD,
-    db: parseInt(parsed.data.REDIS_DB, 10),
-  },
+  redis: (() => {
+    const redisUrl = parsed.data.REDIS_URL;
+    if (!redisUrl) {
+      return {
+        url: undefined as string | undefined,
+        host: parsed.data.REDIS_HOST,
+        port: parseInt(parsed.data.REDIS_PORT, 10),
+        password: parsed.data.REDIS_PASSWORD,
+        db: parseInt(parsed.data.REDIS_DB, 10),
+        tls: false,
+      };
+    }
+
+    try {
+      const url = new URL(redisUrl);
+      const dbFromPath = url.pathname?.replace('/', '');
+      return {
+        url: redisUrl,
+        host: url.hostname || parsed.data.REDIS_HOST,
+        port: Number(url.port || parsed.data.REDIS_PORT),
+        password: url.password || parsed.data.REDIS_PASSWORD,
+        db: dbFromPath ? Number(dbFromPath) : parseInt(parsed.data.REDIS_DB, 10),
+        tls: url.protocol === 'rediss:',
+      };
+    } catch {
+      return {
+        url: undefined as string | undefined,
+        host: parsed.data.REDIS_HOST,
+        port: parseInt(parsed.data.REDIS_PORT, 10),
+        password: parsed.data.REDIS_PASSWORD,
+        db: parseInt(parsed.data.REDIS_DB, 10),
+        tls: false,
+      };
+    }
+  })(),
 
   // APIs
   openai: {

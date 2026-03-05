@@ -12,6 +12,7 @@ const connection = {
   port: env.redis.port,
   password: env.redis.password,
   db: env.redis.db,
+  ...(env.redis.tls ? { tls: {} } : {}),
 };
 
 // Worker unificado
