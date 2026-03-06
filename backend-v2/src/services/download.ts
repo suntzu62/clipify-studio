@@ -292,13 +292,14 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
     const outputBase = path.basename(outputPath, path.extname(outputPath));
     const outputTemplate = path.join(outputDir, `${outputBase}.%(ext)s`);
 
-    // Use youtube-dl-exec wrapper (ships own yt-dlp binary) instead of system command.
-    await youtubedl(url, {
+    // Ask yt-dlp to print final output path so we can resolve it reliably.
+    const ytDlpStdout = await youtubedl(url, {
       format: 'bestvideo+bestaudio/best',
       noPlaylist: true,
       noCheckCertificates: true,
       output: outputTemplate,
-    }, {
+      print: 'after_move:filepath',
+    } as any, {
       timeout: 600000, // 10 minutos para downloads maiores
     });
 
@@ -307,6 +308,24 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
 
     let fileSize = 0;
     let resolvedOutputPath = outputPath;
+    const printedPath = String(ytDlpStdout || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .pop();
+
+    if (printedPath) {
+      try {
+        const printedStats = await fs.stat(printedPath);
+        if (printedStats.isFile() && printedStats.size > 0) {
+          resolvedOutputPath = printedPath;
+          fileSize = printedStats.size;
+          logger.info({ printedPath, size: fileSize }, 'Resolved final file path from yt-dlp output');
+        }
+      } catch (error: any) {
+        logger.warn({ printedPath, error: error?.message }, 'Printed yt-dlp path not found on disk');
+      }
+    }
     const findGeneratedFile = async (): Promise<string | null> => {
       const files = await fs.readdir(outputDir);
       const candidates = files
@@ -330,54 +349,56 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       return best?.file || null;
     };
 
-    try {
-      const generated = await findGeneratedFile();
-      if (!generated) throw new Error('No generated file found');
-      resolvedOutputPath = generated;
-      const statsImmediate = await fs.stat(resolvedOutputPath);
-      fileSize = statsImmediate.size;
-      logger.info({ outputPath: resolvedOutputPath, size: fileSize }, 'Generated file exists immediately after download');
-    } catch (error: any) {
-      logger.warn({ outputPath, error: error.message }, 'File not found immediately - will retry with polling');
-
-      // Listar arquivos no /tmp para debug
+    if (fileSize === 0) {
       try {
-        const tmpFiles = await fs.readdir('/tmp');
-        const clipifyFiles = tmpFiles.filter(f => f.startsWith('clipify-'));
-        logger.info({ clipifyFiles }, 'Files in /tmp starting with clipify-');
-      } catch {}
+        const generated = await findGeneratedFile();
+        if (!generated) throw new Error('No generated file found');
+        resolvedOutputPath = generated;
+        const statsImmediate = await fs.stat(resolvedOutputPath);
+        fileSize = statsImmediate.size;
+        logger.info({ outputPath: resolvedOutputPath, size: fileSize }, 'Generated file exists immediately after download');
+      } catch (error: any) {
+        logger.warn({ outputPath, error: error.message }, 'File not found immediately - will retry with polling');
 
-      // Se não existe, fazer polling
-      const maxRetries = 30;
-      let stableSize = 0;
-      let stableCount = 0;
-
-      for (let retry = 0; retry < maxRetries; retry++) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
+        // Listar arquivos no /tmp para debug
         try {
-          const generated = await findGeneratedFile();
-          if (!generated) throw new Error('No generated file found');
-          resolvedOutputPath = generated;
-          const stats = await fs.stat(resolvedOutputPath);
-          fileSize = stats.size;
+          const tmpFiles = await fs.readdir('/tmp');
+          const clipifyFiles = tmpFiles.filter(f => f.startsWith('clipify-'));
+          logger.info({ clipifyFiles }, 'Files in /tmp starting with clipify-');
+        } catch {}
 
-          logger.info({ outputPath: resolvedOutputPath, size: fileSize, retry, stableCount }, 'File size check (polling)');
+        // Se não existe, fazer polling
+        const maxRetries = 30;
+        let stableSize = 0;
+        let stableCount = 0;
 
-          if (fileSize > 0) {
-            if (fileSize === stableSize) {
-              stableCount++;
-              if (stableCount >= 2) {
-                logger.info({ outputPath, finalSize: fileSize }, 'File size stable');
-                break;
+        for (let retry = 0; retry < maxRetries; retry++) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          try {
+            const generated = await findGeneratedFile();
+            if (!generated) throw new Error('No generated file found');
+            resolvedOutputPath = generated;
+            const stats = await fs.stat(resolvedOutputPath);
+            fileSize = stats.size;
+
+            logger.info({ outputPath: resolvedOutputPath, size: fileSize, retry, stableCount }, 'File size check (polling)');
+
+            if (fileSize > 0) {
+              if (fileSize === stableSize) {
+                stableCount++;
+                if (stableCount >= 2) {
+                  logger.info({ outputPath, finalSize: fileSize }, 'File size stable');
+                  break;
+                }
+              } else {
+                stableSize = fileSize;
+                stableCount = 0;
               }
-            } else {
-              stableSize = fileSize;
-              stableCount = 0;
             }
+          } catch (err: any) {
+            logger.warn({ outputPath, retry, error: err.message }, 'File still not found');
           }
-        } catch (err: any) {
-          logger.warn({ outputPath, retry, error: err.message }, 'File still not found');
         }
       }
     }
