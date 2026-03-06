@@ -1,11 +1,11 @@
 import ytdl from '@distube/ytdl-core';
-import { execa } from 'execa';
 import { createWriteStream, promises as fs } from 'fs';
 import { pipeline } from 'stream/promises';
 import path from 'path';
 import os from 'os';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
+import youtubedl from 'youtube-dl-exec';
 import { createLogger } from '../config/logger.js';
 import { downloadFile } from '../lib/supabase.js';
 import { env } from '../config/env.js';
@@ -288,41 +288,16 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
 
     // Chamar yt-dlp diretamente (sem script intermediário)
     // Isso garante que o processo aguarde o download completo (incluindo HLS streaming)
-    const result = await execa('yt-dlp', [
-      '-f', 'bestvideo+bestaudio/best',
-      '--merge-output-format', 'mp4',
-      '--no-playlist',
-      '--no-check-certificates',
-      '--force-overwrites',
-      '-o', outputPath,
-      url
-    ], {
+    // Use youtube-dl-exec wrapper (ships own yt-dlp binary) instead of system command.
+    await youtubedl(url, {
+      format: 'bestvideo+bestaudio/best',
+      mergeOutputFormat: 'mp4',
+      noPlaylist: true,
+      noCheckCertificates: true,
+      output: outputPath,
+    }, {
       timeout: 600000, // 10 minutos para downloads maiores
-      all: true,
-      reject: false,
-      maxBuffer: 100 * 1024 * 1024, // 100MB buffer
     });
-
-    logger.info({
-      exitCode: result.exitCode,
-      failed: result.failed,
-      stdoutLength: result.stdout?.length || 0,
-      stderrLength: result.stderr?.length || 0,
-      stdout: result.stdout,
-      stderr: result.stderr
-    }, 'yt-dlp execution summary');
-
-    if (result.failed || result.exitCode !== 0) {
-      logger.error({ stdout: result.stdout, stderr: result.stderr }, 'yt-dlp output on failure');
-
-      const fallbackMessage = result.exitCode === undefined
-        ? 'yt-dlp command not found or failed to start'
-        : '';
-
-      throw new Error(
-        `yt-dlp failed with exit code ${result.exitCode ?? 'undefined'}: ${result.stderr || result.stdout || fallbackMessage}`
-      );
-    }
 
     // Verificar IMEDIATAMENTE se o arquivo existe
     logger.info({ outputPath }, 'Checking file immediately after yt-dlp');
@@ -386,11 +361,10 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
 
     // Tentar obter informações adicionais do YouTube via yt-dlp --dump-json
     try {
-      const { stdout } = await execa('yt-dlp', ['--dump-single-json', '--no-playlist', url], {
-        timeout: 30000,
-        reject: false,
-      });
-      const info = JSON.parse(stdout);
+      const info = await youtubedl(url, {
+        dumpSingleJson: true,
+        noPlaylist: true,
+      }) as any;
 
       metadata.id = info.id;
       metadata.title = info.title || metadata.title;
