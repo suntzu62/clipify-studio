@@ -184,11 +184,18 @@ export async function registerRoutes(app: FastifyInstance) {
   // HEALTH CHECK
   // ============================================
   app.get('/health', async () => {
-    const queueHealth = await getQueueHealth();
+    let queueHealth: any = null;
+    let queueAvailable = true;
+    try {
+      queueHealth = await withTimeout(getQueueHealth(), 2500);
+    } catch {
+      queueAvailable = false;
+    }
 
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
+      queueAvailable,
       queue: queueHealth,
     };
   });
@@ -423,13 +430,52 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
-    const status = await getJobStatus(jobId);
+    let status: any = null;
+    try {
+      status = await withTimeout(getJobStatus(jobId), 3000);
+    } catch (error) {
+      logger.warn({ jobId, error }, 'Queue status lookup failed, using database fallback');
+    }
 
-    if (!status) {
+    if (!status && !dbJob) {
       return reply.status(404).send({
         error: 'JOB_NOT_FOUND',
         message: `Job ${jobId} not found`,
       });
+    }
+
+    if (!status && dbJob) {
+      const dbState = dbJob.status || 'queued';
+      const progressValue = Number(dbJob.progress || 0);
+
+      const dbClipRows = dbState === 'completed' ? await dbClips.findByJobId(jobId) : [];
+      const transformClip = (clip: any) => {
+        const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
+        return {
+          id: clip.id,
+          title: clip.title,
+          description: clip.description || 'Descrição gerada automaticamente',
+          hashtags: clip.hashtags || [],
+          previewUrl: proxyUrl,
+          downloadUrl: clip.video_url || proxyUrl,
+          thumbnailUrl: clip.thumbnail_url,
+          duration: clip.duration,
+          status: 'ready',
+          start: clip.start_time,
+          end: clip.end_time,
+        };
+      };
+
+      return {
+        jobId: dbJob.id,
+        state: dbState,
+        status: dbState,
+        currentStep: dbJob.current_step || 'ingest',
+        progress: { progress: progressValue, message: dbJob.current_step_message || '' },
+        result: dbState === 'completed' ? { clips: dbClipRows.map(transformClip) } : null,
+        error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
+        finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
+      };
     }
 
     const queueUserId = (status.data as { userId?: string } | undefined)?.userId;
