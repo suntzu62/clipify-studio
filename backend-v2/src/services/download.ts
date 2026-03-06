@@ -288,25 +288,55 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
 
     // Chamar yt-dlp diretamente (sem script intermediário)
     // Isso garante que o processo aguarde o download completo (incluindo HLS streaming)
+    const outputDir = path.dirname(outputPath);
+    const outputBase = path.basename(outputPath, path.extname(outputPath));
+    const outputTemplate = path.join(outputDir, `${outputBase}.%(ext)s`);
+
     // Use youtube-dl-exec wrapper (ships own yt-dlp binary) instead of system command.
     await youtubedl(url, {
       format: 'bestvideo+bestaudio/best',
-      mergeOutputFormat: 'mp4',
       noPlaylist: true,
       noCheckCertificates: true,
-      output: outputPath,
+      output: outputTemplate,
     }, {
       timeout: 600000, // 10 minutos para downloads maiores
     });
 
-    // Verificar IMEDIATAMENTE se o arquivo existe
-    logger.info({ outputPath }, 'Checking file immediately after yt-dlp');
+    // Tentar localizar qualquer arquivo final gerado pelo yt-dlp
+    logger.info({ outputPath, outputTemplate }, 'Checking generated files after yt-dlp');
 
     let fileSize = 0;
+    let resolvedOutputPath = outputPath;
+    const findGeneratedFile = async (): Promise<string | null> => {
+      const files = await fs.readdir(outputDir);
+      const candidates = files
+        .filter((f) => f.startsWith(`${outputBase}.`) && !f.endsWith('.part'))
+        .map((f) => path.join(outputDir, f));
+
+      if (candidates.length === 0) return null;
+
+      let best: { file: string; mtimeMs: number } | null = null;
+      for (const file of candidates) {
+        try {
+          const stats = await fs.stat(file);
+          if (!stats.isFile() || stats.size <= 0) continue;
+          if (!best || stats.mtimeMs > best.mtimeMs) {
+            best = { file, mtimeMs: stats.mtimeMs };
+          }
+        } catch {
+          // ignore missing transient files
+        }
+      }
+      return best?.file || null;
+    };
+
     try {
-      const statsImmediate = await fs.stat(outputPath);
+      const generated = await findGeneratedFile();
+      if (!generated) throw new Error('No generated file found');
+      resolvedOutputPath = generated;
+      const statsImmediate = await fs.stat(resolvedOutputPath);
       fileSize = statsImmediate.size;
-      logger.info({ outputPath, size: fileSize }, 'File exists immediately after download');
+      logger.info({ outputPath: resolvedOutputPath, size: fileSize }, 'Generated file exists immediately after download');
     } catch (error: any) {
       logger.warn({ outputPath, error: error.message }, 'File not found immediately - will retry with polling');
 
@@ -326,10 +356,13 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         try {
-          const stats = await fs.stat(outputPath);
+          const generated = await findGeneratedFile();
+          if (!generated) throw new Error('No generated file found');
+          resolvedOutputPath = generated;
+          const stats = await fs.stat(resolvedOutputPath);
           fileSize = stats.size;
 
-          logger.info({ outputPath, size: fileSize, retry, stableCount }, 'File size check (polling)');
+          logger.info({ outputPath: resolvedOutputPath, size: fileSize, retry, stableCount }, 'File size check (polling)');
 
           if (fileSize > 0) {
             if (fileSize === stableSize) {
@@ -352,6 +385,12 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
     if (fileSize === 0) {
       logger.error({ outputPath }, 'Downloaded file is empty or not found');
       throw new Error('Downloaded file is empty');
+    }
+
+    // Normalize final path for the rest of the pipeline
+    if (resolvedOutputPath !== outputPath) {
+      await fs.rename(resolvedOutputPath, outputPath);
+      logger.info({ from: resolvedOutputPath, to: outputPath }, 'Renamed yt-dlp output to expected path');
     }
 
     logger.info({ outputPath, size: fileSize }, 'File downloaded successfully');
