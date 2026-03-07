@@ -297,6 +297,8 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       format: 'bestvideo+bestaudio/best',
       noPlaylist: true,
       noCheckCertificates: true,
+      jsRuntimes: 'node',
+      extractorArgs: 'youtube:player_client=android,web;youtube:player_skip=webpage,configs',
       output: outputTemplate,
       print: 'after_move:filepath',
     } as any, {
