@@ -36,6 +36,40 @@ interface DownloadResult {
   metadata: VideoMetadata;
 }
 
+async function prepareYtDlpCookiesFile(): Promise<string | null> {
+  const encoded = env.ytdlp.cookiesBase64?.trim();
+  if (!encoded) return null;
+
+  try {
+    let content = '';
+    try {
+      content = Buffer.from(encoded, 'base64').toString('utf-8');
+    } catch {
+      content = encoded;
+    }
+
+    // Accept raw cookies text if user pasted it directly.
+    if (!content.includes('youtube.com') && !content.includes('# Netscape HTTP Cookie File')) {
+      content = encoded;
+    }
+
+    if (!content || !content.trim()) {
+      return null;
+    }
+
+    const cookiesPath = path.join(
+      os.tmpdir(),
+      `clipify-ytdlp-cookies-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`
+    );
+
+    await fs.writeFile(cookiesPath, content, { mode: 0o600 });
+    return cookiesPath;
+  } catch (error: any) {
+    logger.warn({ error: error?.message }, 'Failed to prepare yt-dlp cookies file');
+    return null;
+  }
+}
+
 // Removido - usamos os tipos nativos do fluent-ffmpeg
 
 // ============================================
@@ -277,6 +311,8 @@ async function downloadWithYtdl(url: string, outputPath: string): Promise<VideoM
 async function downloadWithYtDlp(url: string, outputPath: string): Promise<VideoMetadata> {
   logger.info({ url, outputPath }, 'Downloading with yt-dlp');
 
+  let cookiesPath: string | null = null;
+
   try {
     // Deletar arquivo se já existir (pode estar vazio de tentativa anterior)
     try {
@@ -291,6 +327,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
     const outputDir = path.dirname(outputPath);
     const outputBase = path.basename(outputPath, path.extname(outputPath));
     const outputTemplate = path.join(outputDir, `${outputBase}.%(ext)s`);
+    cookiesPath = await prepareYtDlpCookiesFile();
 
     // Ask yt-dlp to print final output path so we can resolve it reliably.
     const ytDlpStdout = await youtubedl(url, {
@@ -301,6 +338,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       extractorArgs: 'youtube:player_client=android,web;youtube:player_skip=webpage,configs',
       output: outputTemplate,
       print: 'after_move:filepath',
+      ...(cookiesPath ? { cookies: cookiesPath } : {}),
     } as any, {
       timeout: 600000, // 10 minutos para downloads maiores
     });
@@ -426,6 +464,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       const info = await youtubedl(url, {
         dumpSingleJson: true,
         noPlaylist: true,
+        ...(cookiesPath ? { cookies: cookiesPath } : {}),
       }) as any;
 
       metadata.id = info.id;
@@ -438,7 +477,24 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
     logger.info({ metadata, outputPath }, 'Download with yt-dlp completed');
     return metadata;
   } catch (error: any) {
+    const message = String(error?.message || error || '');
+    const requiresAuth =
+      /sign in to confirm you're not a bot|cookies-from-browser|use --cookies|no title found in player responses/i.test(
+        message
+      );
+
+    if (requiresAuth && !env.ytdlp.cookiesBase64) {
+      throw new VideoDownloadError(
+        'yt-dlp bloqueado pelo YouTube. Configure YTDLP_COOKIES_B64 com cookies exportados da conta.',
+        error
+      );
+    }
+
     throw new VideoDownloadError(`yt-dlp download failed: ${error.message}`, error);
+  } finally {
+    if (cookiesPath) {
+      await fs.unlink(cookiesPath).catch(() => {});
+    }
   }
 }
 
