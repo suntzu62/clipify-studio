@@ -70,6 +70,17 @@ async function prepareYtDlpCookiesFile(): Promise<string | null> {
   }
 }
 
+function buildYtDlpExtractorArgs(): string {
+  const args = ['youtube:player_client=android,web', 'youtube:player_skip=webpage,configs'];
+  if (env.ytdlp.visitorData) {
+    args.push(`youtube:visitor_data=${env.ytdlp.visitorData}`);
+  }
+  if (env.ytdlp.poToken) {
+    args.push(`youtube:po_token=${env.ytdlp.poToken}`);
+  }
+  return args.join(';');
+}
+
 // Removido - usamos os tipos nativos do fluent-ffmpeg
 
 // ============================================
@@ -335,7 +346,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       noPlaylist: true,
       noCheckCertificates: true,
       jsRuntimes: 'node',
-      extractorArgs: 'youtube:player_client=android,web;youtube:player_skip=webpage,configs',
+      extractorArgs: buildYtDlpExtractorArgs(),
       output: outputTemplate,
       print: 'after_move:filepath',
       ...(cookiesPath ? { cookies: cookiesPath } : {}),
@@ -464,8 +475,9 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       const info = await youtubedl(url, {
         dumpSingleJson: true,
         noPlaylist: true,
+        extractorArgs: buildYtDlpExtractorArgs(),
         ...(cookiesPath ? { cookies: cookiesPath } : {}),
-      }) as any;
+      } as any) as any;
 
       metadata.id = info.id;
       metadata.title = info.title || metadata.title;
@@ -479,13 +491,13 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
   } catch (error: any) {
     const message = String(error?.message || error || '');
     const requiresAuth =
-      /sign in to confirm you're not a bot|cookies-from-browser|use --cookies|no title found in player responses/i.test(
+      /sign in to confirm you're not a bot|cookies-from-browser|use --cookies|no title found in player responses|visitor_data|po_token/i.test(
         message
       );
 
-    if (requiresAuth && !env.ytdlp.cookiesBase64) {
+    if (requiresAuth && !env.ytdlp.cookiesBase64 && !(env.ytdlp.visitorData && env.ytdlp.poToken)) {
       throw new VideoDownloadError(
-        'yt-dlp bloqueado pelo YouTube. Configure YTDLP_COOKIES_B64 com cookies exportados da conta.',
+        'yt-dlp bloqueado pelo YouTube. Configure YTDLP_COOKIES_B64 ou o par YTDLP_VISITOR_DATA + YTDLP_PO_TOKEN.',
         error
       );
     }

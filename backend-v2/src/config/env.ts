@@ -56,6 +56,8 @@ const envSchema = z.object({
   FFMPEG_PATH: z.string().optional(),
   YOUTUBE_API_KEY: z.string().optional(),
   YTDLP_COOKIES_B64: z.string().optional(),
+  YTDLP_VISITOR_DATA: z.string().optional(),
+  YTDLP_PO_TOKEN: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -166,6 +168,8 @@ export const env = {
   youtubeApiKey: parsed.data.YOUTUBE_API_KEY,
   ytdlp: {
     cookiesBase64: parsed.data.YTDLP_COOKIES_B64,
+    visitorData: parsed.data.YTDLP_VISITOR_DATA,
+    poToken: parsed.data.YTDLP_PO_TOKEN,
   },
   logLevel: parsed.data.LOG_LEVEL,
 } as const;
