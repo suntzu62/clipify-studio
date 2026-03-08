@@ -36,6 +36,37 @@ interface DownloadResult {
   metadata: VideoMetadata;
 }
 
+interface ExternalDownloadResult {
+  videoPath: string;
+  provider: string;
+  metadata?: Partial<VideoMetadata>;
+}
+
+interface VideoDownloadApiJobResponse {
+  id?: string;
+  job_id?: string;
+  status?: string;
+  success?: boolean;
+  result?: {
+    response?: string;
+    url?: string;
+    title?: string;
+    thumbnail?: string;
+    duration?: number | string;
+    width?: number;
+    height?: number;
+  };
+  response?: string;
+  url?: string;
+  title?: string;
+  thumbnail?: string;
+  duration?: number | string;
+  width?: number;
+  height?: number;
+  error?: string;
+  message?: string;
+}
+
 async function prepareYtDlpCookiesFile(): Promise<string | null> {
   const encoded = env.ytdlp.cookiesBase64?.trim();
   if (!encoded) return null;
@@ -79,6 +110,137 @@ function buildYtDlpExtractorArgs(): string {
     args.push(`youtube:po_token=${env.ytdlp.poToken}`);
   }
   return args.join(';');
+}
+
+function normalizeDuration(value: number | string | undefined): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function getVideoDownloadApiHeaders(): Record<string, string> {
+  const apiKey = env.videoDownload.apiKey;
+  if (!apiKey) {
+    throw new Error('VIDEO_DOWNLOAD_API_KEY not configured');
+  }
+
+  return {
+    Accept: 'application/json',
+    'x-api-key': apiKey,
+    Authorization: `Bearer ${apiKey}`,
+  };
+}
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(env.videoDownload.timeoutMs),
+  });
+
+  const text = await response.text();
+  let parsed: any = {};
+
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { raw: text };
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(parsed?.error || parsed?.message || `HTTP ${response.status}`);
+  }
+
+  return parsed as T;
+}
+
+async function downloadRemoteFile(sourceUrl: string, destinationPath: string): Promise<void> {
+  const response = await fetch(sourceUrl, {
+    signal: AbortSignal.timeout(env.videoDownload.timeoutMs),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Failed to fetch provider file: HTTP ${response.status}`);
+  }
+
+  await pipeline(response.body as any, createWriteStream(destinationPath));
+}
+
+async function downloadWithVideoDownloadApi(url: string, outputPath: string): Promise<ExternalDownloadResult> {
+  const baseUrl = env.videoDownload.baseUrl;
+  const headers = getVideoDownloadApiHeaders();
+  const requestUrl = new URL('/v1/video/download', baseUrl);
+  requestUrl.searchParams.set('url', url);
+  requestUrl.searchParams.set('format', env.videoDownload.format);
+
+  logger.info({ url, provider: 'video_download_api', requestUrl: requestUrl.toString() }, 'Attempting download with external provider');
+
+  const started = await fetchJson<VideoDownloadApiJobResponse>(requestUrl.toString(), {
+    method: 'GET',
+    headers,
+  });
+
+  const directUrl = started.result?.response || started.result?.url || started.response || started.url;
+  let jobId = started.job_id || started.id;
+  let finalPayload = started;
+
+  if (!directUrl && !jobId) {
+    throw new Error(started.error || started.message || 'Provider did not return job_id or file URL');
+  }
+
+  if (!directUrl && jobId) {
+    const deadline = Date.now() + env.videoDownload.timeoutMs;
+    const jobUrl = new URL(`/v1/jobs/${jobId}`, baseUrl);
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const polled = await fetchJson<VideoDownloadApiJobResponse>(jobUrl.toString(), {
+        method: 'GET',
+        headers,
+      });
+
+      finalPayload = polled;
+      const status = String(polled.status || '').toLowerCase();
+      const resultUrl = polled.result?.response || polled.result?.url || polled.response || polled.url;
+
+      if (resultUrl) {
+        break;
+      }
+
+      if (status === 'failed' || status === 'error') {
+        throw new Error(polled.error || polled.message || 'Provider job failed');
+      }
+    }
+  }
+
+  const finalUrl =
+    finalPayload.result?.response ||
+    finalPayload.result?.url ||
+    finalPayload.response ||
+    finalPayload.url;
+
+  if (!finalUrl) {
+    throw new Error('Provider did not return downloadable URL before timeout');
+  }
+
+  await downloadRemoteFile(finalUrl, outputPath);
+
+  return {
+    videoPath: outputPath,
+    provider: 'video_download_api',
+    metadata: {
+      title: finalPayload.result?.title || finalPayload.title,
+      thumbnail: finalPayload.result?.thumbnail || finalPayload.thumbnail,
+      duration: normalizeDuration(finalPayload.result?.duration || finalPayload.duration),
+      width: finalPayload.result?.width || finalPayload.width,
+      height: finalPayload.result?.height || finalPayload.height,
+      url,
+    },
+  };
 }
 
 // Removido - usamos os tipos nativos do fluent-ffmpeg
@@ -197,6 +359,35 @@ async function downloadFromYouTube(url: string): Promise<DownloadResult> {
   // Gerar caminho temporário único
   const videoId = extractYouTubeId(url);
   const tempPath = path.join(os.tmpdir(), `clipify-${videoId}-${Date.now()}.mp4`);
+
+  if (env.videoDownload.provider === 'video_download_api' && env.videoDownload.apiKey) {
+    try {
+      const providerResult = await downloadWithVideoDownloadApi(url, tempPath);
+      const isValid = await validateVideo(tempPath);
+      if (!isValid) {
+        throw new Error('Provider downloaded an invalid video');
+      }
+
+      const extractedMetadata = await extractMetadata(tempPath);
+      const metadata: VideoMetadata = {
+        ...extractedMetadata,
+        ...providerResult.metadata,
+        title: providerResult.metadata?.title || extractedMetadata.title,
+        duration: providerResult.metadata?.duration || extractedMetadata.duration,
+        width: providerResult.metadata?.width || extractedMetadata.width,
+        height: providerResult.metadata?.height || extractedMetadata.height,
+        url,
+      };
+
+      logger.info({ url, provider: providerResult.provider }, 'External provider download succeeded');
+      return { videoPath: tempPath, metadata };
+    } catch (providerError: any) {
+      logger.warn(
+        { error: providerError?.message, url, provider: env.videoDownload.provider },
+        'External provider failed, falling back to local download methods'
+      );
+    }
+  }
 
   try {
     // Tentar com ytdl-core primeiro (mais rápido)
