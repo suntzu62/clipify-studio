@@ -58,11 +58,6 @@ const envSchema = z.object({
   YTDLP_COOKIES_B64: z.string().optional(),
   YTDLP_VISITOR_DATA: z.string().optional(),
   YTDLP_PO_TOKEN: z.string().optional(),
-  VIDEO_DOWNLOAD_PROVIDER: z.enum(['none', 'video_download_api']).default('none'),
-  VIDEO_DOWNLOAD_API_KEY: z.string().optional(),
-  VIDEO_DOWNLOAD_API_BASE_URL: z.string().url().default('https://api.video-download-api.com'),
-  VIDEO_DOWNLOAD_FORMAT: z.string().default('1080'),
-  VIDEO_DOWNLOAD_TIMEOUT_MS: z.string().default('180000'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -175,13 +170,6 @@ export const env = {
     cookiesBase64: parsed.data.YTDLP_COOKIES_B64,
     visitorData: parsed.data.YTDLP_VISITOR_DATA,
     poToken: parsed.data.YTDLP_PO_TOKEN,
-  },
-  videoDownload: {
-    provider: parsed.data.VIDEO_DOWNLOAD_PROVIDER,
-    apiKey: parsed.data.VIDEO_DOWNLOAD_API_KEY,
-    baseUrl: parsed.data.VIDEO_DOWNLOAD_API_BASE_URL.replace(/\/$/, ''),
-    format: parsed.data.VIDEO_DOWNLOAD_FORMAT,
-    timeoutMs: parseInt(parsed.data.VIDEO_DOWNLOAD_TIMEOUT_MS, 10),
   },
   logLevel: parsed.data.LOG_LEVEL,
 } as const;
