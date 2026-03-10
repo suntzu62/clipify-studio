@@ -58,6 +58,9 @@ const envSchema = z.object({
   YTDLP_COOKIES_B64: z.string().optional(),
   YTDLP_VISITOR_DATA: z.string().optional(),
   YTDLP_PO_TOKEN: z.string().optional(),
+  INGEST_SERVICE_URL: z.string().url().optional(),
+  INGEST_SERVICE_API_KEY: z.string().min(1).optional(),
+  INGEST_SERVICE_TIMEOUT_MS: z.string().default('300000'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -170,6 +173,11 @@ export const env = {
     cookiesBase64: parsed.data.YTDLP_COOKIES_B64,
     visitorData: parsed.data.YTDLP_VISITOR_DATA,
     poToken: parsed.data.YTDLP_PO_TOKEN,
+  },
+  ingestService: {
+    url: parsed.data.INGEST_SERVICE_URL,
+    apiKey: parsed.data.INGEST_SERVICE_API_KEY,
+    timeoutMs: parseInt(parsed.data.INGEST_SERVICE_TIMEOUT_MS, 10),
   },
   logLevel: parsed.data.LOG_LEVEL,
 } as const;

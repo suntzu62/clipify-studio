@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
-import { promises as fs } from 'fs';
+import { createReadStream, promises as fs } from 'fs';
+import path from 'path';
 import { z } from 'zod';
 import {
   CreateJobSchema,
@@ -27,6 +28,7 @@ import { registerAdminRoutes } from './admin.routes.js';
 import { reprocessClip } from '../services/clip-reprocessor.js';
 import * as db from '../services/database.service.js';
 import * as mp from '../services/mercadopago.service.js';
+import { downloadVideo, cleanupVideo } from '../services/download.js';
 
 const logger = createLogger('routes');
 const dbJobs = db.jobs;
@@ -198,6 +200,40 @@ export async function registerRoutes(app: FastifyInstance) {
       queueAvailable,
       queue: queueHealth,
     };
+  });
+
+  app.post('/internal/ingest/youtube', async (request, reply) => {
+    const schema = z.object({
+      url: z.string().url(),
+    });
+
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'INVALID_INPUT',
+        message: 'Invalid request body',
+        details: parsed.error.format(),
+      });
+    }
+
+    const { url } = parsed.data;
+    logger.info({ url }, 'Internal ingest request received');
+
+    const { videoPath, metadata } = await downloadVideo('youtube', url);
+    const readStream = createReadStream(videoPath);
+    const cleanup = async () => {
+      await cleanupVideo(videoPath);
+    };
+
+    reply.header('content-type', 'application/octet-stream');
+    reply.header('x-clipify-metadata', Buffer.from(JSON.stringify(metadata)).toString('base64'));
+    reply.header('x-clipify-filename', path.basename(videoPath));
+
+    reply.raw.once('finish', () => { void cleanup(); });
+    reply.raw.once('close', () => { void cleanup(); });
+    readStream.once('error', () => { void cleanup(); });
+
+    return reply.send(readStream);
   });
 
   // ============================================

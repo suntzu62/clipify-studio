@@ -1,5 +1,6 @@
 import ytdl from '@distube/ytdl-core';
 import { createWriteStream, promises as fs } from 'fs';
+import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import path from 'path';
 import os from 'os';
@@ -199,6 +200,25 @@ async function downloadFromYouTube(url: string): Promise<DownloadResult> {
   const tempPath = path.join(os.tmpdir(), `clipify-${videoId}-${Date.now()}.mp4`);
 
   try {
+    if (env.ingestService.url && env.ingestService.apiKey) {
+      try {
+        logger.info({ url, ingestServiceUrl: env.ingestService.url }, 'Attempting remote ingest service download');
+        const metadata = await downloadWithIngestService(url, tempPath);
+
+        const isValid = await validateVideo(tempPath);
+        if (!isValid) {
+          throw new Error('Video returned by ingest service is invalid');
+        }
+
+        return { videoPath: tempPath, metadata };
+      } catch (error: any) {
+        logger.warn(
+          { url, ingestServiceUrl: env.ingestService.url, error: error.message },
+          'Remote ingest service failed, falling back to local download'
+        );
+      }
+    }
+
     // Tentar com ytdl-core primeiro (mais rápido)
     logger.info({ url, method: 'ytdl-core' }, 'Attempting download with ytdl-core');
     const metadata = await downloadWithYtdl(url, tempPath);
@@ -241,6 +261,47 @@ async function downloadFromYouTube(url: string): Promise<DownloadResult> {
       );
     }
   }
+}
+
+async function downloadWithIngestService(url: string, outputPath: string): Promise<VideoMetadata> {
+  const endpoint = `${env.ingestService.url!.replace(/\/$/, '')}/internal/ingest/youtube`;
+  const timeoutSignal = AbortSignal.timeout(env.ingestService.timeoutMs);
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': env.ingestService.apiKey!,
+    },
+    body: JSON.stringify({ url }),
+    signal: timeoutSignal,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`Ingest service responded ${response.status}: ${errorText || response.statusText}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Ingest service returned empty body');
+  }
+
+  await pipeline(Readable.fromWeb(response.body as any), createWriteStream(outputPath));
+
+  const metadataHeader = response.headers.get('x-clipify-metadata');
+  if (metadataHeader) {
+    try {
+      const parsed = JSON.parse(Buffer.from(metadataHeader, 'base64').toString('utf8')) as VideoMetadata;
+      parsed.url = url;
+      return parsed;
+    } catch (error: any) {
+      logger.warn({ error: error?.message }, 'Failed to parse ingest service metadata header');
+    }
+  }
+
+  const metadata = await extractMetadata(outputPath);
+  metadata.url = url;
+  return metadata;
 }
 
 /**
