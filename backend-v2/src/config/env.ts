@@ -58,6 +58,7 @@ const envSchema = z.object({
   YTDLP_COOKIES_B64: z.string().optional(),
   YTDLP_VISITOR_DATA: z.string().optional(),
   YTDLP_PO_TOKEN: z.string().optional(),
+  YTDLP_PROXY_URL: z.string().url().optional(),
   INGEST_SERVICE_URL: z.string().url().optional(),
   INGEST_SERVICE_API_KEY: z.string().min(1).optional(),
   INGEST_SERVICE_TIMEOUT_MS: z.string().default('300000'),
@@ -173,6 +174,7 @@ export const env = {
     cookiesBase64: parsed.data.YTDLP_COOKIES_B64,
     visitorData: parsed.data.YTDLP_VISITOR_DATA,
     poToken: parsed.data.YTDLP_PO_TOKEN,
+    proxyUrl: parsed.data.YTDLP_PROXY_URL,
   },
   ingestService: {
     url: parsed.data.INGEST_SERVICE_URL,

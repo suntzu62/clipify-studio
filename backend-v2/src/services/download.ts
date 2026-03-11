@@ -37,6 +37,22 @@ interface DownloadResult {
   metadata: VideoMetadata;
 }
 
+function createYtdlDownloadAgent() {
+  if (!env.ytdlp.proxyUrl) {
+    return undefined;
+  }
+
+  try {
+    return ytdl.createProxyAgent({ uri: env.ytdlp.proxyUrl });
+  } catch (error: any) {
+    logger.warn(
+      { error: error?.message, proxyUrl: env.ytdlp.proxyUrl },
+      'Failed to create ytdl proxy agent, continuing without proxy'
+    );
+    return undefined;
+  }
+}
+
 async function prepareYtDlpCookiesFile(): Promise<string | null> {
   const encoded = env.ytdlp.cookiesBase64?.trim();
   if (!encoded) return null;
@@ -312,7 +328,8 @@ async function downloadWithIngestService(url: string, outputPath: string): Promi
 async function downloadWithYtdl(url: string, outputPath: string): Promise<VideoMetadata> {
   logger.info({ url, outputPath }, 'Downloading with ytdl-core (separate streams)');
 
-  const info = await ytdl.getInfo(url);
+  const agent = createYtdlDownloadAgent();
+  const info = await ytdl.getInfo(url, agent ? { agent } : undefined);
 
   // Selecionar melhor video-only e audio-only (DASH = máxima qualidade)
   const videoFormat = ytdl.chooseFormat(info.formats, {
@@ -338,8 +355,8 @@ async function downloadWithYtdl(url: string, outputPath: string): Promise<VideoM
   const audioTmp = outputPath.replace('.mp4', '-audio.mp4');
 
   await Promise.all([
-    pipeline(ytdl(url, { format: videoFormat }), createWriteStream(videoTmp)),
-    pipeline(ytdl(url, { format: audioFormat }), createWriteStream(audioTmp)),
+    pipeline(ytdl(url, { format: videoFormat, ...(agent ? { agent } : {}) }), createWriteStream(videoTmp)),
+    pipeline(ytdl(url, { format: audioFormat, ...(agent ? { agent } : {}) }), createWriteStream(audioTmp)),
   ]);
 
   logger.info('Video and audio streams downloaded, merging with FFmpeg');
@@ -410,6 +427,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       extractorArgs: buildYtDlpExtractorArgs(),
       output: outputTemplate,
       print: 'after_move:filepath',
+      ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
       ...(cookiesPath ? { cookies: cookiesPath } : {}),
     } as any, {
       timeout: 600000, // 10 minutos para downloads maiores
@@ -537,6 +555,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
         dumpSingleJson: true,
         noPlaylist: true,
         extractorArgs: buildYtDlpExtractorArgs(),
+        ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
         ...(cookiesPath ? { cookies: cookiesPath } : {}),
       } as any) as any;
 
@@ -558,7 +577,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
 
     if (requiresAuth && !env.ytdlp.cookiesBase64 && !(env.ytdlp.visitorData && env.ytdlp.poToken)) {
       throw new VideoDownloadError(
-        'yt-dlp bloqueado pelo YouTube. Configure YTDLP_COOKIES_B64 ou o par YTDLP_VISITOR_DATA + YTDLP_PO_TOKEN.',
+        'yt-dlp bloqueado pelo YouTube. Configure YTDLP_PROXY_URL, YTDLP_COOKIES_B64 ou o par YTDLP_VISITOR_DATA + YTDLP_PO_TOKEN.',
         error
       );
     }
