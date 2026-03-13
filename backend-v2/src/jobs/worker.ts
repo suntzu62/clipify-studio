@@ -25,7 +25,10 @@ export const worker = new Worker<JobData, JobResult>(
   },
   {
     connection,
-    concurrency: 2, // Processar 2 vídeos simultaneamente
+    concurrency: Math.max(1, env.worker.concurrency),
+    lockDuration: Math.max(30000, env.worker.lockDurationMs),
+    stalledInterval: Math.max(30000, env.worker.stalledIntervalMs),
+    maxStalledCount: Math.max(1, env.worker.maxStalledCount),
     limiter: {
       max: 10, // Máximo 10 jobs
       duration: 60000, // Por minuto
@@ -62,7 +65,15 @@ worker.on('error', (error) => {
   logger.error({ error: error.message }, 'Worker error');
 });
 
-logger.info({ concurrency: 2 }, 'Worker started');
+logger.info(
+  {
+    concurrency: Math.max(1, env.worker.concurrency),
+    lockDurationMs: Math.max(30000, env.worker.lockDurationMs),
+    stalledIntervalMs: Math.max(30000, env.worker.stalledIntervalMs),
+    maxStalledCount: Math.max(1, env.worker.maxStalledCount),
+  },
+  'Worker started'
+);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

@@ -62,6 +62,12 @@ const envSchema = z.object({
   INGEST_SERVICE_URL: z.string().url().optional(),
   INGEST_SERVICE_API_KEY: z.string().min(1).optional(),
   INGEST_SERVICE_TIMEOUT_MS: z.string().default('300000'),
+  WORKER_CONCURRENCY: z.string().default('1'),
+  WORKER_LOCK_DURATION_MS: z.string().default('900000'),
+  WORKER_STALLED_INTERVAL_MS: z.string().default('30000'),
+  WORKER_MAX_STALLED_COUNT: z.string().default('3'),
+  RENDER_BATCH_CONCURRENCY: z.string().default('1'),
+  RENDER_FFMPEG_THREADS: z.string().default('2'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -180,6 +186,16 @@ export const env = {
     url: parsed.data.INGEST_SERVICE_URL,
     apiKey: parsed.data.INGEST_SERVICE_API_KEY,
     timeoutMs: parseInt(parsed.data.INGEST_SERVICE_TIMEOUT_MS, 10),
+  },
+  worker: {
+    concurrency: parseInt(parsed.data.WORKER_CONCURRENCY, 10),
+    lockDurationMs: parseInt(parsed.data.WORKER_LOCK_DURATION_MS, 10),
+    stalledIntervalMs: parseInt(parsed.data.WORKER_STALLED_INTERVAL_MS, 10),
+    maxStalledCount: parseInt(parsed.data.WORKER_MAX_STALLED_COUNT, 10),
+  },
+  render: {
+    batchConcurrency: parseInt(parsed.data.RENDER_BATCH_CONCURRENCY, 10),
+    ffmpegThreads: parseInt(parsed.data.RENDER_FFMPEG_THREADS, 10),
   },
   logLevel: parsed.data.LOG_LEVEL,
 } as const;

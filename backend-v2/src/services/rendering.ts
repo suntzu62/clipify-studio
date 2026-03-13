@@ -3,6 +3,7 @@ import { join } from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import { createLogger } from '../config/logger.js';
+import { env } from '../config/env.js';
 import type { HighlightSegment, Transcript, Clip, SubtitlePreferences } from '../types/index.js';
 import { DEFAULT_SUBTITLE_PREFERENCES } from '../types/index.js';
 import { generateASS, adjustFontSize } from '../utils/subtitle-optimizer.js';
@@ -47,6 +48,14 @@ type RenderClipOptions = {
   subtitlePreferences: SubtitlePreferences;
 };
 
+const PRESET_PROFILE = {
+  ultrafast: { crf: '22', videoBitrate: '5M', maxrate: '6M', bufsize: '10M' },
+  superfast: { crf: '21', videoBitrate: '6M', maxrate: '8M', bufsize: '12M' },
+  veryfast: { crf: '20', videoBitrate: '7M', maxrate: '9M', bufsize: '14M' },
+  fast: { crf: '19', videoBitrate: '8M', maxrate: '10M', bufsize: '16M' },
+  medium: { crf: '18', videoBitrate: '10M', maxrate: '12M', bufsize: '20M' },
+} as const;
+
 /**
  * Renderiza múltiplos clipes a partir dos highlights
  */
@@ -83,8 +92,8 @@ export async function renderClips(
   const renderedClips: RenderedClip[] = [];
 
   try {
-    // Render clips with controlled concurrency (4 at a time) to avoid overloading CPU
-    const concurrency = 4;
+    // Keep concurrency conservative; shared instances can stall BullMQ lock renewal.
+    const concurrency = Math.max(1, env.render.batchConcurrency);
     logger.info({ totalClips: segments.length, concurrency }, 'Rendering clips with controlled concurrency');
 
     for (let i = 0; i < segments.length; i += concurrency) {
@@ -154,6 +163,7 @@ async function renderSingleClip(
 
   const videoOutputPath = join(outputDir, `${clipId}.mp4`);
   const thumbnailOutputPath = join(outputDir, `${clipId}.jpg`);
+  const encodeProfile = PRESET_PROFILE[options.preset] || PRESET_PROFILE.ultrafast;
 
   logger.info({ clipId, start, end, duration }, 'Rendering clip');
 
@@ -238,23 +248,19 @@ async function renderSingleClip(
           '-vf', vf,
           '-af', af,
           '-c:v', 'libx264',
-          '-preset', 'slow', // QUALIDADE MÁXIMA: slow preset para melhor compressão
-          '-tune', 'film', // Otimiza para conteúdo filmado (preserva detalhes)
-          '-threads', '8', // Mais threads para compensar preset slow
+          '-preset', options.preset,
+          '-threads', String(Math.max(1, env.render.ffmpegThreads)),
           '-profile:v', 'high',
-          '-level', '4.2', // Level 4.2 adequado para 1080p
+          '-level', '4.2',
           '-pix_fmt', 'yuv420p',
-          '-crf', '16', // CRF 16 = Qualidade excelente (ideal para 1080p)
-          '-b:v', '12M', // 12 Mbps ideal para 1080x1920 (alta qualidade)
-          '-maxrate', '15M', // Picos de qualidade
-          '-bufsize', '20M', // Buffer adequado
-          '-g', '60', // GOP maior = melhor qualidade em cenas estáticas
+          '-crf', encodeProfile.crf,
+          '-b:v', encodeProfile.videoBitrate,
+          '-maxrate', encodeProfile.maxrate,
+          '-bufsize', encodeProfile.bufsize,
+          '-g', '60',
           '-keyint_min', '30',
-          '-refs', '5', // Frames de referência
-          '-bf', '3', // B-frames para melhor compressão sem perda
-          '-x264-params', 'aq-mode=3:aq-strength=0.8', // Adaptive quantization para preservar detalhes
           '-c:a', 'aac',
-          '-b:a', '192k', // 192k áudio de alta qualidade
+          '-b:a', '160k',
           '-ac', '2',
           '-ar', '48000',
           '-movflags', '+faststart',

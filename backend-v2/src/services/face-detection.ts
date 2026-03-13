@@ -164,6 +164,8 @@ export async function detectFacesInClip(
       try {
         const faces = await detectFacesInImage(framePath);
         allFaces.push(...faces);
+        // Yield between frames so the worker can renew BullMQ locks on busy hosts.
+        await new Promise<void>((resolve) => setImmediate(resolve));
       } catch (error: any) {
         logger.warn({ framePath, error: error.message }, 'Face detection failed for frame');
       }
