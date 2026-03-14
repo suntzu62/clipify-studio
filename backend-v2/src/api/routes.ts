@@ -1636,6 +1636,16 @@ export async function registerRoutes(app: FastifyInstance) {
 
     try {
       const filePath = `clips/${jobId}/${filename}`;
+      const isImage = filename.endsWith('.jpg');
+      const contentType = isImage ? 'image/jpeg' : 'video/mp4';
+
+      const applyMediaHeaders = () => {
+        reply.header('Content-Type', contentType);
+        reply.header('Accept-Ranges', 'bytes');
+        reply.header('Cache-Control', 'public, max-age=31536000');
+        reply.header('Access-Control-Allow-Origin', '*');
+        reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+      };
 
       // Se Supabase não está configurado, servir do armazenamento local
       if (!supabaseClient) {
@@ -1646,22 +1656,46 @@ export async function registerRoutes(app: FastifyInstance) {
         const localPath = join(storagePath, filePath);
 
         try {
-          const fileBuffer = await fs.readFile(localPath);
+          const fileStats = await fs.stat(localPath);
+          const fileSize = fileStats.size;
 
-          // Set proper headers for video streaming
-          const contentType = filename.endsWith('.jpg') ? 'image/jpeg' : 'video/mp4';
-          reply.header('Content-Type', contentType);
-          reply.header('Accept-Ranges', 'bytes');
-          reply.header('Cache-Control', 'public, max-age=31536000');
-          reply.header('Access-Control-Allow-Origin', '*');
+          applyMediaHeaders();
 
           // If download parameter is present, force download
           if (download === 'true') {
             reply.header('Content-Disposition', `attachment; filename="${filename}"`);
           }
 
-          logger.info({ filePath, size: fileBuffer.length }, 'Video file sent successfully from local storage');
-          return reply.send(fileBuffer);
+          const rangeHeader = request.headers.range;
+          if (!isImage && rangeHeader) {
+            const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader);
+
+            if (!match) {
+              reply.header('Content-Range', `bytes */${fileSize}`);
+              return reply.status(416).send();
+            }
+
+            const start = match[1] ? Number.parseInt(match[1], 10) : 0;
+            const requestedEnd = match[2] ? Number.parseInt(match[2], 10) : fileSize - 1;
+            const end = Math.min(requestedEnd, fileSize - 1);
+
+            if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= fileSize) {
+              reply.header('Content-Range', `bytes */${fileSize}`);
+              return reply.status(416).send();
+            }
+
+            const chunkSize = end - start + 1;
+            reply.code(206);
+            reply.header('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+            reply.header('Content-Length', String(chunkSize));
+
+            logger.info({ filePath, start, end, chunkSize }, 'Streaming ranged media response from local storage');
+            return reply.send(createReadStream(localPath, { start, end }));
+          }
+
+          reply.header('Content-Length', String(fileSize));
+          logger.info({ filePath, size: fileSize }, 'Streaming full media file from local storage');
+          return reply.send(createReadStream(localPath));
         } catch (fileError: any) {
           logger.error({ error: fileError.message, localPath }, 'File not found in local storage');
           return reply.status(404).send({
@@ -1686,12 +1720,7 @@ export async function registerRoutes(app: FastifyInstance) {
         });
       }
 
-      // Set proper headers for video streaming
-      const contentType = filename.endsWith('.jpg') ? 'image/jpeg' : 'video/mp4';
-      reply.header('Content-Type', contentType);
-      reply.header('Accept-Ranges', 'bytes');
-      reply.header('Cache-Control', 'public, max-age=31536000');
-      reply.header('Access-Control-Allow-Origin', '*');
+      applyMediaHeaders();
 
       // If download parameter is present, force download
       if (download === 'true') {

@@ -241,9 +241,9 @@ export const ClipCard = ({ clip, index }: ClipCardProps) => {
           </div>
           <AspectRatio ratio={9/16}>
             {clip.previewUrl ? (
-              <Player url={clip.previewUrl} title={clip.title} />
+              <Player url={clip.previewUrl} title={clip.title} poster={clip.thumbnailUrl} />
             ) : clip.downloadUrl ? (
-              <Player url={clip.downloadUrl} title={clip.title} />
+              <Player url={clip.downloadUrl} title={clip.title} poster={clip.thumbnailUrl} />
             ) : (
               <div className="flex items-center justify-center h-full bg-gradient-to-br from-primary/10 to-primary/5">
                 <p className="text-sm text-muted-foreground">Vídeo não disponível</p>

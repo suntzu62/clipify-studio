@@ -94,6 +94,7 @@ export const ClipShortsModal = ({
                 <Player
                   url={clip.previewUrl || clip.downloadUrl || ''}
                   title={clip.title}
+                  poster={clip.thumbnailUrl}
                   className="w-full h-full"
                 />
               ) : (

@@ -27,6 +27,9 @@ const app = Fastify({
 // Security headers (HSTS, X-Frame-Options, X-Content-Type-Options, etc.)
 await app.register(helmet, {
   contentSecurityPolicy: false, // CSP handled via frontend meta tag
+  crossOriginResourcePolicy: {
+    policy: 'cross-origin',
+  },
 });
 
 // Rate limiting — protect against brute force and abuse

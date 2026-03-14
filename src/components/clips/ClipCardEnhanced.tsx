@@ -551,11 +551,13 @@ export const ClipCardEnhanced = ({ clip, index, jobId = '', apiKey = import.meta
                   {clip.previewUrl ? (
                     <Player
                       url={clip.previewUrl}
+                      poster={clip.thumbnailUrl}
                       className="w-full h-full"
                     />
                   ) : clip.downloadUrl ? (
                     <Player
                       url={clip.downloadUrl}
+                      poster={clip.thumbnailUrl}
                       className="w-full h-full"
                     />
                   ) : (

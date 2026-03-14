@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useMemo, useState } from 'react';
 
 interface OptimizedPlayerProps {
   url: string;
@@ -8,29 +8,23 @@ interface OptimizedPlayerProps {
   loop?: boolean;
   muted?: boolean;
   controls?: boolean;
+  poster?: string;
 }
 
-const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = false, muted = false, controls = true }: OptimizedPlayerProps) => {
-  // Debug: Log when player is rendered
-  console.log('[OptimizedPlayer] Rendering with:', { url, title, hasUrl: !!url });
+const OptimizedPlayer = memo(({
+  url,
+  title,
+  className,
+  playing = false,
+  loop = false,
+  muted = false,
+  controls = true,
+  poster,
+}: OptimizedPlayerProps) => {
+  const [hasError, setHasError] = useState(false);
+  const videoUrl = useMemo(() => url?.trim() || '', [url]);
 
-  // Test URL accessibility
-  if (url) {
-    fetch(url, { method: 'HEAD' })
-      .then(response => {
-        console.log('[OptimizedPlayer] URL accessibility test:', {
-          url,
-          status: response.status,
-          ok: response.ok,
-          headers: Object.fromEntries(response.headers.entries()),
-        });
-      })
-      .catch(error => {
-        console.error('[OptimizedPlayer] URL fetch test failed:', { url, error });
-      });
-  }
-
-  if (!url) {
+  if (!videoUrl) {
     return (
       <div className={`overflow-hidden ${className}`}>
         <div className="relative bg-gradient-to-br from-red-500/20 to-red-700/20 h-[300px] flex items-center justify-center">
@@ -43,35 +37,60 @@ const OptimizedPlayer = memo(({ url, title, className, playing = false, loop = f
     );
   }
 
+  if (hasError) {
+    return (
+      <div className={`overflow-hidden ${className}`}>
+        <div className="relative bg-gradient-to-br from-zinc-800 to-zinc-900 h-full flex items-center justify-center">
+          <div className="text-center text-white px-6">
+            <p className="text-lg font-semibold mb-2">Não foi possível reproduzir este clipe</p>
+            <a
+              href={videoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm text-primary underline underline-offset-4"
+            >
+              Abrir vídeo diretamente
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`w-full h-full overflow-hidden ${className}`}>
       <div className="relative w-full h-full bg-black video-player-container">
-        {/* HTML5 Video Player com controles customizados - sem cortes, qualidade profissional */}
         <video
-          src={url}
+          key={videoUrl}
+          src={videoUrl}
+          poster={poster}
           controls={controls}
           autoPlay={playing}
           loop={loop}
           muted={muted}
           playsInline
           crossOrigin="anonymous"
+          preload="metadata"
           className="w-full h-full video-enhanced-controls object-contain"
           onError={(e) => {
+            setHasError(true);
             console.error('[OptimizedPlayer] Video load error:', {
-              url,
+              url: videoUrl,
               error: e,
               currentTarget: e.currentTarget,
               networkState: e.currentTarget.networkState,
               readyState: e.currentTarget.readyState,
             });
           }}
-          onLoadStart={() => console.log('[OptimizedPlayer] Video load started:', url)}
-          onLoadedData={() => console.log('[OptimizedPlayer] Video data loaded:', url)}
+          onLoadStart={() => {
+            setHasError(false);
+            console.log('[OptimizedPlayer] Video load started:', videoUrl);
+          }}
+          onLoadedData={() => console.log('[OptimizedPlayer] Video data loaded:', videoUrl)}
         >
           Seu navegador não suporta reprodução de vídeo.
         </video>
 
-        {/* Estilos inline para garantir que o vídeo não receba blur */}
         <style>{`
           /* Remover qualquer overlay ou escurecimento no hover */
           .video-player-container::before,

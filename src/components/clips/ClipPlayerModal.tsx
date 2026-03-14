@@ -126,6 +126,7 @@ export const ClipPlayerModal = ({
               {(clip.previewUrl || clip.downloadUrl) ? (
                 <Player
                   url={clip.previewUrl || clip.downloadUrl || ''}
+                  poster={clip.thumbnailUrl}
                   className="absolute inset-0 w-full h-full"
                 />
               ) : (
