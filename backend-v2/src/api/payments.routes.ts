@@ -1,8 +1,10 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import crypto from 'crypto';
 import { authenticateJWT, optionalAuth } from '../middleware/auth.middleware.js';
 import { createLogger } from '../config/logger.js';
 import { env } from '../config/env.js';
+import { buildFrontendAppUrl } from '../utils/frontend-url.js';
 import * as mp from '../services/mercadopago.service.js';
 
 const logger = createLogger('payments-routes');
@@ -448,11 +450,50 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
 
       logger.info({ type: body.type, action: body.action }, 'Webhook recebido');
 
-      // Verificar assinatura do webhook (opcional mas recomendado)
-      // const signature = request.headers['x-signature'];
-      // if (env.mercadoPago.webhookSecret && signature) {
-      //   // Validar assinatura
-      // }
+      // Validate MercadoPago webhook signature
+      if (env.mercadoPago.webhookSecret) {
+        const xSignature = request.headers['x-signature'] as string | undefined;
+        const xRequestId = request.headers['x-request-id'] as string | undefined;
+
+        if (!xSignature || !xRequestId) {
+          logger.warn('Webhook rejected: missing x-signature or x-request-id headers');
+          return reply.status(401).send({ error: 'Missing signature headers' });
+        }
+
+        // Parse x-signature header: "ts=...,v1=..."
+        const parts = Object.fromEntries(
+          xSignature.split(',').map((part) => {
+            const [key, ...rest] = part.trim().split('=');
+            return [key, rest.join('=')];
+          })
+        );
+
+        const ts = parts['ts'];
+        const v1 = parts['v1'];
+
+        if (!ts || !v1) {
+          logger.warn('Webhook rejected: malformed x-signature header');
+          return reply.status(401).send({ error: 'Malformed signature' });
+        }
+
+        // Build the manifest string per MercadoPago docs
+        const dataId = (request.query as any)?.['data.id'] || body?.data?.id || '';
+        const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
+
+        const hmac = crypto
+          .createHmac('sha256', env.mercadoPago.webhookSecret)
+          .update(manifest)
+          .digest('hex');
+
+        if (hmac !== v1) {
+          logger.warn({ expected: hmac, received: v1 }, 'Webhook rejected: invalid signature');
+          return reply.status(401).send({ error: 'Invalid signature' });
+        }
+
+        logger.info('Webhook signature validated successfully');
+      } else {
+        logger.warn('MERCADOPAGO_WEBHOOK_SECRET not configured — skipping signature validation');
+      }
 
       const result = await mp.handleWebhook(body);
 
@@ -474,18 +515,14 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     logger.info({ query }, 'Pagamento sucesso - redirect');
 
     // Redirecionar para frontend com status de sucesso
-    const frontendUrl = env.isDevelopment ? 'http://localhost:8080' : env.baseUrl;
-    const redirectUrl = new URL('/billing', frontendUrl);
-    redirectUrl.searchParams.set('payment_status', 'success');
-
-    if (query.subscription_id) {
-      redirectUrl.searchParams.set('subscription_id', query.subscription_id);
-    }
-    if (query.payment_id) {
-      redirectUrl.searchParams.set('payment_id', query.payment_id);
-    }
-
-    return reply.redirect(redirectUrl.toString());
+    const frontendUrl = env.frontendUrl;
+    return reply.redirect(
+      buildFrontendAppUrl(frontendUrl, '/billing', {
+        payment_status: 'success',
+        subscription_id: query.subscription_id,
+        payment_id: query.payment_id,
+      })
+    );
   });
 
   app.get('/payments/failure', async (request, reply) => {
@@ -493,15 +530,13 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
 
     logger.info({ query }, 'Pagamento falhou - redirect');
 
-    const frontendUrl = env.isDevelopment ? 'http://localhost:8080' : env.baseUrl;
-    const redirectUrl = new URL('/billing', frontendUrl);
-    redirectUrl.searchParams.set('payment_status', 'failure');
-
-    if (query.subscription_id) {
-      redirectUrl.searchParams.set('subscription_id', query.subscription_id);
-    }
-
-    return reply.redirect(redirectUrl.toString());
+    const frontendUrl = env.frontendUrl;
+    return reply.redirect(
+      buildFrontendAppUrl(frontendUrl, '/billing', {
+        payment_status: 'failure',
+        subscription_id: query.subscription_id,
+      })
+    );
   });
 
   app.get('/payments/pending', async (request, reply) => {
@@ -509,15 +544,13 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
 
     logger.info({ query }, 'Pagamento pendente - redirect');
 
-    const frontendUrl = env.isDevelopment ? 'http://localhost:8080' : env.baseUrl;
-    const redirectUrl = new URL('/billing', frontendUrl);
-    redirectUrl.searchParams.set('payment_status', 'pending');
-
-    if (query.subscription_id) {
-      redirectUrl.searchParams.set('subscription_id', query.subscription_id);
-    }
-
-    return reply.redirect(redirectUrl.toString());
+    const frontendUrl = env.frontendUrl;
+    return reply.redirect(
+      buildFrontendAppUrl(frontendUrl, '/billing', {
+        payment_status: 'pending',
+        subscription_id: query.subscription_id,
+      })
+    );
   });
 
   // ============================================

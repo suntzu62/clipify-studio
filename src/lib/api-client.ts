@@ -1,5 +1,5 @@
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-const API_KEY = import.meta.env.VITE_API_KEY || '93560857g';
+const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 async function request<T = any>(method: string, path: string, body?: any): Promise<T> {
   const headers: Record<string, string> = {

@@ -61,7 +61,7 @@ function jobToProject(job: Job, userId: string): Project {
 }
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-const API_KEY = import.meta.env.VITE_API_KEY || '93560857g';
+const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 function normalizeProjectStatus(status: string | null | undefined): string {
   const value = (status || '').toLowerCase();

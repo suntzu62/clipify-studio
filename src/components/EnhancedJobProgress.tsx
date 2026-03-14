@@ -8,6 +8,7 @@ import { CheckCircle, Clock, AlertCircle, Loader2, Youtube, Upload } from 'lucid
 import { supabase } from '@/integrations/supabase/client';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 interface JobStep {
   id: string;
@@ -79,6 +80,7 @@ export function EnhancedJobProgress({
   error,
   className 
 }: EnhancedJobProgressProps) {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [hasYouTubeConnected, setHasYouTubeConnected] = useState(false);
   
@@ -247,7 +249,7 @@ export function EnhancedJobProgress({
                   <p>Mesmo com autenticação, este vídeo não pôde ser baixado.</p>
                   <p className="font-semibold">Solução alternativa: Faça upload do arquivo MP4 diretamente.</p>
                   <Button 
-                    onClick={() => window.location.href = '/projects'}
+                    onClick={() => navigate('/projects')}
                     variant="default"
                     className="mt-2"
                   >

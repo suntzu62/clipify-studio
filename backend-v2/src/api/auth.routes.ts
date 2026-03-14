@@ -5,6 +5,7 @@ import { getUserSettings, upsertUserSettings } from '../services/user-settings.s
 import { authenticateJWT } from '../middleware/auth.middleware.js';
 import { createLogger } from '../config/logger.js';
 import { env } from '../config/env.js';
+import { buildFrontendAppUrl } from '../utils/frontend-url.js';
 
 const logger = createLogger('auth-routes');
 
@@ -378,19 +379,16 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       });
 
       // Redirecionar para frontend sem tokens na URL (mais seguro)
-      const frontendUrl = env.frontendUrl;
-      const redirectUrl = new URL('/dashboard', frontendUrl);
-
-      return reply.redirect(redirectUrl.toString());
+      return reply.redirect(buildFrontendAppUrl(env.frontendUrl, '/dashboard'));
     } catch (error: any) {
       logger.error({ error }, 'Google OAuth callback failed');
 
       // Redirecionar para login com erro
-      const frontendUrl = env.frontendUrl;
-      const errorUrl = new URL('/auth/login', frontendUrl);
-      errorUrl.searchParams.set('error', 'google_oauth_failed');
-
-      return reply.redirect(errorUrl.toString());
+      return reply.redirect(
+        buildFrontendAppUrl(env.frontendUrl, '/auth/login', {
+          error: 'google_oauth_failed',
+        })
+      );
     }
   });
 }

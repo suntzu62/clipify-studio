@@ -25,7 +25,7 @@ interface ClipCardEnhancedProps {
   apiKey?: string;
 }
 
-export const ClipCardEnhanced = ({ clip, index, jobId = '', apiKey = '93560857g' }: ClipCardEnhancedProps) => {
+export const ClipCardEnhanced = ({ clip, index, jobId = '', apiKey = import.meta.env.VITE_API_KEY || '' }: ClipCardEnhancedProps) => {
   const [showPlayer, setShowPlayer] = useState(false);
   const [showSubtitleCustomizer, setShowSubtitleCustomizer] = useState(false);
   const [loadingPreferences, setLoadingPreferences] = useState(false);

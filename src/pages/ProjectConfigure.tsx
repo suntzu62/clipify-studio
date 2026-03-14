@@ -272,6 +272,7 @@ export default function ProjectConfigure() {
   const [processing, setProcessing] = useState(false);
   const [config, setConfig] = useState<ProjectConfig | null>(null);
   const [selectedPreset, setSelectedPreset] = useState('viral');
+  const [aspectRatio, setAspectRatio] = useState<'9:16' | '1:1' | '4:5' | '16:9'>('9:16');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const updateSubtitlePreference = useCallback(
@@ -308,7 +309,7 @@ export default function ProjectConfigure() {
     const loadTempConfig = async () => {
       try {
         const baseUrl = getBackendUrl();
-        const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
+        const apiKey = import.meta.env.VITE_API_KEY || '';
         const response = await fetchWithTimeout(`${baseUrl}/jobs/temp/${tempId}`, {
           headers: { 'X-API-Key': apiKey },
         }, 20000);
@@ -351,7 +352,7 @@ export default function ProjectConfigure() {
     setProcessing(true);
     try {
       const baseUrl = getBackendUrl();
-      const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
+      const apiKey = import.meta.env.VITE_API_KEY || '';
       const requestBody = {
         clipSettings: config.clipSettings,
         subtitlePreferences: config.subtitlePreferences,
@@ -501,7 +502,7 @@ export default function ProjectConfigure() {
       {/* ── Main content: split layout ────────────────────── */}
       <main className="mx-auto max-w-7xl px-4 sm:px-6 py-6 lg:py-10">
         <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] xl:grid-cols-[420px_1fr] gap-8 lg:gap-12">
-          {/* ── LEFT: Phone preview ───────────────────────── */}
+          {/* ── LEFT: Video preview ──────────────────────── */}
           <div className="flex flex-col items-center lg:sticky lg:top-20 lg:self-start">
             {/* Ambient glow */}
             <motion.div
@@ -510,23 +511,68 @@ export default function ProjectConfigure() {
               animate={{ opacity: 1 }}
               transition={{ duration: 0.6 }}
               className={cn(
-                'absolute -z-10 w-[340px] h-[500px] rounded-full blur-[120px] opacity-30',
+                'absolute -z-10 w-[340px] h-[400px] rounded-full blur-[120px] opacity-30',
                 `bg-gradient-to-br ${activePreset.gradient}`,
               )}
             />
 
-            {/* Phone frame */}
+            {/* Aspect ratio selector */}
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+              className="flex items-center gap-1.5 mb-4 p-1 rounded-lg bg-white/[0.04] border border-white/[0.06]"
+            >
+              {(
+                [
+                  { value: '9:16', label: '9:16', w: 9, h: 14 },
+                  { value: '1:1', label: '1:1', w: 12, h: 12 },
+                  { value: '4:5', label: '4:5', w: 10, h: 12 },
+                  { value: '16:9', label: '16:9', w: 14, h: 9 },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setAspectRatio(opt.value)}
+                  className={cn(
+                    'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all',
+                    aspectRatio === opt.value
+                      ? 'bg-white/[0.1] text-white/90'
+                      : 'text-white/35 hover:text-white/60',
+                  )}
+                >
+                  {/* Mini aspect ratio icon */}
+                  <div
+                    className={cn(
+                      'border rounded-[2px] transition-colors',
+                      aspectRatio === opt.value ? 'border-white/50' : 'border-white/20',
+                    )}
+                    style={{ width: opt.w, height: opt.h }}
+                  />
+                  {opt.label}
+                </button>
+              ))}
+            </motion.div>
+
+            {/* Video preview frame */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.1 }}
-              className="relative"
+              className="relative w-full flex justify-center"
             >
-              <div className="relative h-[520px] w-[260px] sm:h-[560px] sm:w-[280px] rounded-[36px] border-2 border-white/[0.08] bg-black shadow-2xl shadow-black/60 overflow-hidden">
-                {/* Notch */}
-                <div className="absolute left-1/2 top-2.5 z-30 h-[5px] w-16 -translate-x-1/2 rounded-full bg-white/[0.06]" />
-
-                {/* Video thumbnail / embed */}
+              <motion.div
+                layout
+                transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+                className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-black shadow-2xl shadow-black/60"
+                style={{
+                  aspectRatio: aspectRatio === '9:16' ? '9/16' : aspectRatio === '1:1' ? '1/1' : aspectRatio === '4:5' ? '4/5' : '16/9',
+                  width: aspectRatio === '9:16' ? '260px' : aspectRatio === '1:1' ? '320px' : aspectRatio === '4:5' ? '300px' : '380px',
+                  maxWidth: '100%',
+                }}
+              >
+                {/* Video thumbnail */}
                 <div className="absolute inset-0 z-0">
                   {youtubeId ? (
                     <img
@@ -534,7 +580,6 @@ export default function ProjectConfigure() {
                       alt=""
                       className="h-full w-full object-cover"
                       onError={(e) => {
-                        // Fallback to hqdefault if maxresdefault doesn't exist
                         const img = e.target as HTMLImageElement;
                         if (img.src.includes('maxresdefault')) {
                           img.src = `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`;
@@ -544,17 +589,27 @@ export default function ProjectConfigure() {
                   ) : (
                     <div className="h-full w-full bg-gradient-to-b from-[#1a1a2e] via-[#16162a] to-[#0a0a14]" />
                   )}
-                  {/* Dark overlay for readability */}
-                  <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
+                  {/* Dark overlay for subtitle readability */}
+                  <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/50" />
+                </div>
+
+                {/* LOW-RES PREVIEW badge */}
+                <div className="absolute top-3 left-3 z-20 px-2 py-0.5 rounded bg-black/60 text-[9px] font-medium text-white/50 tracking-wider uppercase">
+                  Preview
+                </div>
+
+                {/* Aspect ratio badge */}
+                <div className="absolute top-3 right-3 z-20 px-2 py-0.5 rounded bg-black/60 text-[9px] font-medium text-white/50 tracking-wider">
+                  {aspectRatio}
                 </div>
 
                 {/* Subtitle preview overlay */}
                 <div
                   className="absolute left-4 right-4 z-10 flex justify-center"
                   style={{
-                    ...(sp.position === 'top' && { top: '60px' }),
+                    ...(sp.position === 'top' && { top: '12%' }),
                     ...(sp.position === 'center' && { top: '50%', transform: 'translateY(-50%)' }),
-                    ...((sp.position === 'bottom' || !sp.position) && { bottom: '40px' }),
+                    ...((sp.position === 'bottom' || !sp.position) && { bottom: '8%' }),
                   }}
                 >
                   <AnimatedWords
@@ -563,10 +618,7 @@ export default function ProjectConfigure() {
                     style={previewSubtitleStyle}
                   />
                 </div>
-
-                {/* Home indicator */}
-                <div className="absolute bottom-2.5 left-1/2 z-30 h-[4px] w-12 -translate-x-1/2 rounded-full bg-white/[0.1]" />
-              </div>
+              </motion.div>
             </motion.div>
 
             {/* Video info */}
@@ -575,7 +627,7 @@ export default function ProjectConfigure() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.4 }}
-                className="mt-4 text-center text-[11px] text-white/20 max-w-[260px] leading-relaxed"
+                className="mt-4 text-center text-[11px] text-white/20 max-w-[300px] leading-relaxed"
               >
                 Ao continuar, voce confirma que este e seu conteudo original.
               </motion.p>

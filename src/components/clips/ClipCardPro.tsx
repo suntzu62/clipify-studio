@@ -73,7 +73,7 @@ export const ClipCardPro = ({
   clip,
   index,
   jobId = '',
-  apiKey = '93560857g',
+  apiKey = import.meta.env.VITE_API_KEY || '',
   totalClips = 1,
   onOpenPlayer,
 }: ClipCardProProps) => {

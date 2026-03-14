@@ -149,7 +149,7 @@ export default function ProjectDetail() {
 
       try {
         const baseUrl = getBackendUrl();
-        const apiKey = import.meta.env.VITE_API_KEY || '93560857g';
+        const apiKey = import.meta.env.VITE_API_KEY || '';
 
         const response = await fetch(`${baseUrl}/jobs/${id}`, {
           headers: { 'X-API-Key': apiKey },
@@ -395,7 +395,7 @@ export default function ProjectDetail() {
                 clip={clip}
                 index={index}
                 jobId={id}
-                apiKey="93560857g"
+                apiKey={import.meta.env.VITE_API_KEY || ''}
                 totalClips={clips.length}
                 onOpenPlayer={(i) => setPlayerClipIndex(i)}
               />
@@ -410,7 +410,7 @@ export default function ProjectDetail() {
             onOpenChange={(open) => { if (!open) setPlayerClipIndex(null); }}
             onNavigate={setPlayerClipIndex}
             jobId={id || ''}
-            apiKey="93560857g"
+            apiKey={import.meta.env.VITE_API_KEY || ''}
           />
 
           {/* Debug in dev */}
@@ -733,7 +733,7 @@ export default function ProjectDetail() {
               </div>
               <div className="grid grid-cols-1 gap-4">
                 {clips.filter(c => c.status === 'ready').slice(0, 3).map((clip, index) => (
-                  <ClipCard key={clip.id} clip={clip} index={index} jobId={id} apiKey="93560857g" />
+                  <ClipCard key={clip.id} clip={clip} index={index} jobId={id} apiKey={import.meta.env.VITE_API_KEY || ''} />
                 ))}
               </div>
             </div>

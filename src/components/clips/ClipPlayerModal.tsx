@@ -75,7 +75,7 @@ export const ClipPlayerModal = ({
   onOpenChange,
   onNavigate,
   jobId,
-  apiKey = '93560857g',
+  apiKey = import.meta.env.VITE_API_KEY || '',
 }: ClipPlayerModalProps) => {
   const clip = clips[currentIndex];
   const viralIntel = clip?.viralIntel;

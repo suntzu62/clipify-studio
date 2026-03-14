@@ -22,29 +22,15 @@ const Callback = () => {
       return;
     }
 
-    if (accessToken && refreshToken) {
-      // Salvar tokens no localStorage
-      localStorage.setItem('access_token', accessToken);
-      localStorage.setItem('refresh_token', refreshToken);
-
+    // Auth tokens are handled via httpOnly cookies set by the backend.
+    // Never store tokens in localStorage (XSS risk).
+    if (success === 'true' || (accessToken && refreshToken)) {
       toast({
         title: 'Login realizado com sucesso!',
         description: 'Bem-vindo ao Cortaí',
       });
 
-      // Redirecionar para dashboard e recarregar para atualizar o AuthContext
-      window.location.href = '/dashboard';
-      return;
-    }
-
-    // Novo fluxo: backend salva tokens em cookies httpOnly e envia apenas success=true
-    if (success === 'true') {
-      toast({
-        title: 'Login realizado com sucesso!',
-        description: 'Bem-vindo ao Cortaí',
-      });
-
-      window.location.href = '/dashboard';
+      navigate('/dashboard', { replace: true });
       return;
     } else {
       toast({
