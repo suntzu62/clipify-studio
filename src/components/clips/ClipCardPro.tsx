@@ -35,17 +35,24 @@ interface ClipCardProProps {
 
 // Score color helpers
 const getScoreColor = (score: number) => {
-  if (score >= 90) return 'text-green-400';
+  if (score >= 90) return 'text-emerald-400';
   if (score >= 80) return 'text-blue-400';
-  if (score >= 70) return 'text-yellow-400';
-  return 'text-gray-400';
+  if (score >= 70) return 'text-amber-400';
+  return 'text-zinc-400';
 };
 
-const getScoreBg = (score: number) => {
-  if (score >= 90) return 'from-green-500/20 to-green-500/5 border-green-500/30';
-  if (score >= 80) return 'from-blue-500/20 to-blue-500/5 border-blue-500/30';
-  if (score >= 70) return 'from-yellow-500/20 to-yellow-500/5 border-yellow-500/30';
-  return 'from-gray-500/20 to-gray-500/5 border-gray-500/30';
+const getScoreRingColor = (score: number) => {
+  if (score >= 90) return 'stroke-emerald-400';
+  if (score >= 80) return 'stroke-blue-400';
+  if (score >= 70) return 'stroke-amber-400';
+  return 'stroke-zinc-500';
+};
+
+const getScoreGlow = (score: number) => {
+  if (score >= 90) return 'shadow-emerald-500/25';
+  if (score >= 80) return 'shadow-blue-500/20';
+  if (score >= 70) return 'shadow-amber-500/15';
+  return '';
 };
 
 const getScoreLabel = (score: number) => {
@@ -53,6 +60,59 @@ const getScoreLabel = (score: number) => {
   if (score >= 80) return 'Excelente';
   if (score >= 70) return 'Bom';
   return 'Medio';
+};
+
+const getScoreBadgeBg = (score: number) => {
+  if (score >= 90) return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+  if (score >= 80) return 'bg-blue-500/15 text-blue-400 border-blue-500/30';
+  if (score >= 70) return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+  return 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30';
+};
+
+// Keep these for the modals
+const getScoreBg = (score: number) => {
+  if (score >= 90) return 'from-emerald-500/20 to-emerald-500/5 border-emerald-500/30';
+  if (score >= 80) return 'from-blue-500/20 to-blue-500/5 border-blue-500/30';
+  if (score >= 70) return 'from-amber-500/20 to-amber-500/5 border-amber-500/30';
+  return 'from-zinc-500/20 to-zinc-500/5 border-zinc-500/30';
+};
+
+// Score Ring SVG component
+const ScoreRing = ({ score, size = 56 }: { score: number; size?: number }) => {
+  const strokeWidth = 3.5;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const progress = (score / 100) * circumference;
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="rotate-[-90deg]">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          className="stroke-white/[0.06]"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${progress} ${circumference}`}
+          strokeLinecap="round"
+          className={cn("transition-all duration-700", getScoreRingColor(score))}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className={cn("text-lg font-black leading-none", getScoreColor(score))}>
+          {score}
+        </span>
+      </div>
+    </div>
+  );
 };
 
 // Platform icons (compact)
@@ -109,10 +169,6 @@ export const ClipCardPro = ({
 
   if (!viralIntel) return null;
 
-  const bestPlatform = viralIntel.platformPredictions.find(
-    p => p.platform === viralIntel.recommendedPlatform
-  );
-
   const formatDuration = (s: number) => {
     const mins = Math.floor(s / 60);
     const secs = Math.round(s % 60);
@@ -121,152 +177,152 @@ export const ClipCardPro = ({
 
   return (
     <TooltipProvider>
-      {/* ========== COMPACT HORIZONTAL CARD ========== */}
-      <Card className="group overflow-hidden bg-[#12121a] border border-white/10 hover:border-primary/50 transition-all duration-200 hover:shadow-xl hover:shadow-primary/5">
+      {/* ========== VERTICAL CARD ========== */}
+      <Card className="group overflow-hidden bg-zinc-950/80 border border-white/[0.06] hover:border-white/[0.12] transition-all duration-300 rounded-xl hover:shadow-2xl hover:shadow-black/40">
         <CardContent className="p-0">
-          <div className="flex flex-row h-[220px]">
-            {/* Left: Thumbnail */}
-            <div
-              className="relative w-[130px] flex-shrink-0 cursor-pointer overflow-hidden bg-black"
-              onClick={openPlayer}
-            >
-              {clip.thumbnailUrl ? (
-                <img
-                  src={clip.thumbnailUrl}
-                  alt={clip.title}
-                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                />
-              ) : (
-                <div className="w-full h-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                  <Play className="w-8 h-8 text-white/50" />
-                </div>
-              )}
-
-              {/* Play overlay on hover */}
-              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <div className="w-12 h-12 bg-white/90 rounded-full flex items-center justify-center shadow-lg">
-                  <Play className="w-6 h-6 text-primary ml-0.5" />
-                </div>
+          {/* Thumbnail area - taller, vertical feel */}
+          <div
+            className="relative aspect-video cursor-pointer overflow-hidden bg-zinc-900"
+            onClick={openPlayer}
+          >
+            {clip.thumbnailUrl ? (
+              <img
+                src={clip.thumbnailUrl}
+                alt={clip.title}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-primary/10 via-zinc-900 to-zinc-950 flex items-center justify-center">
+                <Play className="w-10 h-10 text-white/20" />
               </div>
+            )}
 
-              {/* Score badge at bottom of thumbnail */}
-              <div className="absolute bottom-0 left-0 right-0 p-2">
-                <div className={cn(
-                  "flex items-center justify-center gap-1.5 py-1.5 rounded-lg border backdrop-blur-xl bg-gradient-to-r",
-                  getScoreBg(viralIntel.overallScore)
-                )}>
-                  <span className={cn("text-xl font-black", getScoreColor(viralIntel.overallScore))}>
-                    {viralIntel.overallScore}
-                  </span>
-                  <span className={cn("text-[10px] font-bold uppercase", getScoreColor(viralIntel.overallScore))}>
-                    {getScoreLabel(viralIntel.overallScore)}
-                  </span>
-                </div>
-              </div>
+            {/* Gradient overlay */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
 
-              {/* Duration pill */}
-              <div className="absolute top-2 right-2">
-                <span className="text-[10px] font-semibold bg-black/70 text-white px-1.5 py-0.5 rounded backdrop-blur-sm">
-                  {formatDuration(clip.duration)}
-                </span>
+            {/* Play overlay on hover */}
+            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center">
+              <div className="w-14 h-14 bg-white/95 rounded-full flex items-center justify-center shadow-2xl shadow-black/50 scale-90 group-hover:scale-100 transition-transform duration-300">
+                <Play className="w-6 h-6 text-zinc-900 ml-0.5" />
               </div>
             </div>
 
-            {/* Right: Content */}
-            <div className="flex-1 flex flex-col justify-between p-3 min-w-0">
-              {/* Top: Title + Ranking */}
-              <div>
-                <div className="flex items-start gap-2 mb-1.5">
-                  <h3 className="font-bold text-sm leading-tight line-clamp-2 flex-1 text-white">
-                    {clip.title}
-                  </h3>
-                  {viralIntel.ranking && (
-                    <Badge variant="outline" className="shrink-0 text-[10px] px-1.5 py-0 border-white/20 text-white/60">
-                      #{viralIntel.ranking.position}
-                    </Badge>
-                  )}
-                </div>
+            {/* Top bar: Ranking + Duration */}
+            <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
+              {viralIntel.ranking && (
+                <span className="text-[11px] font-bold bg-black/60 text-white/80 px-2 py-0.5 rounded-md backdrop-blur-sm">
+                  #{viralIntel.ranking.position}
+                </span>
+              )}
+              <span className="text-[11px] font-medium bg-black/60 text-white/80 px-2 py-0.5 rounded-md backdrop-blur-sm flex items-center gap-1 ml-auto">
+                <Clock className="w-3 h-3" />
+                {formatDuration(clip.duration)}
+              </span>
+            </div>
 
-                {/* Description (1 line) */}
-                <p className="text-xs text-white/40 line-clamp-1 mb-2">
+            {/* Bottom: Score label overlay */}
+            <div className="absolute bottom-3 left-3">
+              <Badge className={cn("text-[10px] font-bold uppercase border backdrop-blur-md", getScoreBadgeBg(viralIntel.overallScore))}>
+                {getScoreLabel(viralIntel.overallScore)}
+              </Badge>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="p-4 space-y-3">
+            {/* Title row with score ring */}
+            <div className="flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-[13px] leading-snug text-white line-clamp-2 mb-1">
+                  {clip.title}
+                </h3>
+                <p className="text-[11px] text-white/35 line-clamp-1">
                   {clip.description}
                 </p>
               </div>
-
-              {/* Middle: Platform mini-scores */}
-              <div className="flex gap-1.5 mb-2">
-                {viralIntel.platformPredictions.map((pred) => (
-                  <Tooltip key={pred.platform}>
-                    <TooltipTrigger asChild>
-                      <div className={cn(
-                        "flex items-center gap-1 px-2 py-1 rounded-md border text-xs cursor-help transition-all",
-                        pred.platform === viralIntel.recommendedPlatform
-                          ? "bg-primary/15 border-primary/40 text-primary"
-                          : "bg-white/5 border-white/10 text-white/50"
-                      )}>
-                        <PlatformIcon platform={pred.platform} className="w-3 h-3" />
-                        <span className="font-bold">{pred.viralScore}</span>
-                        {pred.platform === viralIntel.recommendedPlatform && (
-                          <Sparkles className="w-2.5 h-2.5" />
-                        )}
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs">
-                      <p className="font-semibold capitalize mb-1">{pred.platform}</p>
-                      <p className="text-xs text-muted-foreground">{pred.reason}</p>
-                      {pred.bestPostingTime && (
-                        <p className="text-xs mt-1 flex items-center gap-1"><Clock className="w-3 h-3" />{pred.bestPostingTime}</p>
-                      )}
-                      {pred.estimatedReach && (
-                        <p className="text-xs text-green-500 flex items-center gap-1">
-                          <Eye className="w-3 h-3" />
-                          {pred.estimatedReach.min.toLocaleString()}-{pred.estimatedReach.max.toLocaleString()} views
-                        </p>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
+              <div className={cn("flex-shrink-0 shadow-lg rounded-full", getScoreGlow(viralIntel.overallScore))}>
+                <ScoreRing score={viralIntel.overallScore} size={52} />
               </div>
+            </div>
 
-              {/* Bottom: Actions */}
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={handleDownload}
-                  disabled={!canPerformActions || isDownloading}
-                  className="flex-1 h-8 text-xs font-semibold"
-                >
-                  {isDownloading ? (
-                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 mr-1.5" />
-                  )}
-                  Baixar
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={openPlayer}
-                  className="h-8 text-xs px-3 border-white/10 text-white/70 hover:text-white"
-                >
-                  <Play className="w-3.5 h-3.5 mr-1" />
-                  Ver
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowDetails(true)}
-                  className="h-8 w-8 p-0 text-white/40 hover:text-white"
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                </Button>
-              </div>
+            {/* Platform predictions - minimal pills */}
+            <div className="flex gap-1.5">
+              {viralIntel.platformPredictions.map((pred) => (
+                <Tooltip key={pred.platform}>
+                  <TooltipTrigger asChild>
+                    <div className={cn(
+                      "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium cursor-help transition-all",
+                      pred.platform === viralIntel.recommendedPlatform
+                        ? "bg-primary/10 text-primary border border-primary/20"
+                        : "bg-white/[0.04] text-white/40 border border-white/[0.06] hover:bg-white/[0.06]"
+                    )}>
+                      <PlatformIcon platform={pred.platform} className="w-3 h-3" />
+                      <span>{pred.viralScore}</span>
+                      {pred.platform === viralIntel.recommendedPlatform && (
+                        <Sparkles className="w-2.5 h-2.5" />
+                      )}
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs">
+                    <p className="font-semibold capitalize mb-1">{pred.platform}</p>
+                    <p className="text-xs text-muted-foreground">{pred.reason}</p>
+                    {pred.bestPostingTime && (
+                      <p className="text-xs mt-1 flex items-center gap-1"><Clock className="w-3 h-3" />{pred.bestPostingTime}</p>
+                    )}
+                    {pred.estimatedReach && (
+                      <p className="text-xs text-emerald-500 flex items-center gap-1">
+                        <Eye className="w-3 h-3" />
+                        {pred.estimatedReach.min.toLocaleString()}-{pred.estimatedReach.max.toLocaleString()} views
+                      </p>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1">
+              <Button
+                size="sm"
+                onClick={handleDownload}
+                disabled={!canPerformActions || isDownloading}
+                className="flex-1 h-9 text-xs font-semibold rounded-lg bg-white text-zinc-900 hover:bg-white/90"
+              >
+                {isDownloading ? (
+                  <div className="w-3.5 h-3.5 border-2 border-zinc-400 border-t-zinc-900 rounded-full animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5 mr-1.5" />
+                )}
+                Baixar
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={openPlayer}
+                className="h-9 px-3 text-xs text-white/50 hover:text-white hover:bg-white/[0.06] rounded-lg"
+              >
+                <Play className="w-3.5 h-3.5 mr-1" />
+                Ver
+              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowDetails(true)}
+                    className="h-9 w-9 p-0 text-white/30 hover:text-primary hover:bg-primary/10 rounded-lg"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Insights virais</TooltipContent>
+              </Tooltip>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* ========== PLAYER MODAL (kept from original) ========== */}
+      {/* ========== PLAYER MODAL ========== */}
       <Dialog open={showPlayer} onOpenChange={setShowPlayer}>
         <DialogContent className="max-w-[95vw] md:max-w-7xl h-[95vh] p-0 overflow-hidden bg-gradient-to-br from-background via-background to-muted/20">
           <div className="flex flex-col lg:flex-row h-full overflow-hidden">
@@ -358,7 +414,7 @@ export const ClipCardPro = ({
                     <div className="text-xs text-muted-foreground mb-1">Emocao</div>
                     <div className="text-lg font-bold capitalize">{viralIntel.contentAnalysis.emotion}</div>
                   </div>
-                  <div className="p-3 rounded-lg bg-gradient-to-br from-green-500/10 to-green-500/5 border border-green-500/20">
+                  <div className="p-3 rounded-lg bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20">
                     <div className="text-xs text-muted-foreground mb-1">Retencao</div>
                     <div className="text-lg font-bold">{viralIntel.contentAnalysis.audienceRetention}%</div>
                   </div>
@@ -399,7 +455,7 @@ export const ClipCardPro = ({
                               <div className="font-bold capitalize flex items-center gap-2">
                                 {pred.platform}
                                 {pred.platform === viralIntel.recommendedPlatform && (
-                                  <Badge className="bg-green-500 text-white text-[10px] px-1.5 py-0">MELHOR</Badge>
+                                  <Badge className="bg-emerald-500 text-white text-[10px] px-1.5 py-0">MELHOR</Badge>
                                 )}
                               </div>
                               <div className="text-xs text-muted-foreground">{pred.confidence} confianca</div>
@@ -408,8 +464,8 @@ export const ClipCardPro = ({
                           <div className="text-right">
                             <div className={cn(
                               "text-3xl font-black",
-                              pred.viralScore >= 85 ? "text-green-500" :
-                              pred.viralScore >= 75 ? "text-blue-500" : "text-yellow-500"
+                              pred.viralScore >= 85 ? "text-emerald-500" :
+                              pred.viralScore >= 75 ? "text-blue-500" : "text-amber-500"
                             )}>
                               {pred.viralScore}
                             </div>
@@ -429,7 +485,7 @@ export const ClipCardPro = ({
                           )}
                           {pred.estimatedReach && (
                             <div className="flex items-center gap-2 p-2 bg-background/50 rounded">
-                              <Eye className="w-3 h-3 text-green-500" />
+                              <Eye className="w-3 h-3 text-emerald-500" />
                               <div>
                                 <div className="font-medium">Alcance previsto</div>
                                 <div className="text-muted-foreground">
@@ -461,9 +517,9 @@ export const ClipCardPro = ({
                         key={idx}
                         className={cn(
                           "p-3 rounded-lg border-l-4",
-                          insight.type === 'strength' && "bg-green-950/20 border-green-500",
+                          insight.type === 'strength' && "bg-emerald-950/20 border-emerald-500",
                           insight.type === 'opportunity' && "bg-blue-950/20 border-blue-500",
-                          insight.type === 'warning' && "bg-yellow-950/20 border-yellow-500"
+                          insight.type === 'warning' && "bg-amber-950/20 border-amber-500"
                         )}
                       >
                         <div className="flex gap-3">
@@ -508,7 +564,7 @@ export const ClipCardPro = ({
         </DialogContent>
       </Dialog>
 
-      {/* ========== INSIGHTS MODAL (kept from original) ========== */}
+      {/* ========== INSIGHTS MODAL ========== */}
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -539,9 +595,9 @@ export const ClipCardPro = ({
                   key={idx}
                   className={cn(
                     "p-4 rounded-lg border-2",
-                    insight.type === 'strength' && "bg-green-950/20 border-green-500/30",
+                    insight.type === 'strength' && "bg-emerald-950/20 border-emerald-500/30",
                     insight.type === 'opportunity' && "bg-blue-950/20 border-blue-500/30",
-                    insight.type === 'warning' && "bg-yellow-950/20 border-yellow-500/30"
+                    insight.type === 'warning' && "bg-amber-950/20 border-amber-500/30"
                   )}
                 >
                   <div className="flex items-start gap-3">
@@ -600,7 +656,7 @@ export const ClipCardPro = ({
                     )}
                     {pred.estimatedReach && (
                       <div className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-green-500" />
+                        <TrendingUp className="w-4 h-4 text-emerald-500" />
                         <div>
                           <div className="font-medium">Alcance estimado</div>
                           <div className="text-xs text-muted-foreground">
@@ -634,7 +690,7 @@ export const ClipCardPro = ({
                   <div className="flex items-center gap-2">
                     <div className="flex-1 bg-white/10 rounded-full h-2">
                       <div
-                        className="bg-green-500 h-2 rounded-full transition-all"
+                        className="bg-emerald-500 h-2 rounded-full transition-all"
                         style={{ width: `${viralIntel.contentAnalysis.audienceRetention}%` }}
                       />
                     </div>
