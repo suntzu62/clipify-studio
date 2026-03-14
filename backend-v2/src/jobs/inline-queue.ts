@@ -7,6 +7,8 @@ const logger = createLogger('inline-queue');
 
 const pendingJobs: JobData[] = [];
 let activeJobId: string | null = null;
+const ACTIVE_RESTART_MESSAGE = 'Processamento retomado apos reinicio do servico.';
+const SUPERSEDED_MESSAGE = 'Substituido por um job mais recente do mesmo usuario.';
 
 function createInlineJob(jobData: JobData) {
   return {
@@ -64,8 +66,46 @@ async function drainInlineQueue(): Promise<void> {
   });
 }
 
+async function failJobAsSuperseded(jobId: string, reason: string): Promise<void> {
+  await dbJobs.update(jobId, {
+    status: 'failed',
+    error: reason,
+    progress: 0,
+    current_step: 'failed',
+    current_step_message: reason,
+  });
+}
+
+export async function removeInlinePendingJob(jobId: string): Promise<boolean> {
+  const index = pendingJobs.findIndex((job) => job.jobId === jobId);
+  if (index === -1) {
+    return false;
+  }
+
+  pendingJobs.splice(index, 1);
+  logger.warn({ jobId, waiting: pendingJobs.length }, 'Removed job from inline pending queue');
+  return true;
+}
+
+async function removeOlderPendingJobsForUser(userId: string, keepJobId: string): Promise<number> {
+  const jobsToRemove = pendingJobs.filter((job) => job.userId === userId && job.jobId !== keepJobId);
+
+  if (jobsToRemove.length === 0) {
+    return 0;
+  }
+
+  for (const job of jobsToRemove) {
+    await removeInlinePendingJob(job.jobId);
+    await failJobAsSuperseded(job.jobId, SUPERSEDED_MESSAGE);
+  }
+
+  logger.warn({ userId, keepJobId, removed: jobsToRemove.length }, 'Removed older pending inline jobs for user');
+  return jobsToRemove.length;
+}
+
 export async function enqueueInlineVideoJob(jobData: JobData): Promise<string> {
   await ensureQueuedRecord(jobData);
+  await removeOlderPendingJobsForUser(jobData.userId, jobData.jobId);
   pendingJobs.push(jobData);
 
   logger.warn(
@@ -93,13 +133,42 @@ export async function recoverStaleInlineJobs(staleAfterSeconds: number = 180): P
     return 0;
   }
 
-  const recoverableJobs = await dbJobs.findRecoverable(staleAfterSeconds, 5);
+  const recoverableJobs = await dbJobs.findRecoverable(staleAfterSeconds, 20);
   let recovered = 0;
+  let discarded = 0;
+  const selectedJobIds = new Set<string>();
 
-  for (const jobRow of recoverableJobs) {
+  const sortedRecoverableJobs = [...recoverableJobs].sort((a, b) => {
+    const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
+    const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
+    return bTime - aTime;
+  });
+
+  for (const jobRow of sortedRecoverableJobs) {
+    if (!jobRow?.id || !jobRow?.user_id) {
+      continue;
+    }
+
+    if (selectedJobIds.has(jobRow.user_id)) {
+      await failJobAsSuperseded(jobRow.id, SUPERSEDED_MESSAGE);
+      discarded += 1;
+      continue;
+    }
+
+    selectedJobIds.add(jobRow.user_id);
+  }
+
+  for (const jobRow of sortedRecoverableJobs) {
     if (!jobRow?.id || !jobRow?.user_id || !jobRow?.source_type) {
       continue;
     }
+
+    if (!selectedJobIds.has(jobRow.user_id)) {
+      continue;
+    }
+
+    // Only recover the newest pending job per user.
+    selectedJobIds.delete(jobRow.user_id);
 
     const jobData: JobData = {
       jobId: jobRow.id,
@@ -117,7 +186,9 @@ export async function recoverStaleInlineJobs(staleAfterSeconds: number = 180): P
 
     await dbJobs.update(jobRow.id, {
       status: 'queued',
-      current_step_message: 'Retomando processamento apos reinicio do servico...',
+      progress: 0,
+      current_step: 'ingest',
+      current_step_message: ACTIVE_RESTART_MESSAGE,
     });
 
     logger.warn(
@@ -134,5 +205,6 @@ export async function recoverStaleInlineJobs(staleAfterSeconds: number = 180): P
     void drainInlineQueue();
   }
 
+  logger.warn({ recovered, discarded }, 'Recovered inline jobs after restart');
   return recovered;
 }

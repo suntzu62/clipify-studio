@@ -15,7 +15,7 @@ import {
   type SubtitlePreferences,
 } from '../types/index.js';
 import { addVideoJob, getJobStatus, cancelJob, getQueueHealth, videoQueue } from '../jobs/queue.js';
-import { enqueueInlineVideoJob, getInlineQueueSnapshot } from '../jobs/inline-queue.js';
+import { enqueueInlineVideoJob, getInlineQueueSnapshot, removeInlinePendingJob } from '../jobs/inline-queue.js';
 import { getJobExecutionDecision } from '../jobs/execution-mode.js';
 import { clips as dbClips } from '../services/database.service.js';
 import { createLogger } from '../config/logger.js';
@@ -947,6 +947,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
       // 2. Cancelar job na fila se ainda estiver ativo
       await cancelJob(jobId);
+      await removeInlinePendingJob(jobId);
 
       // 3. Deletar todos os clips associados
       await db.clips.deleteByJobId(jobId);
