@@ -26,6 +26,11 @@ interface RenderOptions {
   onProgress?: (progress: number, message: string) => Promise<void>; // Progress callback
 }
 
+interface SingleClipRenderOptions extends RenderOptions {
+  clipIndex?: number;
+  totalClips?: number;
+}
+
 interface RenderResult {
   clips: RenderedClip[];
   outputDir: string;
@@ -37,6 +42,11 @@ interface RenderedClip {
   thumbnailPath: string;
   duration: number;
   segment: HighlightSegment;
+}
+
+interface SingleClipRenderResult {
+  clip: RenderedClip;
+  outputDir: string;
 }
 
 type RenderClipOptions = {
@@ -151,6 +161,50 @@ export async function renderClips(
     logger.error({ error: error.message, outputDir }, 'Clip rendering failed');
     throw new Error(`Rendering failed: ${error.message}`);
   }
+}
+
+export async function renderClip(
+  videoPath: string,
+  segment: HighlightSegment,
+  transcript: Transcript,
+  clipId: string,
+  options: SingleClipRenderOptions = {}
+): Promise<SingleClipRenderResult> {
+  const {
+    format = '9:16',
+    resolution = getResolutionForFormat(format),
+    addSubtitles = true,
+    font = 'Inter',
+    preset = 'ultrafast',
+    subtitlePreferences = DEFAULT_SUBTITLE_PREFERENCES,
+    onProgress,
+    clipIndex = 0,
+    totalClips = 1,
+  } = options;
+
+  const outputDir = join('/tmp', `render-${clipId}-${Date.now()}`);
+  await fs.mkdir(outputDir, { recursive: true });
+
+  const clip = await renderSingleClip(
+    videoPath,
+    segment,
+    transcript,
+    outputDir,
+    clipId,
+    {
+      clipIndex,
+      totalClips,
+      resolution,
+      format,
+      addSubtitles,
+      font,
+      preset,
+      subtitlePreferences,
+      onProgress,
+    }
+  );
+
+  return { clip, outputDir };
 }
 
 /**
