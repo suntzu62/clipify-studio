@@ -87,3 +87,52 @@ export function getInlineQueueSnapshot() {
     waiting: pendingJobs.length,
   };
 }
+
+export async function recoverStaleInlineJobs(staleAfterSeconds: number = 180): Promise<number> {
+  if (activeJobId || pendingJobs.length > 0) {
+    return 0;
+  }
+
+  const recoverableJobs = await dbJobs.findRecoverable(staleAfterSeconds, 5);
+  let recovered = 0;
+
+  for (const jobRow of recoverableJobs) {
+    if (!jobRow?.id || !jobRow?.user_id || !jobRow?.source_type) {
+      continue;
+    }
+
+    const jobData: JobData = {
+      jobId: jobRow.id,
+      userId: jobRow.user_id,
+      sourceType: jobRow.source_type,
+      youtubeUrl: jobRow.youtube_url || undefined,
+      uploadPath: jobRow.upload_path || undefined,
+      targetDuration: jobRow.target_duration || undefined,
+      clipCount: jobRow.clip_count || undefined,
+      createdAt: jobRow.created_at ? new Date(jobRow.created_at) : new Date(),
+    };
+
+    pendingJobs.push(jobData);
+    recovered += 1;
+
+    await dbJobs.update(jobRow.id, {
+      status: 'queued',
+      current_step_message: 'Retomando processamento apos reinicio do servico...',
+    });
+
+    logger.warn(
+      {
+        jobId: jobRow.id,
+        previousStatus: jobRow.status,
+        updatedAt: jobRow.updated_at,
+      },
+      'Recovered stale inline job after service restart'
+    );
+  }
+
+  if (recovered > 0) {
+    void drainInlineQueue();
+  }
+
+  return recovered;
+}

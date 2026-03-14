@@ -1,11 +1,14 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { registerRoutes } from './api/routes.js';
 import { verifyToken } from './services/auth.service.js';
 import { getJobExecutionDecision } from './jobs/execution-mode.js';
+import { recoverStaleInlineJobs } from './jobs/inline-queue.js';
 
 // ============================================
 // CRIAR SERVIDOR FASTIFY
@@ -21,9 +24,31 @@ const app = Fastify({
 // PLUGINS
 // ============================================
 
-// CORS
+// Security headers (HSTS, X-Frame-Options, X-Content-Type-Options, etc.)
+await app.register(helmet, {
+  contentSecurityPolicy: false, // CSP handled via frontend meta tag
+});
+
+// Rate limiting — protect against brute force and abuse
+await app.register(rateLimit, {
+  max: 100, // 100 requests per window
+  timeWindow: '1 minute',
+  keyGenerator: (request) => {
+    // Use user ID if authenticated, otherwise IP
+    return (request as any).user?.userId || request.ip;
+  },
+});
+
+// CORS — whitelist allowed origins
+const allowedOrigins = env.isDevelopment
+  ? [/localhost:\d+$/, /127\.0\.0\.1:\d+$/]
+  : [
+      env.frontendUrl,
+      // Add any other production domains here
+    ].filter(Boolean) as string[];
+
 await app.register(cors, {
-  origin: true, // Permitir todos os origins em dev, configurar para produção
+  origin: allowedOrigins,
   credentials: true,
 });
 
@@ -138,6 +163,8 @@ try {
     }
   } else {
     logger.warn(jobExecution, 'Skipping BullMQ worker startup; jobs will run inline');
+    const recoveredJobs = await recoverStaleInlineJobs();
+    logger.info({ recoveredJobs }, 'Inline queue recovery completed');
   }
 } catch (error) {
   logger.error(error, 'Failed to start server');

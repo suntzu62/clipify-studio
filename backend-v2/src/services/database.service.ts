@@ -125,6 +125,19 @@ export const jobs = {
     return result.rows;
   },
 
+  async findRecoverable(staleAfterSeconds: number = 120, limit: number = 5) {
+    const result = await pool.query(
+      `SELECT *
+       FROM jobs
+       WHERE status IN ('queued', 'processing')
+         AND updated_at < NOW() - ($1 * INTERVAL '1 second')
+       ORDER BY updated_at ASC
+       LIMIT $2`,
+      [staleAfterSeconds, limit]
+    );
+    return result.rows;
+  },
+
   async delete(jobId: string) {
     await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
   },

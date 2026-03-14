@@ -40,12 +40,15 @@ interface RenderedClip {
 }
 
 type RenderClipOptions = {
+  clipIndex: number;
+  totalClips: number;
   format: NonNullable<RenderOptions['format']>;
   resolution: NonNullable<RenderOptions['resolution']>;
   addSubtitles: NonNullable<RenderOptions['addSubtitles']>;
   font: NonNullable<RenderOptions['font']>;
   preset: NonNullable<RenderOptions['preset']>;
   subtitlePreferences: SubtitlePreferences;
+  onProgress?: RenderOptions['onProgress'];
 };
 
 const PRESET_PROFILE = {
@@ -121,12 +124,15 @@ export async function renderClips(
             outputDir,
             `clip-${i + batchIdx}`,
             {
+              clipIndex: i + batchIdx,
+              totalClips: segments.length,
               resolution,
               format,
               addSubtitles,
               font,
               preset,
               subtitlePreferences,
+              onProgress,
             }
           )
         )
@@ -183,19 +189,23 @@ async function renderSingleClip(
       // 3. SCALE to target resolution
       let cropX = '(iw-ih*9/16)/2'; // default: center crop
 
-      try {
-        const dims = await getVideoDimensions(videoPath);
-        const faces = await detectFacesInClip(videoPath, start, end, 3);
-        const cropOffset = calculateSmartCropX(faces, dims.width, dims.height, 9 / 16);
+      if (env.render.smartCrop) {
+        try {
+          const dims = await getVideoDimensions(videoPath);
+          const faces = await detectFacesInClip(videoPath, start, end, 3);
+          const cropOffset = calculateSmartCropX(faces, dims.width, dims.height, 9 / 16);
 
-        if (!cropOffset.fallback) {
-          cropX = cropOffset.x.toString();
-          logger.info({ clipId, cropX, faceCount: faces.length }, 'Using face-based smart crop');
-        } else {
-          logger.info({ clipId }, 'No faces detected, using center crop');
+          if (!cropOffset.fallback) {
+            cropX = cropOffset.x.toString();
+            logger.info({ clipId, cropX, faceCount: faces.length }, 'Using face-based smart crop');
+          } else {
+            logger.info({ clipId }, 'No faces detected, using center crop');
+          }
+        } catch (error: any) {
+          logger.warn({ clipId, error: error.message }, 'Face detection failed, using center crop fallback');
         }
-      } catch (error: any) {
-        logger.warn({ clipId, error: error.message }, 'Face detection failed, using center crop fallback');
+      } else {
+        logger.info({ clipId }, 'Smart crop disabled, using center crop');
       }
 
       vfFilters.push(
@@ -266,6 +276,22 @@ async function renderSingleClip(
           '-movflags', '+faststart',
         ])
         .output(videoOutputPath)
+        .on('progress', async (progress) => {
+          if (!options.onProgress) {
+            return;
+          }
+
+          const elapsedSeconds = parseTimemarkToSeconds(progress.timemark);
+          const clipFraction = duration > 0 ? Math.min(1, elapsedSeconds / duration) : 0;
+          const overallProgress = 65 + Math.floor(
+            (10 * (options.clipIndex + clipFraction)) / Math.max(1, options.totalClips)
+          );
+
+          await options.onProgress(
+            Math.min(74, overallProgress),
+            `Renderizando clipe ${options.clipIndex + 1} de ${options.totalClips}...`
+          );
+        })
         .on('end', () => resolve())
         .on('error', (err) => reject(err))
         .run();
@@ -361,6 +387,15 @@ function formatSRTTime(seconds: number): string {
   const ms = Math.floor((seconds % 1) * 1000);
 
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+}
+
+function parseTimemarkToSeconds(timemark?: string): number {
+  if (!timemark) {
+    return 0;
+  }
+
+  const [hh = '0', mm = '0', ss = '0'] = timemark.split(':');
+  return (Number(hh) * 3600) + (Number(mm) * 60) + Number(ss.replace(',', '.'));
 }
 
 /**

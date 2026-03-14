@@ -47,6 +47,7 @@ const envSchema = z.object({
   // MercadoPago (accept both MERCADOPAGO_ and MERCADO_PAGO_ prefixes)
   MERCADOPAGO_ACCESS_TOKEN: z.string().min(1).optional(),
   MERCADOPAGO_PUBLIC_KEY: z.string().min(1).optional(),
+  MERCADOPAGO_WEBHOOK_SECRET: z.string().min(1).optional(),
   MERCADOPAGO_SANDBOX_MODE: z.string().default('true'),
   PAYMENTS_SUCCESS_URL: z.string().url().optional(),
   PAYMENTS_FAILURE_URL: z.string().url().optional(),
@@ -67,6 +68,7 @@ const envSchema = z.object({
   WORKER_LOCK_DURATION_MS: z.string().default('900000'),
   WORKER_STALLED_INTERVAL_MS: z.string().default('30000'),
   WORKER_MAX_STALLED_COUNT: z.string().default('3'),
+  RENDER_SMART_CROP: z.string().default('false'),
   RENDER_BATCH_CONCURRENCY: z.string().default('1'),
   RENDER_FFMPEG_THREADS: z.string().default('2'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -165,6 +167,7 @@ export const env = {
   mercadoPago: {
     accessToken: parsed.data.MERCADOPAGO_ACCESS_TOKEN,
     publicKey: parsed.data.MERCADOPAGO_PUBLIC_KEY,
+    webhookSecret: parsed.data.MERCADOPAGO_WEBHOOK_SECRET,
     sandboxMode: parsed.data.MERCADOPAGO_SANDBOX_MODE === 'true',
     successUrl: parsed.data.PAYMENTS_SUCCESS_URL,
     failureUrl: parsed.data.PAYMENTS_FAILURE_URL,
@@ -196,6 +199,7 @@ export const env = {
     maxStalledCount: parseInt(parsed.data.WORKER_MAX_STALLED_COUNT, 10),
   },
   render: {
+    smartCrop: parsed.data.RENDER_SMART_CROP === 'true',
     batchConcurrency: parseInt(parsed.data.RENDER_BATCH_CONCURRENCY, 10),
     ffmpegThreads: parseInt(parsed.data.RENDER_FFMPEG_THREADS, 10),
   },
