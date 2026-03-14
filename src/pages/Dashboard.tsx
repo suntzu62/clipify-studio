@@ -28,6 +28,16 @@ import { getAuthHeader } from '@/lib/auth-token';
 import { createProjectTitle, extractVideoId, getYouTubeMetadata } from '@/lib/youtube-metadata';
 import { deleteProject } from '@/services/projects';
 import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { isAdminEmail } from '@/lib/admin';
 
 const sidebarVariants = {
@@ -67,6 +77,9 @@ const Dashboard = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [usage, setUsage] = useState<UsageDTO | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [jobToDelete, setJobToDelete] = useState<Job | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [projectMetadata, setProjectMetadata] = useState<Record<string, {
     title?: string;
     thumbnailUrl?: string;
@@ -153,22 +166,26 @@ const Dashboard = () => {
     setJobs(updatedJobs);
   };
 
-  const handleDeleteProject = async (job: Job) => {
-    if (!user?.id) return;
+  const handleDeleteProject = (job: Job) => {
+    setJobToDelete(job);
+    setDeleteDialogOpen(true);
+  };
 
-    const confirmed = window.confirm('Tem certeza que deseja excluir este vídeo do dashboard?');
-    if (!confirmed) return;
-
-    setJobs((prev) => prev.filter((item) => item.id !== job.id));
-    setProjectMetadata((prev) => {
-      const next = { ...prev };
-      delete next[job.id];
-      return next;
-    });
-    deleteUserJob(user.id, job.id);
+  const handleConfirmDelete = async () => {
+    if (!jobToDelete || !user?.id) return;
 
     try {
-      await deleteProject(job.id);
+      setIsDeleting(true);
+
+      setJobs((prev) => prev.filter((item) => item.id !== jobToDelete.id));
+      setProjectMetadata((prev) => {
+        const next = { ...prev };
+        delete next[jobToDelete.id];
+        return next;
+      });
+      deleteUserJob(user.id, jobToDelete.id);
+
+      await deleteProject(jobToDelete.id);
       toast({
         title: 'Vídeo excluído',
         description: 'O vídeo foi removido com sucesso.',
@@ -180,6 +197,10 @@ const Dashboard = () => {
         description: 'Não foi possível excluir no backend agora, mas saiu do seu dashboard.',
         variant: 'destructive',
       });
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+      setJobToDelete(null);
     }
   };
 
@@ -697,6 +718,29 @@ const Dashboard = () => {
           </MouseSpotlight>
         </div>
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir vídeo</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir este vídeo do dashboard? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? 'Excluindo...' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
