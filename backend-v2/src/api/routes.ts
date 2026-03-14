@@ -15,7 +15,8 @@ import {
   type SubtitlePreferences,
 } from '../types/index.js';
 import { addVideoJob, getJobStatus, cancelJob, getQueueHealth, videoQueue } from '../jobs/queue.js';
-import { processVideo } from '../jobs/processor.js';
+import { enqueueInlineVideoJob, getInlineQueueSnapshot } from '../jobs/inline-queue.js';
+import { getJobExecutionDecision } from '../jobs/execution-mode.js';
 import { clips as dbClips } from '../services/database.service.js';
 import { createLogger } from '../config/logger.js';
 import { createClient } from '@supabase/supabase-js';
@@ -82,22 +83,22 @@ async function deleteTempConfigSafely(tempId: string): Promise<void> {
   }
 }
 
-function launchInlineProcessing(jobData: JobData): void {
-  const inlineJob = {
-    id: jobData.jobId,
-    data: jobData,
-    attemptsMade: 0,
-    async updateProgress() {
-      // Progress is persisted by processor directly in DB.
-      return;
-    },
-  } as any;
+async function submitVideoJob(jobData: JobData): Promise<{ mode: 'queue' | 'inline'; reason: string }> {
+  const execution = await getJobExecutionDecision();
 
-  setTimeout(() => {
-    processVideo(inlineJob).catch((error) => {
-      logger.error({ jobId: jobData.jobId, error }, 'Inline processing failed');
-    });
-  }, 0);
+  if (execution.mode === 'inline') {
+    await enqueueInlineVideoJob(jobData);
+    return { mode: 'inline', reason: execution.reason };
+  }
+
+  try {
+    await withTimeout(addVideoJob(jobData), 10000);
+    return { mode: 'queue', reason: execution.reason };
+  } catch (error) {
+    logger.warn({ jobId: jobData.jobId, error }, 'Queue unavailable, falling back to inline processing');
+    await enqueueInlineVideoJob(jobData);
+    return { mode: 'inline', reason: 'Queue unavailable' };
+  }
 }
 
 function getRequestUserId(request: any): string | undefined {
@@ -194,11 +195,18 @@ export async function registerRoutes(app: FastifyInstance) {
       queueAvailable = false;
     }
 
+    const execution = await getJobExecutionDecision();
+
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
       queueAvailable,
       queue: queueHealth,
+      jobExecution: {
+        mode: execution.mode,
+        reason: execution.reason,
+        inlineQueue: getInlineQueueSnapshot(),
+      },
     };
   });
 
@@ -287,9 +295,12 @@ export async function registerRoutes(app: FastifyInstance) {
       createdAt: new Date(),
     };
 
-    await addVideoJob(jobData);
+    const submission = await submitVideoJob(jobData);
 
-    logger.info({ jobId, userId: effectiveUserId, storagePath: input.storagePath }, 'Job created from upload');
+    logger.info(
+      { jobId, userId: effectiveUserId, storagePath: input.storagePath, submission },
+      'Job created from upload'
+    );
 
     return reply.status(201).send({
       jobId,
@@ -358,9 +369,9 @@ export async function registerRoutes(app: FastifyInstance) {
       createdAt: new Date(),
     };
 
-    await addVideoJob(jobData);
+    const submission = await submitVideoJob(jobData);
 
-    logger.info({ jobId, userId: effectiveUserId }, 'Job created');
+    logger.info({ jobId, userId: effectiveUserId, submission }, 'Job created');
 
     return reply.status(201).send({
       jobId,
@@ -484,6 +495,50 @@ export async function registerRoutes(app: FastifyInstance) {
       const dbState = dbJob.status || 'queued';
       const progressValue = Number(dbJob.progress || 0);
 
+      const dbClipRows = dbState === 'completed' ? await dbClips.findByJobId(jobId) : [];
+      const transformClip = (clip: any) => {
+        const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
+        return {
+          id: clip.id,
+          title: clip.title,
+          description: clip.description || 'Descrição gerada automaticamente',
+          hashtags: clip.hashtags || [],
+          previewUrl: proxyUrl,
+          downloadUrl: clip.video_url || proxyUrl,
+          thumbnailUrl: clip.thumbnail_url,
+          duration: clip.duration,
+          status: 'ready',
+          start: clip.start_time,
+          end: clip.end_time,
+        };
+      };
+
+      return {
+        jobId: dbJob.id,
+        state: dbState,
+        status: dbState,
+        currentStep: dbJob.current_step || 'ingest',
+        progress: { progress: progressValue, message: dbJob.current_step_message || '' },
+        result: dbState === 'completed' ? { clips: dbClipRows.map(transformClip) } : null,
+        error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
+        finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
+      };
+    }
+
+    const queueFailedReason =
+      typeof status?.failedReason === 'string' ? status.failedReason.toLowerCase() : '';
+    const queueStalled =
+      status?.state === 'failed' &&
+      (queueFailedReason.includes('stalled') || queueFailedReason.includes('lock'));
+
+    if (queueStalled && dbJob && dbJob.status && dbJob.status !== 'failed') {
+      logger.warn(
+        { jobId, queueState: status.state, queueFailedReason: status.failedReason, dbState: dbJob.status },
+        'Queue reported stalled job; preferring database state'
+      );
+
+      const dbState = dbJob.status || 'queued';
+      const progressValue = Number(dbJob.progress || 0);
       const dbClipRows = dbState === 'completed' ? await dbClips.findByJobId(jobId) : [];
       const transformClip = (clip: any) => {
         const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
@@ -1107,18 +1162,13 @@ export async function registerRoutes(app: FastifyInstance) {
       logger.warn({ jobId, tempId, error }, 'Failed to persist global subtitle preferences in Redis');
     }
 
-    // 5. Add job to queue
-    try {
-      await withTimeout(addVideoJob(jobData), 10000);
-    } catch (error) {
-      logger.warn({ jobId, tempId, error }, 'Queue unavailable, falling back to inline processing');
-      launchInlineProcessing(jobData);
-    }
+    // 5. Submit job
+    const submission = await submitVideoJob(jobData);
 
     // 6. Delete temporary configuration
     await deleteTempConfigSafely(tempId);
 
-    logger.info({ jobId, tempId, userId: tempConfig.userId }, 'Job started from temp config');
+    logger.info({ jobId, tempId, userId: tempConfig.userId, submission }, 'Job started from temp config');
 
     return reply.status(201).send({
       jobId,

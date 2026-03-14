@@ -50,6 +50,46 @@ redis.on('close', () => {
   logger.warn('Redis connection closed');
 });
 
+let queueSafetyPromise: Promise<{ safe: boolean; reason: string; policy?: string }> | null = null;
+
+export async function getRedisQueueSafety(): Promise<{ safe: boolean; reason: string; policy?: string }> {
+  if (queueSafetyPromise) {
+    return queueSafetyPromise;
+  }
+
+  queueSafetyPromise = (async () => {
+    try {
+      const info = await redis.info('memory');
+      const policyLine = info
+        .split('\n')
+        .find((line) => line.toLowerCase().startsWith('maxmemory_policy:'));
+      const policy = policyLine?.split(':')[1]?.trim().toLowerCase();
+
+      if (policy && policy !== 'noeviction') {
+        return {
+          safe: false,
+          policy,
+          reason: `Redis maxmemory_policy=${policy} is unsafe for BullMQ locks`,
+        };
+      }
+
+      return {
+        safe: true,
+        policy,
+        reason: policy ? `Redis maxmemory_policy=${policy}` : 'Redis maxmemory_policy unavailable',
+      };
+    } catch (error: any) {
+      logger.warn({ error: error.message }, 'Failed to inspect Redis memory policy');
+      return {
+        safe: true,
+        reason: 'Redis memory policy check unavailable',
+      };
+    }
+  })();
+
+  return queueSafetyPromise;
+}
+
 /**
  * Helper functions for temporary configuration storage
  */

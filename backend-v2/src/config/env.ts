@@ -62,6 +62,7 @@ const envSchema = z.object({
   INGEST_SERVICE_URL: z.string().url().optional(),
   INGEST_SERVICE_API_KEY: z.string().min(1).optional(),
   INGEST_SERVICE_TIMEOUT_MS: z.string().default('300000'),
+  JOB_EXECUTION_MODE: z.enum(['auto', 'queue', 'inline']).default('auto'),
   WORKER_CONCURRENCY: z.string().default('1'),
   WORKER_LOCK_DURATION_MS: z.string().default('900000'),
   WORKER_STALLED_INTERVAL_MS: z.string().default('30000'),
@@ -187,6 +188,7 @@ export const env = {
     apiKey: parsed.data.INGEST_SERVICE_API_KEY,
     timeoutMs: parseInt(parsed.data.INGEST_SERVICE_TIMEOUT_MS, 10),
   },
+  jobExecutionMode: parsed.data.JOB_EXECUTION_MODE,
   worker: {
     concurrency: parseInt(parsed.data.WORKER_CONCURRENCY, 10),
     lockDurationMs: parseInt(parsed.data.WORKER_LOCK_DURATION_MS, 10),
