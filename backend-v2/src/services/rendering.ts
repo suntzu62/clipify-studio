@@ -330,21 +330,33 @@ async function renderSingleClip(
           '-movflags', '+faststart',
         ])
         .output(videoOutputPath)
-        .on('progress', async (progress) => {
+        .on('progress', (progress) => {
           if (!options.onProgress) {
             return;
           }
 
-          const elapsedSeconds = parseTimemarkToSeconds(progress.timemark);
-          const clipFraction = duration > 0 ? Math.min(1, elapsedSeconds / duration) : 0;
-          const overallProgress = 65 + Math.floor(
-            (10 * (options.clipIndex + clipFraction)) / Math.max(1, options.totalClips)
-          );
+          void (async () => {
+            const elapsedSeconds = parseTimemarkToSeconds(progress.timemark);
+            if (!Number.isFinite(elapsedSeconds)) {
+              return;
+            }
 
-          await options.onProgress(
-            Math.min(74, overallProgress),
-            `Renderizando clipe ${options.clipIndex + 1} de ${options.totalClips}...`
-          );
+            const clipFraction = duration > 0 ? Math.min(1, Math.max(0, elapsedSeconds / duration)) : 0;
+            const overallProgress = 65 + Math.floor(
+              (10 * (options.clipIndex + clipFraction)) / Math.max(1, options.totalClips)
+            );
+
+            if (!Number.isFinite(overallProgress)) {
+              return;
+            }
+
+            await options.onProgress!(
+              Math.min(74, Math.max(65, overallProgress)),
+              `Renderizando clipe ${options.clipIndex + 1} de ${options.totalClips}...`
+            );
+          })().catch((error: any) => {
+            logger.warn({ clipId, error: error.message }, 'Render progress update failed');
+          });
         })
         .on('end', () => resolve())
         .on('error', (err) => reject(err))
@@ -448,8 +460,21 @@ function parseTimemarkToSeconds(timemark?: string): number {
     return 0;
   }
 
-  const [hh = '0', mm = '0', ss = '0'] = timemark.split(':');
-  return (Number(hh) * 3600) + (Number(mm) * 60) + Number(ss.replace(',', '.'));
+  const parts = timemark.split(':');
+  if (parts.length !== 3) {
+    return 0;
+  }
+
+  const [hh = '0', mm = '0', ss = '0'] = parts;
+  const hours = Number(hh);
+  const minutes = Number(mm);
+  const seconds = Number(ss.replace(',', '.'));
+
+  if (![hours, minutes, seconds].every((value) => Number.isFinite(value))) {
+    return 0;
+  }
+
+  return (hours * 3600) + (minutes * 60) + seconds;
 }
 
 /**

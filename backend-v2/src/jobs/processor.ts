@@ -435,24 +435,41 @@ async function updateProgress(
   progress: number,
   message: string
 ) {
+  const normalizedProgress = Number.isFinite(progress)
+    ? Math.max(0, Math.min(100, Math.round(progress)))
+    : 0;
+
   const progressData: JobProgress = {
     jobId: job.data.jobId,
     step,
-    progress,
+    progress: normalizedProgress,
     message,
   };
 
-  await job.updateProgress(progressData);
+  try {
+    await job.updateProgress(progressData);
+  } catch (error: any) {
+    logger.warn(
+      { jobId: job.data.jobId, step, progress: normalizedProgress, error: error.message },
+      'Queue progress update failed'
+    );
+  }
 
-  // Atualizar também no banco de dados
-  await dbJobs.update(job.data.jobId, {
-    progress,
-    current_step: step,
-    current_step_message: message,
-  });
+  try {
+    await dbJobs.update(job.data.jobId, {
+      progress: normalizedProgress,
+      current_step: step,
+      current_step_message: message,
+    });
+  } catch (error: any) {
+    logger.warn(
+      { jobId: job.data.jobId, step, progress: normalizedProgress, error: error.message },
+      'Database progress update failed'
+    );
+  }
 
   logger.debug(
-    { jobId: job.data.jobId, step, progress },
+    { jobId: job.data.jobId, step, progress: normalizedProgress },
     message
   );
 }
