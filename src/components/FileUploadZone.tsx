@@ -179,8 +179,8 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
       'border-muted-foreground/25': !isDragActive && !uploading
     })}>
       <CardContent className="p-6">
-        <div {...getRootProps()} className="cursor-pointer">
-          <input {...getInputProps()} disabled={uploading} />
+        <div {...getRootProps()} className="cursor-pointer" role="button" aria-label="Área de upload de vídeo. Clique ou arraste um arquivo." tabIndex={0}>
+          <input {...getInputProps()} disabled={uploading} aria-label="Selecionar arquivo de vídeo" />
           
           {uploading ? (
             <div className="text-center space-y-4">

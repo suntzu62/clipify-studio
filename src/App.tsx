@@ -8,6 +8,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminRoute from "@/components/AdminRoute";
 import { Skeleton } from "@/components/ui/skeleton";
 import PerformanceMonitor from "@/components/PerformanceMonitor";
+import { OfflineBanner } from "@/components/OfflineBanner";
 
 // Lazy load non-critical routes
 const Landing = lazy(() => import("./pages/Landing"));
@@ -48,6 +49,7 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
+        <OfflineBanner />
         <Toaster />
         <Sonner />
         <PerformanceMonitor />

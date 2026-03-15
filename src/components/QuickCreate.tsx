@@ -275,11 +275,11 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 w-full sm:w-auto">
               <Button
                 type="submit"
                 disabled={isSubmitting || isValid === false}
-                className="h-12 min-w-[170px] gap-2"
+                className="h-12 flex-1 sm:flex-none sm:min-w-[170px] gap-2"
               >
                 {isSubmitting ? (
                   <>
@@ -318,6 +318,8 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
                       className="h-8 text-xs"
                       onClick={() => setTargetDuration(duration as 30 | 60 | 90)}
                       disabled={isSubmitting}
+                      aria-label={`Duração alvo: ${duration} segundos`}
+                      aria-pressed={targetDuration === duration}
                     >
                       {duration}s
                     </Button>

@@ -183,14 +183,32 @@ export const useClipActions = ({
       await navigator.clipboard.writeText(text);
       toast({
         title: `${type} copiado!`,
-        description: 'Colado na área de transferência',
+        description: 'Texto copiado para a área de transferência',
+        duration: 2000,
       });
     } catch (err) {
-      toast({
-        title: 'Erro ao copiar',
-        description: 'Não foi possível copiar o texto',
-        variant: 'destructive',
-      });
+      // Fallback for older browsers / insecure contexts
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        toast({
+          title: `${type} copiado!`,
+          description: 'Texto copiado para a área de transferência',
+          duration: 2000,
+        });
+      } catch {
+        toast({
+          title: 'Erro ao copiar',
+          description: 'Não foi possível copiar o texto. Tente selecionar manualmente.',
+          variant: 'destructive',
+        });
+      }
     }
   };
 

@@ -229,18 +229,26 @@ export default function ProjectDetail() {
   const handleRetry = async () => {
     const youtubeUrl = job?.youtubeUrl || jobStatus?.result?.metadata?.url;
     if (!youtubeUrl || !isValidYouTubeUrl(youtubeUrl)) {
-      toast({ title: "Não é possível tentar novamente", description: "URL do YouTube não disponível.", variant: "destructive" });
-      navigate('/dashboard');
+      toast({
+        title: "Não é possível reprocessar",
+        description: "A URL original não está disponível. Crie um novo projeto com o mesmo vídeo.",
+        variant: "destructive",
+      });
+      navigate('/projects/new');
       return;
     }
     setIsRetrying(true);
     try {
       posthog.capture('job retry', { jobId: id });
       const { tempId } = await createTempConfig(youtubeUrl, getToken);
-      toast({ title: "Novo processamento criado!", description: "Revise as configuracoes e tente novamente." });
+      toast({ title: "Novo processamento criado!", description: "Revise as configurações e tente novamente." });
       navigate(`/projects/configure/${tempId}`);
     } catch (error: any) {
-      toast({ title: "Erro ao tentar novamente", description: error.message || "Tente criar um novo projeto", variant: "destructive" });
+      toast({
+        title: "Erro ao reprocessar",
+        description: error.message || "Não foi possível criar um novo processamento. Tente criar um novo projeto.",
+        variant: "destructive",
+      });
     } finally {
       setIsRetrying(false);
     }
@@ -249,11 +257,12 @@ export default function ProjectDetail() {
   function friendlyError(msg?: string | null) {
     if (!msg) return null;
     const m = String(msg);
-    if (m.includes('QUOTA_EXCEEDED') || m.toLowerCase().includes('quota')) return 'Quota do YouTube estourada. Vamos tentar novamente em breve!';
-    if (m.includes('401') || m.includes('unauthorized')) return 'Problema de autenticacao. Recarregue a pagina!';
-    if (m.toLowerCase().includes('youtube') || m.toLowerCase().includes('blocked')) return 'YouTube temporariamente indisponivel. Tente fazer upload do arquivo!';
-    if (m.toLowerCase().includes('timeout') || m.toLowerCase().includes('network')) return 'Conexao instavel. Verificando status automaticamente...';
-    return null;
+    if (m.includes('QUOTA_EXCEEDED') || m.toLowerCase().includes('quota')) return 'Quota do YouTube atingida. Tente novamente em alguns minutos.';
+    if (m.includes('401') || m.includes('unauthorized')) return 'Problema de autenticação. Recarregue a página.';
+    if (m.toLowerCase().includes('youtube') || m.toLowerCase().includes('blocked')) return 'YouTube temporariamente indisponível. Tente fazer upload do arquivo.';
+    if (m.toLowerCase().includes('timeout') || m.toLowerCase().includes('network')) return 'Conexão instável. Verificando status automaticamente...';
+    if (m.toLowerCase().includes('private') || m.toLowerCase().includes('unavailable')) return 'Vídeo privado ou indisponível. Use apenas vídeos públicos.';
+    return 'Ocorreu um erro no processamento. Tente novamente.';
   }
 
   const getProjectDisplayTitle = () => {
