@@ -17,7 +17,7 @@ if (ffmpegStatic) {
 }
 
 interface RenderOptions {
-  format?: '9:16' | '16:9' | '1:1'; // Aspect ratio
+  format?: '9:16' | '16:9' | '1:1' | '4:5'; // Aspect ratio
   resolution?: { width: number; height: number };
   addSubtitles?: boolean;
   font?: string;
@@ -272,6 +272,12 @@ async function renderSingleClip(
         `crop=min(iw\\,ih):min(iw\\,ih):(iw-min(iw\\,ih))/2:(ih-min(iw\\,ih))/2`,
         `scale=${width}:${height}:${scaleParams}`
       );
+    } else if (options.format === '4:5') {
+      // Portrait format (1080x1350) - crop do centro mantendo 4:5
+      vfFilters.push(
+        `crop=ih*4/5:ih:(iw-ih*4/5)/2:0`,
+        `scale=${width}:${height}:${scaleParams}`
+      );
     } else {
       // Keep original 16:9 - apenas scale se necessário
       vfFilters.push(`scale=${width}:${height}:${scaleParams}`);
@@ -503,7 +509,7 @@ function generateThumbnail(
  * Obtém resolução baseada no formato
  * Usa resoluções MENORES para evitar upscale excessivo e preservar qualidade
  */
-export function getResolutionForFormat(format: '9:16' | '16:9' | '1:1'): { width: number; height: number } {
+export function getResolutionForFormat(format: '9:16' | '16:9' | '1:1' | '4:5'): { width: number; height: number } {
   switch (format) {
     case '9:16':
       // 1080x1920 para MÁXIMA QUALIDADE
@@ -512,6 +518,8 @@ export function getResolutionForFormat(format: '9:16' | '16:9' | '1:1'): { width
       return { width: 1080, height: 1920 };
     case '1:1':
       return { width: 1080, height: 1080 };
+    case '4:5':
+      return { width: 1080, height: 1350 };
     case '16:9':
     default:
       return { width: 1920, height: 1080 };

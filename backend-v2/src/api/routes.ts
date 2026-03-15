@@ -1147,6 +1147,7 @@ export async function registerRoutes(app: FastifyInstance) {
       timeframe: finalConfig.timeframe,
       genre: finalConfig.genre,
       specificMoments: finalConfig.specificMoments,
+      aspectRatio: finalConfig.aspectRatio,
       createdAt: new Date(),
     };
 

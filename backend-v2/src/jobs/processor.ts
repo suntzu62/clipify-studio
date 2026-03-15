@@ -73,6 +73,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
   const effectiveMinDuration = clipSettings?.minDuration ?? 30;
   const effectiveMaxDuration = clipSettings?.maxDuration ?? 90;
   const clippingModel = clipSettings?.model ?? 'ClipAnything';
+  const effectiveAspectRatio = job.data.aspectRatio || '9:16';
   const startTime = Date.now();
 
   logger.info(
@@ -88,6 +89,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       hasTimeframe: Boolean(timeframe),
       genre,
       hasSpecificMoments: Boolean(specificMoments),
+      aspectRatio: effectiveAspectRatio,
     },
     'Starting video processing'
   );
@@ -228,7 +230,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
           {
             clipIndex: idx,
             totalClips: highlightAnalysis.segments.length,
-            format: '9:16',
+            format: effectiveAspectRatio,
             addSubtitles: true,
             font: subtitlePreferences.font,
             preset: 'ultrafast',

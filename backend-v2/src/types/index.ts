@@ -110,6 +110,7 @@ export const StartJobFromTempSchema = z.object({
   timeframe: TimeframeConfigSchema.optional(),
   genre: z.string().optional(),
   specificMoments: z.string().optional(),
+  aspectRatio: z.enum(['9:16', '1:1', '4:5', '16:9']).default('9:16'),
 });
 
 export type StartJobFromTempInput = z.infer<typeof StartJobFromTempSchema>;
@@ -127,6 +128,8 @@ export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
 // JOB DATA TYPES
 // ============================================
 
+export type AspectRatio = '9:16' | '1:1' | '4:5' | '16:9';
+
 export interface JobData {
   jobId: string;
   userId: string;
@@ -141,6 +144,7 @@ export interface JobData {
   timeframe?: TimeframeConfig;
   genre?: string;
   specificMoments?: string;
+  aspectRatio?: AspectRatio;
   createdAt: Date;
 }
 

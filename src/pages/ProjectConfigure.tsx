@@ -359,6 +359,7 @@ export default function ProjectConfigure() {
         timeframe: config.timeframe,
         genre: config.genre,
         specificMoments: config.specificMoments,
+        aspectRatio,
       };
       const response = await fetchWithTimeout(`${baseUrl}/jobs/temp/${tempId}/start`, {
         method: 'POST',
