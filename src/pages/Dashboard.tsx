@@ -668,17 +668,36 @@ const Dashboard = () => {
                     <CardContent className="p-8">
                       <EmptyState
                         icon={Video}
-                        title="Nenhum projeto ainda"
-                        description="Comece criando seu primeiro vídeo e acompanhe tudo por aqui."
+                        title="Bem-vindo ao Cortaí!"
+                        description="Transforme seus vídeos longos em clips virais em 3 passos simples:"
                         action={{
                           label: 'Criar Primeiro Vídeo',
                           onClick: () => navigate('/projects/new'),
                         }}
-                        secondaryAction={{
-                          label: 'Ir para projetos',
-                          onClick: () => navigate('/projects'),
-                        }}
                       />
+                      <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+                        <div className="flex gap-3 items-start p-3 rounded-lg bg-white/5">
+                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">1</span>
+                          <div>
+                            <p className="text-sm font-medium text-white">Cole a URL</p>
+                            <p className="text-xs text-white/50">Cole um link do YouTube ou faça upload</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-3 items-start p-3 rounded-lg bg-white/5">
+                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">2</span>
+                          <div>
+                            <p className="text-sm font-medium text-white">IA processa</p>
+                            <p className="text-xs text-white/50">Detectamos os melhores momentos automaticamente</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-3 items-start p-3 rounded-lg bg-white/5">
+                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">3</span>
+                          <div>
+                            <p className="text-sm font-medium text-white">Baixe os clips</p>
+                            <p className="text-xs text-white/50">Prontos para TikTok, Reels e Shorts</p>
+                          </div>
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 ) : (

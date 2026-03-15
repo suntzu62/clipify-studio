@@ -28,12 +28,14 @@ const Billing = () => {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const loadUsage = async () => {
     if (!user) return;
 
     try {
       setLoading(true);
+      setLoadError(false);
       const [usageData, subData] = await Promise.all([
         getUsageLimits(),
         getCurrentSubscription(),
@@ -43,9 +45,10 @@ const Billing = () => {
       setSubscription(subData.subscription);
     } catch (error) {
       console.error("Error loading usage:", error);
+      setLoadError(true);
       toast({
-        title: "Erro",
-        description: "Não foi possível carregar os dados de uso.",
+        title: "Erro ao carregar dados",
+        description: "Não foi possível carregar seu plano e uso. Verifique sua conexão e tente novamente.",
         variant: "destructive",
       });
     } finally {
@@ -158,6 +161,24 @@ const Billing = () => {
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
             <p className="text-muted-foreground">Carregando informações de billing...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError && !usage) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center max-w-md">
+            <h2 className="text-xl font-semibold mb-2">Erro ao carregar dados</h2>
+            <p className="text-muted-foreground mb-6">
+              Não conseguimos carregar as informações do seu plano. Isso pode ser um problema temporário de conexão.
+            </p>
+            <Button onClick={loadUsage} size="lg">
+              Tentar novamente
+            </Button>
           </div>
         </div>
       </div>

@@ -149,7 +149,7 @@ export const ClipPlayerModal = ({
                 />
               ) : (
                 <div className="flex items-center justify-center h-full">
-                  <p className="text-white text-sm">Video nao disponivel</p>
+                  <p className="text-white text-sm">Vídeo não disponível</p>
                 </div>
               )}
 

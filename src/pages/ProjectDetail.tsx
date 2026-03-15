@@ -174,8 +174,8 @@ export default function ProjectDetail() {
       }
 
       toast({
-        title: "Projeto nao encontrado",
-        description: "O projeto solicitado nao foi encontrado. Tente novamente.",
+        title: "Projeto não encontrado",
+        description: "O projeto solicitado não foi encontrado. Tente novamente.",
         variant: "destructive"
       });
       navigate('/dashboard');
@@ -222,14 +222,14 @@ export default function ProjectDetail() {
   const handleCopyJobId = () => {
     if (id) {
       navigator.clipboard.writeText(id);
-      toast({ title: "ID copiado!", description: "ID do projeto copiado para a area de transferencia" });
+      toast({ title: "ID copiado!", description: "ID do projeto copiado para a área de transferência" });
     }
   };
 
   const handleRetry = async () => {
     const youtubeUrl = job?.youtubeUrl || jobStatus?.result?.metadata?.url;
     if (!youtubeUrl || !isValidYouTubeUrl(youtubeUrl)) {
-      toast({ title: "Nao e possivel tentar novamente", description: "URL do YouTube nao disponivel.", variant: "destructive" });
+      toast({ title: "Não é possível tentar novamente", description: "URL do YouTube não disponível.", variant: "destructive" });
       navigate('/dashboard');
       return;
     }

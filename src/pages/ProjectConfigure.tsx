@@ -315,11 +315,11 @@ export default function ProjectConfigure() {
         }, 20000);
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.message || 'Configuracao nao encontrada ou expirada');
+          throw new Error(errorData.message || 'Configuração não encontrada ou expirada');
         }
         const data = await response.json();
         if (!data.clipSettings || !data.subtitlePreferences) {
-          throw new Error('Dados de configuracao incompletos');
+          throw new Error('Dados de configuração incompletos');
         }
         setConfig(data);
         // Apply "Viral Boost" as default
@@ -330,10 +330,10 @@ export default function ProjectConfigure() {
       } catch (error: unknown) {
         console.error('Failed to load temp config:', error);
         toast({
-          title: 'Erro ao carregar configuracao',
+          title: 'Erro ao carregar configuração',
           description: getErrorMessage(
             error,
-            'A configuracao pode ter expirado (1 hora). Tente criar um novo projeto.',
+            'A configuração pode ter expirado (1 hora). Tente criar um novo projeto.',
           ),
           variant: 'destructive',
         });
@@ -370,7 +370,7 @@ export default function ProjectConfigure() {
         throw new Error(responseData.error || responseData.message || 'Falha ao iniciar processamento');
       }
       const { jobId } = responseData;
-      if (!jobId) throw new Error('JobId nao foi retornado pelo servidor');
+      if (!jobId) throw new Error('JobId não foi retornado pelo servidor');
 
       if (user?.id && config) {
         const job: Job = {
