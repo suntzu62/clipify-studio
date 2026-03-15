@@ -293,11 +293,20 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
         });
 
         logger.info({ jobId, clipId: renderedClip.id, storageUrl: videoUpload.publicUrl }, 'Clip rendered, uploaded and saved to database');
+      } catch (clipError: any) {
+        logger.error(
+          { jobId, clipId, clipIndex: idx, error: clipError.message, stack: clipError.stack },
+          'Failed to render/upload clip, skipping to next'
+        );
       } finally {
         if (clipOutputDir) {
           await cleanupRenderDir(clipOutputDir);
         }
       }
+    }
+
+    if (clips.length === 0) {
+      throw new Error('All clips failed to render');
     }
 
     logger.info(
