@@ -247,8 +247,8 @@ function createScenesFromBoundaries(
     const sceneEnd = boundary.timestamp;
     const duration = sceneEnd - sceneStart;
 
-    // Only create scene if duration is reasonable
-    if (duration >= minDuration && duration <= maxDuration * 1.5) {
+    // Only create scene if duration is reasonable (use relaxed minimum to capture more candidates)
+    if (duration >= minDuration * 0.5 && duration <= maxDuration * 1.5) {
       // Apply padding (but don't go negative or beyond video duration)
       const paddedStart = Math.max(0, sceneStart - padding);
       const paddedEnd = Math.min(transcript.duration, sceneEnd + padding);
@@ -277,7 +277,7 @@ function createScenesFromBoundaries(
   // Add final scene
   if (sceneStart < transcript.duration) {
     const duration = transcript.duration - sceneStart;
-    if (duration >= minDuration) {
+    if (duration >= minDuration * 0.5) {
       const paddedStart = Math.max(0, sceneStart - padding);
       const sceneSegments = transcript.segments.filter(
         (seg) => seg.start >= paddedStart && seg.end <= transcript.duration
@@ -295,8 +295,8 @@ function createScenesFromBoundaries(
     }
   }
 
-  // Filter out scenes that are too long
-  return scenes.filter((scene) => scene.duration <= maxDuration);
+  // Filter out scenes that are too long (keep relaxed minimum for more candidates)
+  return scenes.filter((scene) => scene.duration <= maxDuration * 1.2);
 }
 
 /**

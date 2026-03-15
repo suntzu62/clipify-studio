@@ -59,7 +59,7 @@ export async function analyzeHighlights(
       minSceneDuration: minDuration,
       maxSceneDuration: maxDuration,
       padding: 0.4, // 400ms padding for smooth transitions
-      targetSceneCount: Math.max(clipCount * 2, 12), // Detect more scenes than needed for ranking
+      targetSceneCount: Math.max(clipCount * 3, 20), // Detect significantly more scenes than needed for better ranking
     });
 
     logger.info(

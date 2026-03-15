@@ -253,7 +253,7 @@ export async function registerRoutes(app: FastifyInstance) {
       storagePath: z.string(),
       fileName: z.string(),
       targetDuration: z.number().min(15).max(90).default(60),
-      clipCount: z.number().min(1).max(10).default(5),
+      clipCount: z.number().min(1).max(20).default(8),
     });
 
     const parsed = schema.safeParse(request.body);

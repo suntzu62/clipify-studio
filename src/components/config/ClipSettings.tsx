@@ -205,7 +205,7 @@ export const ClipSettings = ({ settings, onChange }: ClipSettingsProps) => {
             value={[settings.clipCount]}
             onValueChange={([value]) => updateSetting('clipCount', value)}
             min={3}
-            max={15}
+            max={20}
             step={1}
             className="w-full"
           />
