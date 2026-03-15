@@ -1,5 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 
+export type AspectRatioType = 'portrait' | 'landscape' | 'square';
+
 interface OptimizedPlayerProps {
   url: string;
   title?: string;
@@ -9,6 +11,7 @@ interface OptimizedPlayerProps {
   muted?: boolean;
   controls?: boolean;
   poster?: string;
+  onAspectRatioDetected?: (ratio: AspectRatioType, width: number, height: number) => void;
 }
 
 const OptimizedPlayer = memo(({
@@ -20,6 +23,7 @@ const OptimizedPlayer = memo(({
   muted = false,
   controls = true,
   poster,
+  onAspectRatioDetected,
 }: OptimizedPlayerProps) => {
   const [hasError, setHasError] = useState(false);
   const videoUrl = useMemo(() => url?.trim() || '', [url]);
@@ -87,6 +91,16 @@ const OptimizedPlayer = memo(({
             console.log('[OptimizedPlayer] Video load started:', videoUrl);
           }}
           onLoadedData={() => console.log('[OptimizedPlayer] Video data loaded:', videoUrl)}
+          onLoadedMetadata={(e) => {
+            const video = e.currentTarget;
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+            if (w && h && onAspectRatioDetected) {
+              const ratio = w / h;
+              const type: AspectRatioType = ratio > 1.2 ? 'landscape' : ratio < 0.8 ? 'portrait' : 'square';
+              onAspectRatioDetected(type, w, h);
+            }
+          }}
         >
           Seu navegador não suporta reprodução de vídeo.
         </video>

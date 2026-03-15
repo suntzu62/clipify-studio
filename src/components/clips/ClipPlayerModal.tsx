@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Clip } from '@/hooks/useClipList';
 import { Player } from '@/components/Player';
+import type { AspectRatioType } from '@/components/Player';
 import { useClipActions } from '@/hooks/useClipActions';
 import { cn } from '@/lib/utils';
 
@@ -81,6 +82,12 @@ export const ClipPlayerModal = ({
   const viralIntel = clip?.viralIntel;
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < clips.length - 1;
+  const [aspectRatio, setAspectRatio] = useState<AspectRatioType>('portrait');
+
+  // Reset aspect ratio when clip changes
+  useEffect(() => {
+    setAspectRatio('portrait');
+  }, [currentIndex]);
 
   const {
     canPerformActions,
@@ -119,15 +126,26 @@ export const ClipPlayerModal = ({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[95vw] md:max-w-7xl h-[95vh] p-0 overflow-hidden bg-gradient-to-br from-background via-background to-muted/20">
-        <div className="flex flex-col lg:flex-row h-full overflow-hidden">
-          {/* Left Side - Video Player */}
-          <div className="lg:w-[500px] xl:w-[600px] flex-shrink-0 bg-black flex flex-col relative">
+        <div className={cn(
+          "flex h-full overflow-hidden",
+          aspectRatio === 'landscape' ? "flex-col" : "flex-col lg:flex-row"
+        )}>
+          {/* Left/Top Side - Video Player */}
+          <div className={cn(
+            "flex-shrink-0 bg-black flex flex-col relative transition-all duration-300",
+            aspectRatio === 'landscape'
+              ? "w-full h-[50vh] lg:h-[60vh]"
+              : aspectRatio === 'square'
+              ? "lg:w-[55%] xl:w-[50%]"
+              : "lg:w-[400px] xl:w-[480px]"
+          )}>
             <div className="relative flex-1 overflow-hidden">
               {(clip.previewUrl || clip.downloadUrl) ? (
                 <Player
                   url={clip.previewUrl || clip.downloadUrl || ''}
                   poster={clip.thumbnailUrl}
                   className="absolute inset-0 w-full h-full"
+                  onAspectRatioDetected={(ratio) => setAspectRatio(ratio)}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full">
