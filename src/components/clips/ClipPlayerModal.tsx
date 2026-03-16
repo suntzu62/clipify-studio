@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
   Download,
   Share2,
-  Clock,
-  Target,
-  Eye,
-  Sparkles,
   ChevronRight,
   ChevronLeft,
-  Play,
+  Copy,
+  Clock,
+  Eye,
+  TrendingUp,
+  Zap,
+  X,
 } from 'lucide-react';
 import { Clip } from '@/hooks/useClipList';
 import { Player } from '@/components/Player';
@@ -30,27 +30,45 @@ interface ClipPlayerModalProps {
 }
 
 const getScoreColor = (score: number) => {
-  if (score >= 90) return 'text-green-400';
-  if (score >= 80) return 'text-blue-400';
-  if (score >= 70) return 'text-yellow-400';
-  return 'text-gray-400';
+  if (score >= 85) return 'text-emerald-400';
+  if (score >= 70) return 'text-amber-400';
+  if (score >= 55) return 'text-orange-400';
+  return 'text-white/50';
 };
 
-const getScoreBg = (score: number) => {
-  if (score >= 90) return 'from-green-500/20 to-green-500/5 border-green-500/30';
-  if (score >= 80) return 'from-blue-500/20 to-blue-500/5 border-blue-500/30';
-  if (score >= 70) return 'from-yellow-500/20 to-yellow-500/5 border-yellow-500/30';
-  return 'from-gray-500/20 to-gray-500/5 border-gray-500/30';
+const getScoreRing = (score: number) => {
+  if (score >= 85) return 'ring-emerald-500/40';
+  if (score >= 70) return 'ring-amber-500/40';
+  if (score >= 55) return 'ring-orange-500/40';
+  return 'ring-white/20';
 };
 
 const getScoreLabel = (score: number) => {
-  if (score >= 90) return 'Viral';
-  if (score >= 80) return 'Excelente';
+  if (score >= 85) return 'Viral';
   if (score >= 70) return 'Bom';
-  return 'Medio';
+  if (score >= 55) return 'Medio';
+  return 'Baixo';
 };
 
-const PlatformIcon = ({ platform, className = 'w-3.5 h-3.5' }: { platform: string; className?: string }) => {
+const getGradeColor = (score: number) => {
+  if (score >= 85) return 'text-emerald-400';
+  if (score >= 75) return 'text-blue-400';
+  if (score >= 65) return 'text-amber-400';
+  return 'text-white/40';
+};
+
+const getGrade = (score: number) => {
+  if (score >= 90) return 'A+';
+  if (score >= 85) return 'A';
+  if (score >= 80) return 'A-';
+  if (score >= 75) return 'B+';
+  if (score >= 70) return 'B';
+  if (score >= 65) return 'B-';
+  if (score >= 60) return 'C+';
+  return 'C';
+};
+
+const PlatformIcon = ({ platform, className = 'w-4 h-4' }: { platform: string; className?: string }) => {
   switch (platform) {
     case 'tiktok':
       return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 20.1a6.34 6.34 0 0010.86-4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.1z"/></svg>;
@@ -84,7 +102,6 @@ export const ClipPlayerModal = ({
   const hasNext = currentIndex < clips.length - 1;
   const [aspectRatio, setAspectRatio] = useState<AspectRatioType>('portrait');
 
-  // Reset aspect ratio when clip changes
   useEffect(() => {
     setAspectRatio('portrait');
   }, [currentIndex]);
@@ -110,36 +127,64 @@ export const ClipPlayerModal = ({
     if (hasNext) onNavigate(currentIndex + 1);
   }, [hasNext, currentIndex, onNavigate]);
 
-  // Keyboard navigation
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
       if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
+      if (e.key === 'Escape') { e.preventDefault(); onOpenChange(false); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, goPrev, goNext]);
+  }, [open, goPrev, goNext, onOpenChange]);
 
   if (!clip || !viralIntel) return null;
 
+  const bestPlatform = viralIntel.platformPredictions.find(
+    (p) => p.platform === viralIntel.recommendedPlatform
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[95vw] md:max-w-7xl h-[95vh] p-0 overflow-hidden bg-gradient-to-br from-background via-background to-muted/20">
-        <div className={cn(
-          "flex h-full overflow-hidden",
-          aspectRatio === 'landscape' ? "flex-col" : "flex-col lg:flex-row"
-        )}>
-          {/* Left/Top Side - Video Player */}
-          <div className={cn(
-            "flex-shrink-0 bg-black flex flex-col relative transition-all duration-300",
-            aspectRatio === 'landscape'
-              ? "w-full h-[50vh] lg:h-[60vh]"
-              : aspectRatio === 'square'
-              ? "lg:w-[55%] xl:w-[50%]"
-              : "lg:w-[400px] xl:w-[480px]"
-          )}>
-            <div className="relative flex-1 overflow-hidden">
+      <DialogContent className="max-w-[920px] w-[95vw] p-0 overflow-hidden bg-[#0c0c14] border border-white/[0.08] rounded-2xl shadow-2xl shadow-black/60 gap-0">
+        {/* Top bar */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-white/90">
+              #{currentIndex + 1}
+            </span>
+            <h2 className="text-sm font-medium text-white/80 truncate max-w-[400px]">
+              {clip.title}
+            </h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-white/30 mr-1">
+              {currentIndex + 1} de {clips.length}
+            </span>
+            <button
+              onClick={() => onOpenChange(false)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/[0.08] transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Main content */}
+        <div className="flex flex-col md:flex-row">
+          {/* Video section */}
+          <div className="relative flex-shrink-0 bg-black">
+            <div
+              className={cn(
+                'relative',
+                aspectRatio === 'landscape'
+                  ? 'w-full md:w-[520px] aspect-video'
+                  : aspectRatio === 'square'
+                  ? 'w-full md:w-[420px] aspect-square'
+                  : 'w-full md:w-[320px] aspect-[9/16]'
+              )}
+              style={{ maxHeight: '70vh' }}
+            >
               {(clip.previewUrl || clip.downloadUrl) ? (
                 <Player
                   url={clip.previewUrl || clip.downloadUrl || ''}
@@ -149,283 +194,241 @@ export const ClipPlayerModal = ({
                 />
               ) : (
                 <div className="flex items-center justify-center h-full">
-                  <p className="text-white text-sm">Vídeo não disponível</p>
+                  <p className="text-white/40 text-sm">Video indisponivel</p>
                 </div>
               )}
 
-              {/* Floating Score Badge */}
-              <div className="absolute top-4 left-4 z-10">
-                <div className={cn(
-                  "flex items-center gap-2 px-4 py-3 rounded-xl border-2 backdrop-blur-xl shadow-2xl bg-gradient-to-r",
-                  getScoreBg(viralIntel.overallScore)
-                )}>
-                  <div className="flex flex-col items-center">
-                    <span className={cn("text-3xl font-black", getScoreColor(viralIntel.overallScore))}>
-                      {viralIntel.overallScore}
-                    </span>
-                    <span className="text-[10px] text-white/80 font-semibold">/100</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs text-white/70 leading-none mb-1">VIRAL</span>
-                    <span className={cn("text-sm font-bold leading-none", getScoreColor(viralIntel.overallScore))}>
-                      {getScoreLabel(viralIntel.overallScore)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Clip counter */}
-              <div className="absolute top-4 right-4 z-10">
-                <span className="text-xs font-semibold bg-black/70 text-white px-2.5 py-1 rounded-lg backdrop-blur-sm">
-                  {currentIndex + 1} / {clips.length}
-                </span>
-              </div>
-
-              {/* Navigation arrows over video */}
+              {/* Navigation arrows */}
               {hasPrev && (
                 <button
                   onClick={goPrev}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm flex items-center justify-center text-white/80 hover:text-white transition-all"
+                  className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white transition-all"
                 >
-                  <ChevronLeft className="w-5 h-5" />
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
               )}
               {hasNext && (
                 <button
                   onClick={goNext}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm flex items-center justify-center text-white/80 hover:text-white transition-all"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white transition-all"
                 >
-                  <ChevronRight className="w-5 h-5" />
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               )}
             </div>
-
-            {/* Action Buttons */}
-            <div className="p-4 bg-black/90 backdrop-blur grid grid-cols-2 gap-3">
-              <Button
-                variant="secondary"
-                onClick={handleDownload}
-                disabled={!canPerformActions || isDownloading}
-                className="w-full"
-              >
-                {isDownloading ? (
-                  <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin mr-2" />
-                ) : (
-                  <Download className="w-4 h-4 mr-2" />
-                )}
-                Baixar HD
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => handleCopy(clip.downloadUrl || '', 'Link')}
-                className="w-full"
-              >
-                <Share2 className="w-4 h-4 mr-2" />
-                Compartilhar
-              </Button>
-            </div>
           </div>
 
-          {/* Right Side - Rich Information */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="p-6 space-y-6">
-              {/* Header */}
-              <div>
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <h2 className="text-2xl font-bold leading-tight">{clip.title}</h2>
-                  {viralIntel.ranking && (
-                    <Badge className="bg-primary text-primary-foreground shrink-0">
-                      #{viralIntel.ranking.position} de {viralIntel.ranking.total}
-                    </Badge>
-                  )}
+          {/* Info panel */}
+          <div className="flex-1 min-w-0 overflow-y-auto" style={{ maxHeight: '70vh' }}>
+            <div className="p-5 space-y-5">
+
+              {/* Score + Quick metrics row */}
+              <div className="flex items-start gap-4">
+                {/* Score ring */}
+                <div className={cn(
+                  'flex-shrink-0 w-16 h-16 rounded-2xl ring-2 flex flex-col items-center justify-center bg-white/[0.04]',
+                  getScoreRing(viralIntel.overallScore)
+                )}>
+                  <span className={cn('text-2xl font-black leading-none', getScoreColor(viralIntel.overallScore))}>
+                    {viralIntel.overallScore}
+                  </span>
+                  <span className={cn('text-[9px] font-bold uppercase tracking-wider mt-0.5', getScoreColor(viralIntel.overallScore))}>
+                    {getScoreLabel(viralIntel.overallScore)}
+                  </span>
                 </div>
-                <p className="text-muted-foreground leading-relaxed">{clip.description}</p>
+
+                {/* Quick metrics */}
+                <div className="flex-1 grid grid-cols-2 gap-2">
+                  <div className="px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.06]">
+                    <span className="text-[10px] text-white/30 uppercase tracking-wider">Hook</span>
+                    <span className={cn('block text-base font-bold', getGradeColor(viralIntel.contentAnalysis.audienceRetention))}>
+                      {getGrade(viralIntel.contentAnalysis.audienceRetention)}
+                    </span>
+                  </div>
+                  <div className="px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.06]">
+                    <span className="text-[10px] text-white/30 uppercase tracking-wider">Ritmo</span>
+                    <span className="block text-base font-bold text-white/80 capitalize">
+                      {viralIntel.contentAnalysis.pacing}
+                    </span>
+                  </div>
+                  <div className="px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.06]">
+                    <span className="text-[10px] text-white/30 uppercase tracking-wider">Emocao</span>
+                    <span className="block text-base font-bold text-white/80 capitalize">
+                      {viralIntel.contentAnalysis.emotion}
+                    </span>
+                  </div>
+                  <div className="px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.06]">
+                    <span className="text-[10px] text-white/30 uppercase tracking-wider">Duracao</span>
+                    <span className="block text-base font-bold text-white/80">
+                      {formatDuration(clip.duration)}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              {/* Viral Metrics Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="p-3 rounded-lg bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/20">
-                  <div className="text-xs text-muted-foreground mb-1">Ritmo</div>
-                  <div className="text-lg font-bold capitalize">{viralIntel.contentAnalysis.pacing}</div>
-                </div>
-                <div className="p-3 rounded-lg bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20">
-                  <div className="text-xs text-muted-foreground mb-1">Emocao</div>
-                  <div className="text-lg font-bold capitalize">{viralIntel.contentAnalysis.emotion}</div>
-                </div>
-                <div className="p-3 rounded-lg bg-gradient-to-br from-green-500/10 to-green-500/5 border border-green-500/20">
-                  <div className="text-xs text-muted-foreground mb-1">Retencao</div>
-                  <div className="text-lg font-bold">{viralIntel.contentAnalysis.audienceRetention}%</div>
-                </div>
-                <div className="p-3 rounded-lg bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/20">
-                  <div className="text-xs text-muted-foreground mb-1">Duracao</div>
-                  <div className="text-lg font-bold">{formatDuration(clip.duration)}</div>
-                </div>
-              </div>
+              {/* Description */}
+              <p className="text-[13px] text-white/50 leading-relaxed line-clamp-2">
+                {clip.description}
+              </p>
 
-              {/* Platform Performance */}
+              {/* Platform scores — compact row */}
               <div>
-                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                  <Target className="w-4 h-4" />
-                  Previsao por Plataforma
-                </h3>
-                <div className="space-y-3">
-                  {viralIntel.platformPredictions.map((pred) => (
-                    <div
-                      key={pred.platform}
-                      className={cn(
-                        "p-4 rounded-lg border-2 transition-all",
-                        pred.platform === viralIntel.recommendedPlatform
-                          ? "bg-primary/5 border-primary shadow-lg shadow-primary/10"
-                          : "bg-muted/30 border-muted"
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                          <div className={cn(
-                            "w-10 h-10 rounded-lg flex items-center justify-center",
-                            pred.platform === viralIntel.recommendedPlatform
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted"
-                          )}>
-                            <PlatformIcon platform={pred.platform} className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <div className="font-bold capitalize flex items-center gap-2">
-                              {pred.platform}
-                              {pred.platform === viralIntel.recommendedPlatform && (
-                                <Badge className="bg-green-500 text-white text-[10px] px-1.5 py-0">MELHOR</Badge>
-                              )}
-                            </div>
-                            <div className="text-xs text-muted-foreground">{pred.confidence} confianca</div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className={cn(
-                            "text-3xl font-black",
-                            pred.viralScore >= 85 ? "text-green-500" :
-                            pred.viralScore >= 75 ? "text-blue-500" : "text-yellow-500"
-                          )}>
-                            {pred.viralScore}
-                          </div>
-                          <div className="text-xs text-muted-foreground">score</div>
-                        </div>
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-3">{pred.reason}</p>
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        {pred.bestPostingTime && (
-                          <div className="flex items-center gap-2 p-2 bg-background/50 rounded">
-                            <Clock className="w-3 h-3 text-primary" />
-                            <div>
-                              <div className="font-medium">Melhor horario</div>
-                              <div className="text-muted-foreground">{pred.bestPostingTime}</div>
-                            </div>
-                          </div>
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-white/30" />
+                  <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">Plataformas</span>
+                </div>
+                <div className="space-y-1.5">
+                  {viralIntel.platformPredictions.map((pred) => {
+                    const isBest = pred.platform === viralIntel.recommendedPlatform;
+                    return (
+                      <div
+                        key={pred.platform}
+                        className={cn(
+                          'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all',
+                          isBest
+                            ? 'bg-gradient-to-r from-purple-500/[0.12] to-blue-500/[0.08] border border-purple-500/20'
+                            : 'bg-white/[0.03] border border-white/[0.04] hover:bg-white/[0.05]'
                         )}
-                        {pred.estimatedReach && (
-                          <div className="flex items-center gap-2 p-2 bg-background/50 rounded">
-                            <Eye className="w-3 h-3 text-green-500" />
-                            <div>
-                              <div className="font-medium">Alcance previsto</div>
-                              <div className="text-muted-foreground">
-                                {pred.estimatedReach.min >= 1000
-                                  ? `${(pred.estimatedReach.min/1000).toFixed(0)}k`
-                                  : pred.estimatedReach.min}-
-                                {pred.estimatedReach.max >= 1000
-                                  ? `${(pred.estimatedReach.max/1000).toFixed(0)}k`
-                                  : pred.estimatedReach.max}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Viral Insights */}
-              <div>
-                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" />
-                  Insights para Maximizar Resultados
-                </h3>
-                <div className="space-y-2">
-                  {viralIntel.insights.map((insight, idx) => (
-                    <div
-                      key={idx}
-                      className={cn(
-                        "p-3 rounded-lg border-l-4",
-                        insight.type === 'strength' && "bg-green-950/20 border-green-500",
-                        insight.type === 'opportunity' && "bg-blue-950/20 border-blue-500",
-                        insight.type === 'warning' && "bg-yellow-950/20 border-yellow-500"
-                      )}
-                    >
-                      <div className="flex gap-3">
-                        <span className="text-xl">{insight.icon}</span>
+                      >
+                        <div className={cn(
+                          'w-8 h-8 rounded-lg flex items-center justify-center',
+                          isBest ? 'bg-purple-500/20 text-purple-300' : 'bg-white/[0.06] text-white/40'
+                        )}>
+                          <PlatformIcon platform={pred.platform} className="w-4 h-4" />
+                        </div>
                         <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-sm mb-1">{insight.title}</div>
-                          <div className="text-xs text-muted-foreground mb-1">{insight.description}</div>
-                          {insight.actionable && (
-                            <div className="flex items-center gap-1 text-xs font-medium text-primary mt-2">
-                              <ChevronRight className="w-3 h-3" />
-                              {insight.actionable}
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-white/90 capitalize">{pred.platform}</span>
+                            {isBest && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded">
+                                Melhor
+                              </span>
+                            )}
+                          </div>
+                          {pred.bestPostingTime && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <Clock className="w-2.5 h-2.5 text-white/20" />
+                              <span className="text-[10px] text-white/30">{pred.bestPostingTime}</span>
                             </div>
                           )}
                         </div>
+                        <div className="text-right">
+                          <span className={cn(
+                            'text-xl font-black',
+                            pred.viralScore >= 80 ? 'text-emerald-400' :
+                            pred.viralScore >= 65 ? 'text-amber-400' : 'text-white/40'
+                          )}>
+                            {pred.viralScore}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Hashtags */}
-              {clip.hashtags.length > 0 && (
+              {/* Insights — compact */}
+              {viralIntel.insights.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-semibold mb-2">Hashtags Sugeridas</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {clip.hashtags.map((tag, i) => (
-                      <Badge
-                        key={i}
-                        variant="secondary"
-                        className="cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors"
-                        onClick={() => handleCopy(`#${tag}`, 'Hashtag')}
+                  <div className="flex items-center gap-1.5 mb-2.5">
+                    <Zap className="w-3.5 h-3.5 text-white/30" />
+                    <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">Insights</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {viralIntel.insights.slice(0, 3).map((insight, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-start gap-2.5 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04]"
                       >
-                        #{tag}
-                      </Badge>
+                        <span className="text-sm mt-0.5">{insight.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[12px] font-medium text-white/70">{insight.title}</span>
+                          {insight.actionable && (
+                            <span className="text-[11px] text-purple-300/70 block mt-0.5">{insight.actionable}</span>
+                          )}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Navigation footer */}
-              {clips.length > 1 && (
-                <div className="flex items-center justify-between pt-4 border-t border-white/10">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={goPrev}
-                    disabled={!hasPrev}
-                    className="gap-2 text-white/60 hover:text-white disabled:opacity-30"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                    Clip anterior
-                  </Button>
-                  <span className="text-xs text-white/40">
-                    Use as setas do teclado para navegar
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={goNext}
-                    disabled={!hasNext}
-                    className="gap-2 text-white/60 hover:text-white disabled:opacity-30"
-                  >
-                    Proximo clip
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
+              {/* Hashtags */}
+              {clip.hashtags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {clip.hashtags.map((tag, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleCopy(`#${tag}`, 'Hashtag')}
+                      className="text-[11px] px-2 py-1 rounded-md bg-white/[0.04] border border-white/[0.06] text-white/40 hover:text-white/70 hover:bg-white/[0.08] transition-colors"
+                    >
+                      #{tag}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Bottom action bar */}
+        <div className="flex items-center justify-between px-5 py-3 border-t border-white/[0.06] bg-white/[0.02]">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={goPrev}
+              disabled={!hasPrev}
+              className="h-8 px-2.5 text-white/40 hover:text-white disabled:opacity-20"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <span className="text-[11px] text-white/25 min-w-[60px] text-center">
+              Setas ←→
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={goNext}
+              disabled={!hasNext}
+              className="h-8 px-2.5 text-white/40 hover:text-white disabled:opacity-20"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleCopy(clip.title, 'Titulo')}
+              className="h-8 gap-1.5 text-[12px] text-white/40 hover:text-white"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              Copiar titulo
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleCopy(clip.downloadUrl || '', 'Link')}
+              className="h-8 gap-1.5 text-[12px] text-white/40 hover:text-white"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              Compartilhar
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleDownload}
+              disabled={!canPerformActions || isDownloading}
+              className="h-8 gap-1.5 text-[12px] bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 border-0 text-white font-semibold"
+            >
+              {isDownloading ? (
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              Baixar HD
+            </Button>
           </div>
         </div>
       </DialogContent>
