@@ -171,17 +171,17 @@ export const ClipPlayerModal = ({
         </div>
 
         {/* Main content */}
-        <div className="flex flex-col md:flex-row">
+        <div className="flex flex-col md:flex-row items-start">
           {/* Video section */}
-          <div className="relative flex-shrink-0 rounded-bl-2xl overflow-hidden bg-black">
-            <div className="relative flex items-center justify-center"
-              style={{
-                width: aspectRatio === 'landscape' ? 520 : aspectRatio === 'square' ? 380 : 300,
-                height: aspectRatio === 'landscape' ? 293 : aspectRatio === 'square' ? 380 : aspectRatio === 'portrait' ? 533 : 400,
-                maxHeight: '70vh',
-                transition: 'width 0.3s ease, height 0.3s ease',
-              }}
-            >
+          <div className="relative flex-shrink-0 rounded-bl-2xl overflow-hidden bg-black"
+            style={{
+              width: aspectRatio === 'landscape' ? 520 : aspectRatio === 'square' ? 380 : 300,
+              aspectRatio: aspectRatio === 'landscape' ? '16/9' : aspectRatio === 'square' ? '1/1' : '9/16',
+              maxHeight: '70vh',
+              transition: 'width 0.3s ease',
+            }}
+          >
+            <div className="relative w-full h-full">
               {(clip.previewUrl || clip.downloadUrl) ? (
                 <Player
                   url={clip.previewUrl || clip.downloadUrl || ''}
