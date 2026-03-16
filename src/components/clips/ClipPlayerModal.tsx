@@ -173,17 +173,17 @@ export const ClipPlayerModal = ({
         {/* Main content */}
         <div className="flex flex-col md:flex-row">
           {/* Video section */}
-          <div className="relative flex-shrink-0 bg-black">
+          <div className="relative flex-shrink-0 bg-black rounded-bl-2xl overflow-hidden">
             <div
               className={cn(
                 'relative',
                 aspectRatio === 'landscape'
                   ? 'w-full md:w-[520px] aspect-video'
                   : aspectRatio === 'square'
-                  ? 'w-full md:w-[420px] aspect-square'
-                  : 'w-full md:w-[320px] aspect-[9/16]'
+                  ? 'w-full md:w-[380px] aspect-square'
+                  : 'w-full md:w-[300px] aspect-[9/16]'
               )}
-              style={{ maxHeight: '70vh' }}
+              style={{ maxHeight: '65vh' }}
             >
               {(clip.previewUrl || clip.downloadUrl) ? (
                 <Player
