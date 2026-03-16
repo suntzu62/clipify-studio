@@ -173,10 +173,10 @@ export const ClipPlayerModal = ({
         {/* Main content */}
         <div className="flex flex-col md:flex-row">
           {/* Video section */}
-          <div className="relative flex-shrink-0 bg-black rounded-bl-2xl overflow-hidden">
+          <div className="relative flex-shrink-0 rounded-bl-2xl overflow-hidden h-fit">
             <div
               className={cn(
-                'relative',
+                'relative bg-black',
                 aspectRatio === 'landscape'
                   ? 'w-full md:w-[520px] aspect-video'
                   : aspectRatio === 'square'
