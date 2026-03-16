@@ -6,6 +6,7 @@ interface OptimizedPlayerProps {
   url: string;
   title?: string;
   className?: string;
+  style?: React.CSSProperties;
   playing?: boolean;
   loop?: boolean;
   muted?: boolean;
@@ -18,6 +19,7 @@ const OptimizedPlayer = memo(({
   url,
   title,
   className,
+  style,
   playing = false,
   loop = false,
   muted = false,
@@ -62,7 +64,7 @@ const OptimizedPlayer = memo(({
   }
 
   return (
-    <div className={`w-full h-full overflow-hidden ${className}`}>
+    <div className={`w-full h-full overflow-hidden ${className}`} style={style}>
       <div className="relative w-full h-full bg-black video-player-container">
         <video
           key={videoUrl}

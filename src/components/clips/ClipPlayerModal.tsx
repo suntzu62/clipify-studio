@@ -100,10 +100,10 @@ export const ClipPlayerModal = ({
   const viralIntel = clip?.viralIntel;
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < clips.length - 1;
-  const [aspectRatio, setAspectRatio] = useState<AspectRatioType>('portrait');
+  const [aspectRatio, setAspectRatio] = useState<AspectRatioType | null>(null);
 
   useEffect(() => {
-    setAspectRatio('portrait');
+    setAspectRatio(null);
   }, [currentIndex]);
 
   const {
@@ -173,27 +173,24 @@ export const ClipPlayerModal = ({
         {/* Main content */}
         <div className="flex flex-col md:flex-row">
           {/* Video section */}
-          <div className="relative flex-shrink-0 rounded-bl-2xl overflow-hidden h-fit">
-            <div
-              className={cn(
-                'relative bg-black',
-                aspectRatio === 'landscape'
-                  ? 'w-full md:w-[520px] aspect-video'
-                  : aspectRatio === 'square'
-                  ? 'w-full md:w-[380px] aspect-square'
-                  : 'w-full md:w-[300px] aspect-[9/16]'
-              )}
-              style={{ maxHeight: '65vh' }}
+          <div className="relative flex-shrink-0 rounded-bl-2xl overflow-hidden bg-black">
+            <div className="relative flex items-center justify-center"
+              style={{
+                width: aspectRatio === 'landscape' ? 520 : aspectRatio === 'square' ? 380 : 300,
+                height: aspectRatio === 'landscape' ? 293 : aspectRatio === 'square' ? 380 : aspectRatio === 'portrait' ? 533 : 400,
+                maxHeight: '70vh',
+                transition: 'width 0.3s ease, height 0.3s ease',
+              }}
             >
               {(clip.previewUrl || clip.downloadUrl) ? (
                 <Player
                   url={clip.previewUrl || clip.downloadUrl || ''}
                   poster={clip.thumbnailUrl}
-                  className="absolute inset-0 w-full h-full"
+                  className="w-full h-full"
                   onAspectRatioDetected={(ratio) => setAspectRatio(ratio)}
                 />
               ) : (
-                <div className="flex items-center justify-center h-full">
+                <div className="flex items-center justify-center w-full h-full">
                   <p className="text-white/40 text-sm">Video indisponivel</p>
                 </div>
               )}
