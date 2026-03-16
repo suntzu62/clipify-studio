@@ -295,7 +295,8 @@ async function renderSingleClip(
         end,
         outputDir,
         clipId,
-        subtitlePrefs
+        subtitlePrefs,
+        options.format
       );
       if (subtitlesFilter) {
         vfFilters.push(subtitlesFilter);
@@ -399,7 +400,8 @@ export async function buildSubtitlesFilter(
   end: number,
   outputDir: string,
   clipId: string,
-  subtitlePreferences: SubtitlePreferences
+  subtitlePreferences: SubtitlePreferences,
+  format: string = '9:16'
 ): Promise<string | null> {
   // Get relevant segments for this clip
   const clipSegments = transcript.segments.filter(
@@ -415,14 +417,25 @@ export async function buildSubtitlesFilter(
   const duration = end - start;
   const adjustedFontSize = adjustFontSize(totalText, duration, subtitlePreferences.fontSize);
 
+  // Adjust maxCharsPerLine for wider formats
+  let adjustedMaxChars = subtitlePreferences.maxCharsPerLine;
+  if (format === '16:9') {
+    adjustedMaxChars = Math.min(50, adjustedMaxChars + 15); // wider screen = longer lines
+  } else if (format === '1:1') {
+    adjustedMaxChars = Math.min(40, adjustedMaxChars + 8);
+  } else if (format === '4:5') {
+    adjustedMaxChars = Math.min(36, adjustedMaxChars + 5);
+  }
+
   const adjustedPreferences = {
     ...subtitlePreferences,
     fontSize: adjustedFontSize,
+    maxCharsPerLine: adjustedMaxChars,
   };
 
-  // Generate ASS file with custom styling
+  // Generate ASS file with custom styling, passing format for resolution/scaling
   const assPath = join(outputDir, `${clipId}.ass`);
-  const assContent = generateASS(clipSegments, start, adjustedPreferences);
+  const assContent = generateASS(clipSegments, start, adjustedPreferences, format);
 
   await fs.writeFile(assPath, assContent);
 

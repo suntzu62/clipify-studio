@@ -81,12 +81,49 @@ function getAssAlignment(position: SubtitlePreferences['position']): number {
 }
 
 /**
+ * Resolução de referência ASS por formato de vídeo
+ */
+function getAssPlayRes(format: string): { x: number; y: number } {
+  switch (format) {
+    case '9:16':
+      return { x: 720, y: 1280 };
+    case '1:1':
+      return { x: 1080, y: 1080 };
+    case '4:5':
+      return { x: 1080, y: 1350 };
+    case '16:9':
+      return { x: 1920, y: 1080 };
+    default:
+      return { x: 720, y: 1280 };
+  }
+}
+
+/**
+ * Multiplier de font size por formato — legendas maiores em telas mais largas
+ */
+function getFontScaleForFormat(format: string): number {
+  switch (format) {
+    case '9:16':
+      return 1.0;     // base — otimizado para mobile vertical
+    case '1:1':
+      return 1.35;    // quadrado precisa de fonte maior
+    case '4:5':
+      return 1.2;     // levemente maior que 9:16
+    case '16:9':
+      return 1.6;     // horizontal precisa de fonte bem maior
+    default:
+      return 1.0;
+  }
+}
+
+/**
  * Gera arquivo ASS (Advanced SubStation Alpha) com estilos personalizados
  */
 export function generateASS(
   segments: TranscriptSegment[],
   startOffset: number,
-  preferences: SubtitlePreferences
+  preferences: SubtitlePreferences,
+  format: string = '9:16'
 ): string {
   const {
     font,
@@ -105,18 +142,26 @@ export function generateASS(
     maxCharsPerLine,
   } = preferences;
 
-  // ASS Header - Configurado para 720x1280 (9:16) - resolução otimizada para qualidade
+  const playRes = getAssPlayRes(format);
+  const fontScale = getFontScaleForFormat(format);
+  const scaledFontSize = Math.round(fontSize * fontScale);
+
+  // Margin e outline escalados proporcionalmente
+  const scaledMarginV = Math.round(preferences.marginVertical * (playRes.y / 1280));
+  const scaledMarginH = Math.round(30 * (playRes.x / 720));
+  const scaledOutlineWidth = Math.round(outlineWidth * fontScale);
+
   const header = `[Script Info]
 Title: Generated Subtitles
 ScriptType: v4.00+
 WrapStyle: 0
-PlayResX: 720
-PlayResY: 1280
+PlayResX: ${playRes.x}
+PlayResY: ${playRes.y}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${font},${Math.round(fontSize * 0.67)},${hexToAssColor(fontColor)},${hexToAssColor(fontColor)},${hexToAssColor(outlineColor)},${hexToAssColor(backgroundColor)}${opacityToAssAlpha(backgroundOpacity)},${bold ? '-1' : '0'},${italic ? '-1' : '0'},0,0,100,100,0,0,${outline ? '1' : '0'},${outline ? outlineWidth : '0'},${shadow ? '2' : '0'},${getAssAlignment(position)},30,30,${Math.round(preferences.marginVertical * 0.67)},1
+Style: Default,${font},${scaledFontSize},${hexToAssColor(fontColor)},${hexToAssColor(fontColor)},${hexToAssColor(outlineColor)},${hexToAssColor(backgroundColor)}${opacityToAssAlpha(backgroundOpacity)},${bold ? '-1' : '0'},${italic ? '-1' : '0'},0,0,100,100,0,0,${outline ? '1' : '0'},${outline ? scaledOutlineWidth : '0'},${shadow ? '2' : '0'},${getAssAlignment(position)},${scaledMarginH},${scaledMarginH},${scaledMarginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
