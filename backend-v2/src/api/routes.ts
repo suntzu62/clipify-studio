@@ -495,7 +495,7 @@ export async function registerRoutes(app: FastifyInstance) {
       const dbState = dbJob.status || 'queued';
       const progressValue = Number(dbJob.progress || 0);
 
-      const dbClipRows = dbState === 'completed' ? await dbClips.findByJobId(jobId) : [];
+      const dbClipRows = await dbClips.findByJobId(jobId);
       const transformClip = (clip: any) => {
         const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
         return {
@@ -539,7 +539,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
       const dbState = dbJob.status || 'queued';
       const progressValue = Number(dbJob.progress || 0);
-      const dbClipRows = dbState === 'completed' ? await dbClips.findByJobId(jobId) : [];
+      const dbClipRows = await dbClips.findByJobId(jobId);
       const transformClip = (clip: any) => {
         const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
         return {
