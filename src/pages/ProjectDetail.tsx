@@ -650,16 +650,16 @@ export default function ProjectDetail() {
             </div>
           </div>
 
-          {/* Error banner */}
-          {errorMsg && (
+          {/* Error banner — only show when job actually failed, not during active processing */}
+          {errorMsg && isFailed && (
             <div className="mb-6 px-4 py-3 rounded-xl bg-red-500/[0.08] border border-red-500/[0.15] flex items-center gap-2.5">
               <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
               <span className="text-sm text-red-300">{errorMsg}</span>
             </div>
           )}
 
-          {/* Stalled warning */}
-          {(stalled || jobStatus?.pipelineStatus?.isStalled) && (
+          {/* Stalled warning — only show if job is not actively processing */}
+          {(stalled || jobStatus?.pipelineStatus?.isStalled) && !isProcessing && (
             <div className="mb-6 px-4 py-4 rounded-xl bg-yellow-500/[0.06] border border-yellow-500/[0.12]">
               <div className="flex items-center gap-2 mb-3">
                 <AlertCircle className="w-4 h-4 text-yellow-400" />
