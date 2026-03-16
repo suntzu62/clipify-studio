@@ -279,8 +279,11 @@ async function renderSingleClip(
         `scale=${width}:${height}:${scaleParams}`
       );
     } else {
-      // Keep original 16:9 - apenas scale se necessário
-      vfFilters.push(`scale=${width}:${height}:${scaleParams}`);
+      // Keep original 16:9 - scale preserving aspect ratio, pad if needed
+      vfFilters.push(
+        `scale=${width}:${height}:${scaleParams}:force_original_aspect_ratio=decrease`,
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`
+      );
     }
 
     // Add subtitles if requested

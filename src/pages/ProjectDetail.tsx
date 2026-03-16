@@ -70,7 +70,7 @@ const STEP_DETAILS: Record<string, { label: string; activeLabel: string }> = {
   transcribe: { label: 'Transcrição', activeLabel: 'Convertendo fala em texto com IA...' },
   scenes: { label: 'Detecção', activeLabel: 'Identificando os melhores momentos...' },
   rank: { label: 'Ranking', activeLabel: 'Selecionando clips mais virais...' },
-  render: { label: 'Renderização', activeLabel: 'Criando vídeos otimizados em 9:16...' },
+  render: { label: 'Renderização', activeLabel: 'Criando vídeos otimizados...' },
   texts: { label: 'Metadados', activeLabel: 'Gerando títulos e hashtags com GPT-4...' },
   export: { label: 'Exportação', activeLabel: 'Finalizando e preparando downloads...' },
 };
