@@ -12,7 +12,7 @@ export type UsageDTO = {
 
 export async function getUsage(headers?: Record<string, string>) {
   try {
-    return await invokeFn<UsageDTO>('get-usage', { method: 'POST', headers });
+    return await invokeFn<UsageDTO>('get-usage', { method: 'POST', body: {}, headers });
   } catch (error) {
     console.warn('[usage] get-usage failed, using fallback usage payload:', error);
     return {
