@@ -173,55 +173,116 @@ export const ClipPlayerModal = ({
         </div>
 
         {/* Main content */}
-        <div className="flex flex-col md:flex-row items-start">
-          {/* Video section */}
-          <div className="relative flex-shrink-0 rounded-bl-2xl overflow-hidden"
-            style={{
-              width: aspectRatio === 'landscape' ? 520 : aspectRatio === 'square' ? 380 : 300,
-              aspectRatio: videoAspect ? String(videoAspect) : (aspectRatio === 'landscape' ? '16/9' : aspectRatio === 'square' ? '1/1' : '9/16'),
-              maxHeight: '70vh',
-              transition: 'width 0.3s ease, aspect-ratio 0.3s ease',
-            }}
+        <div className="flex flex-col md:flex-row" style={{ maxHeight: '70vh' }}>
+          {/* Left column: Video + extra info below */}
+          <div className="flex-shrink-0 flex flex-col"
+            style={{ width: aspectRatio === 'landscape' ? 520 : aspectRatio === 'square' ? 400 : 320 }}
           >
-            <div className="relative w-full h-full">
-              {(clip.previewUrl || clip.downloadUrl) ? (
-                <Player
-                  url={clip.previewUrl || clip.downloadUrl || ''}
-                  poster={clip.thumbnailUrl}
-                  className="w-full h-full"
-                  onAspectRatioDetected={(ratio, w, h) => {
-                    setAspectRatio(ratio);
-                    if (w && h) setVideoAspect(w / h);
-                  }}
-                />
-              ) : (
-                <div className="flex items-center justify-center w-full h-full">
-                  <p className="text-white/40 text-sm">Video indisponivel</p>
-                </div>
-              )}
+            {/* Video */}
+            <div className="relative bg-black overflow-hidden rounded-bl-none">
+              <div className="relative w-full"
+                style={{
+                  aspectRatio: videoAspect ? String(videoAspect) : (aspectRatio === 'landscape' ? '16/9' : aspectRatio === 'square' ? '1/1' : '9/16'),
+                  maxHeight: '50vh',
+                }}
+              >
+                {(clip.previewUrl || clip.downloadUrl) ? (
+                  <Player
+                    url={clip.previewUrl || clip.downloadUrl || ''}
+                    poster={clip.thumbnailUrl}
+                    className="w-full h-full"
+                    onAspectRatioDetected={(ratio, w, h) => {
+                      setAspectRatio(ratio);
+                      if (w && h) setVideoAspect(w / h);
+                    }}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center w-full h-full">
+                    <p className="text-white/40 text-sm">Video indisponivel</p>
+                  </div>
+                )}
 
-              {/* Navigation arrows */}
-              {hasPrev && (
-                <button
-                  onClick={goPrev}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white transition-all"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-              )}
-              {hasNext && (
-                <button
-                  onClick={goNext}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white transition-all"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              )}
+                {/* Navigation arrows */}
+                {hasPrev && (
+                  <button
+                    onClick={goPrev}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white transition-all"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                )}
+                {hasNext && (
+                  <button
+                    onClick={goNext}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white transition-all"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Below-video panel: description + hashtags + transcript */}
+            <div className="flex-1 overflow-y-auto border-r border-white/[0.06] bg-[#0a0a12]">
+              <div className="p-4 space-y-3">
+                {/* Description */}
+                <p className="text-[12px] text-white/50 leading-relaxed">
+                  {clip.description}
+                </p>
+
+                {/* Hashtags */}
+                {clip.hashtags.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-1.5 block">Hashtags</span>
+                    <div className="flex flex-wrap gap-1">
+                      {clip.hashtags.map((tag, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleCopy(`#${tag}`, 'Hashtag')}
+                          className="text-[10px] px-2 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-300/70 hover:text-purple-200 hover:bg-purple-500/20 transition-colors"
+                        >
+                          #{tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Transcript snippet */}
+                {clip.transcript && clip.transcript.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-1.5 block">Transcrição</span>
+                    <div className="text-[11px] text-white/40 leading-relaxed max-h-[120px] overflow-y-auto pr-1 custom-scrollbar">
+                      {clip.transcript.map((seg, i) => (
+                        <span key={i}>{seg.text} </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick copy actions */}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => handleCopy(clip.title, 'Titulo')}
+                    className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/60 transition-colors"
+                  >
+                    <Copy className="w-3 h-3" />
+                    Copiar titulo
+                  </button>
+                  <button
+                    onClick={() => handleCopy(clip.hashtags.map(t => `#${t}`).join(' '), 'Hashtags')}
+                    className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/60 transition-colors"
+                  >
+                    <Copy className="w-3 h-3" />
+                    Copiar hashtags
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Info panel */}
-          <div className="flex-1 min-w-0 overflow-y-auto" style={{ maxHeight: '70vh' }}>
+          {/* Right: Info panel */}
+          <div className="flex-1 min-w-0 overflow-y-auto">
             <div className="p-5 space-y-5">
 
               {/* Score + Quick metrics row */}
@@ -268,12 +329,7 @@ export const ClipPlayerModal = ({
                 </div>
               </div>
 
-              {/* Description */}
-              <p className="text-[13px] text-white/50 leading-relaxed line-clamp-2">
-                {clip.description}
-              </p>
-
-              {/* Platform scores — compact row */}
+              {/* Platform scores */}
               <div>
                 <div className="flex items-center gap-1.5 mb-2.5">
                   <TrendingUp className="w-3.5 h-3.5 text-white/30" />
@@ -329,7 +385,7 @@ export const ClipPlayerModal = ({
                 </div>
               </div>
 
-              {/* Insights — compact */}
+              {/* Insights */}
               {viralIntel.insights.length > 0 && (
                 <div>
                   <div className="flex items-center gap-1.5 mb-2.5">
@@ -352,21 +408,6 @@ export const ClipPlayerModal = ({
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
-
-              {/* Hashtags */}
-              {clip.hashtags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {clip.hashtags.map((tag, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleCopy(`#${tag}`, 'Hashtag')}
-                      className="text-[11px] px-2 py-1 rounded-md bg-white/[0.04] border border-white/[0.06] text-white/40 hover:text-white/70 hover:bg-white/[0.08] transition-colors"
-                    >
-                      #{tag}
-                    </button>
-                  ))}
                 </div>
               )}
             </div>
@@ -400,15 +441,6 @@ export const ClipPlayerModal = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => handleCopy(clip.title, 'Titulo')}
-              className="h-8 gap-1.5 text-[12px] text-white/40 hover:text-white"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              Copiar titulo
-            </Button>
             <Button
               variant="ghost"
               size="sm"
