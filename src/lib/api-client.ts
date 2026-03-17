@@ -1,16 +1,11 @@
 import { getBackendUrl } from './backend-url';
 
 const BASE_URL = getBackendUrl();
-const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 async function request<T = any>(method: string, path: string, body?: any): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-
-  if (API_KEY) {
-    headers['X-API-Key'] = API_KEY;
-  }
 
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
