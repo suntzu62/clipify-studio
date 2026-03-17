@@ -101,9 +101,11 @@ export const ClipPlayerModal = ({
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < clips.length - 1;
   const [aspectRatio, setAspectRatio] = useState<AspectRatioType | null>(null);
+  const [videoAspect, setVideoAspect] = useState<number | null>(null);
 
   useEffect(() => {
     setAspectRatio(null);
+    setVideoAspect(null);
   }, [currentIndex]);
 
   const {
@@ -173,12 +175,12 @@ export const ClipPlayerModal = ({
         {/* Main content */}
         <div className="flex flex-col md:flex-row items-start">
           {/* Video section */}
-          <div className="relative flex-shrink-0 rounded-bl-2xl overflow-hidden bg-black"
+          <div className="relative flex-shrink-0 rounded-bl-2xl overflow-hidden"
             style={{
               width: aspectRatio === 'landscape' ? 520 : aspectRatio === 'square' ? 380 : 300,
-              aspectRatio: aspectRatio === 'landscape' ? '16/9' : aspectRatio === 'square' ? '1/1' : '9/16',
+              aspectRatio: videoAspect ? String(videoAspect) : (aspectRatio === 'landscape' ? '16/9' : aspectRatio === 'square' ? '1/1' : '9/16'),
               maxHeight: '70vh',
-              transition: 'width 0.3s ease',
+              transition: 'width 0.3s ease, aspect-ratio 0.3s ease',
             }}
           >
             <div className="relative w-full h-full">
@@ -187,7 +189,10 @@ export const ClipPlayerModal = ({
                   url={clip.previewUrl || clip.downloadUrl || ''}
                   poster={clip.thumbnailUrl}
                   className="w-full h-full"
-                  onAspectRatioDetected={(ratio) => setAspectRatio(ratio)}
+                  onAspectRatioDetected={(ratio, w, h) => {
+                    setAspectRatio(ratio);
+                    if (w && h) setVideoAspect(w / h);
+                  }}
                 />
               ) : (
                 <div className="flex items-center justify-center w-full h-full">
