@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
@@ -190,10 +190,11 @@ const Admin = () => {
       setLoadingStats(true);
       setStatsError(null);
       const data = await api.get<AdminStats>('/admin/stats');
-      setStats(data);
+      setStats(data && typeof data === 'object' ? data : null);
     } catch (e: any) {
       console.error('[Admin] stats error:', e);
       setStatsError(e.message || 'Erro ao carregar stats');
+      setStats(null);
     } finally {
       setLoadingStats(false);
     }
@@ -203,9 +204,10 @@ const Admin = () => {
     try {
       setLoadingUsers(true);
       const data = await api.get<AdminUser[]>('/admin/users');
-      setUsers(data);
+      setUsers(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error('[Admin] users error:', e);
+      setUsers([]);
     } finally {
       setLoadingUsers(false);
     }
@@ -216,9 +218,10 @@ const Admin = () => {
       setLoadingJobs(true);
       const qs = status ? `?status=${status}` : '';
       const data = await api.get<AdminJob[]>(`/admin/jobs${qs}`);
-      setJobs(data);
+      setJobs(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error('[Admin] jobs error:', e);
+      setJobs([]);
     } finally {
       setLoadingJobs(false);
     }
@@ -228,9 +231,10 @@ const Admin = () => {
     try {
       setLoadingPayments(true);
       const data = await api.get<AdminPayment[]>('/admin/payments');
-      setPayments(data);
+      setPayments(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error('[Admin] payments error:', e);
+      setPayments([]);
     } finally {
       setLoadingPayments(false);
     }
@@ -240,9 +244,10 @@ const Admin = () => {
     try {
       setLoadingSystem(true);
       const data = await api.get<SystemHealth>('/admin/system');
-      setSystem(data);
+      setSystem(data && typeof data === 'object' ? data : null);
     } catch (e) {
       console.error('[Admin] system error:', e);
+      setSystem(null);
     } finally {
       setLoadingSystem(false);
     }
@@ -472,9 +477,8 @@ const Admin = () => {
                         </thead>
                         <tbody>
                           {jobs.map((j) => (
-                            <>
+                            <Fragment key={j.id}>
                               <tr
-                                key={j.id}
                                 className={cn(
                                   'border-b border-white/5 hover:bg-white/5 transition-colors',
                                   j.error && 'cursor-pointer',
@@ -502,7 +506,7 @@ const Admin = () => {
                                 <td className="p-3 text-white/50">{formatDate(j.created_at)}</td>
                               </tr>
                               {expandedJobId === j.id && j.error && (
-                                <tr key={`${j.id}-error`}>
+                                <tr>
                                   <td colSpan={8} className="p-3 bg-red-500/5 border-b border-white/5">
                                     <div className="flex items-start gap-2 text-xs">
                                       <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
@@ -511,7 +515,7 @@ const Admin = () => {
                                   </td>
                                 </tr>
                               )}
-                            </>
+                            </Fragment>
                           ))}
                           {jobs.length === 0 && (
                             <tr><td colSpan={8} className="p-6 text-center text-white/40">Nenhum job encontrado</td></tr>
