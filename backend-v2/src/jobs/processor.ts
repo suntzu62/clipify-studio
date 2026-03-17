@@ -280,7 +280,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
           job_id: jobId,
           user_id: userId,
           title: renderedClip.segment.title,
-          description: renderedClip.segment.reason || '',
+          description: renderedClip.segment.description || renderedClip.segment.reason || '',
           hashtags: renderedClip.segment.keywords || [],
           start_time: renderedClip.segment.start,
           end_time: renderedClip.segment.end,

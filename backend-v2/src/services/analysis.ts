@@ -296,6 +296,7 @@ Responda APENAS com um JSON válido neste formato:
       "sceneIndex": 1,
       "score": 0.95,
       "title": "Título viral e chamativo (máx 60 chars)",
+      "description": "Descrição natural e envolvente do clipe (1-2 frases). Escreva como um storyteller: capture a essência do momento, a emoção e o contexto de forma humana e cativante. NÃO use linguagem técnica ou robótica. Exemplo bom: 'O momento exato em que ele descobre o que realmente aconteceu e a reação é impagável.' Exemplo ruim: 'Discussão divertida sobre tema X com provocações e humor.'",
       "reason": "Por que este clipe vai viralizar (gancho + conteúdo + emoção)",
       "keywords": ["palavra1", "palavra2", "palavra3"]
     }
@@ -353,6 +354,7 @@ Responda APENAS com um JSON válido neste formato:
       "end": 60,
       "score": 0.95,
       "title": "Título chamativo do clipe",
+      "description": "Descrição natural e envolvente (1-2 frases). Escreva como storyteller: capture a essência do momento, emoção e contexto de forma humana e cativante. Sem linguagem robótica.",
       "reason": "Por que este momento é viral",
       "keywords": ["palavra1", "palavra2", "palavra3"]
     }

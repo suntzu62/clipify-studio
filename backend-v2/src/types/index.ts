@@ -273,6 +273,7 @@ export interface HighlightSegment {
   end: number;
   score: number;
   title: string;
+  description?: string;
   reason: string;
   keywords: string[];
 }
