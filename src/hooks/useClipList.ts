@@ -4,6 +4,28 @@ import type { SubtitlePreferences } from '@/components/clips/SubtitleCustomizer'
 import type { ViralIntelligence } from '@/types/viral-intelligence';
 import { generateViralIntelligence } from '@/types/viral-intelligence';
 
+export interface RemixVariant {
+  platform: 'tiktok' | 'instagram_reels' | 'youtube_shorts' | 'linkedin';
+  aspectRatio: '9:16' | '1:1' | '4:5' | '16:9';
+  hook: string;
+  title: string;
+  description: string;
+  hashtags: string[];
+  cta: string;
+  editingNotes: string[];
+}
+
+export interface ClipRemixPackage {
+  enabled: boolean;
+  primaryPlatform: RemixVariant['platform'];
+  goal: 'viral' | 'conversion' | 'authority' | 'engagement';
+  hookStyle: 'bold' | 'curiosity' | 'teaching' | 'story';
+  captionStyle: 'punchy' | 'conversational' | 'expert';
+  generateAltHooks: boolean;
+  altHooks: string[];
+  variants: RemixVariant[];
+}
+
 export interface Clip {
   id: string;
   title: string;
@@ -17,6 +39,7 @@ export interface Clip {
   transcript?: Array<{ start: number; end: number; text: string }>;
   subtitleSettings?: SubtitlePreferences;
   viralIntel?: ViralIntelligence;
+  remixPackage?: ClipRemixPackage;
 }
 
 export const useClipList = (jobResult?: any) => {
@@ -82,7 +105,8 @@ export const useClipList = (jobResult?: any) => {
           thumbnailUrl: clip.thumbnailUrl,
           duration: clip.duration || 45,
           status: clip.status || 'ready',
-          transcript: clip.transcript
+          transcript: clip.transcript,
+          remixPackage: clip.remixPackage,
         };
 
         // Gerar Inteligência Viral para clipes prontos
@@ -127,7 +151,8 @@ export const useClipList = (jobResult?: any) => {
         downloadUrl: clip.downloadUrl || clip.previewUrl,
         thumbnailUrl: clip.thumbnailUrl,
         duration: clip.duration || 45,
-        status: clip.status || 'ready'
+        status: clip.status || 'ready',
+        remixPackage: clip.remixPackage,
       }));
       setDebugInfo(prev => ({ ...prev, processed: true, strategy: 'direct_clips', foundClips: validClips.length }));
       setClips(validClips);

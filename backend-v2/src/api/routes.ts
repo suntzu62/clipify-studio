@@ -123,6 +123,53 @@ function getProgressValue(progress: unknown): number {
   return 0;
 }
 
+function parseJobMetadata(metadata: unknown): Record<string, any> {
+  if (!metadata) {
+    return {};
+  }
+
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return typeof metadata === 'object' && !Array.isArray(metadata) ? metadata as Record<string, any> : {};
+}
+
+function getRemixLookup(metadata: unknown): Record<string, any> {
+  const parsed = parseJobMetadata(metadata);
+  const lookup = parsed.remixByClipId;
+  return lookup && typeof lookup === 'object' && !Array.isArray(lookup) ? lookup : {};
+}
+
+function transformClipForResponse(
+  clip: any,
+  jobId: string,
+  remixLookup: Record<string, any> = {}
+) {
+  const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
+
+  return {
+    id: clip.id,
+    title: clip.title,
+    description: clip.description || clip.transcript || clip.reason || 'Descrição gerada automaticamente',
+    hashtags: clip.hashtags || clip.keywords || [],
+    previewUrl: proxyUrl,
+    downloadUrl: clip.storagePath || clip.video_url || proxyUrl,
+    thumbnailUrl: clip.thumbnail || clip.thumbnail_url,
+    duration: clip.duration,
+    status: 'ready',
+    start: clip.start ?? clip.start_time,
+    end: clip.end ?? clip.end_time,
+    score: clip.score,
+    remixPackage: clip.remixPackage || remixLookup[clip.id],
+  };
+}
+
 async function enforceUsageLimits(
   reply: FastifyReply,
   userId: string,
@@ -490,24 +537,8 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!status && dbJob) {
       const dbState = dbJob.status || 'queued';
       const progressValue = Number(dbJob.progress || 0);
-
+      const remixLookup = getRemixLookup(dbJob.metadata);
       const dbClipRows = await dbClips.findByJobId(jobId);
-      const transformClip = (clip: any) => {
-        const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
-        return {
-          id: clip.id,
-          title: clip.title,
-          description: clip.description || 'Descrição gerada automaticamente',
-          hashtags: clip.hashtags || [],
-          previewUrl: proxyUrl,
-          downloadUrl: clip.video_url || proxyUrl,
-          thumbnailUrl: clip.thumbnail_url,
-          duration: clip.duration,
-          status: 'ready',
-          start: clip.start_time,
-          end: clip.end_time,
-        };
-      };
 
       return {
         jobId: dbJob.id,
@@ -515,7 +546,9 @@ export async function registerRoutes(app: FastifyInstance) {
         status: dbState,
         currentStep: dbJob.current_step || 'ingest',
         progress: { progress: progressValue, message: dbJob.current_step_message || '' },
-        result: dbState === 'completed' ? { clips: dbClipRows.map(transformClip) } : null,
+        result: dbState === 'completed'
+          ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
+          : null,
         error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
         finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
       };
@@ -535,23 +568,8 @@ export async function registerRoutes(app: FastifyInstance) {
 
       const dbState = dbJob.status || 'queued';
       const progressValue = Number(dbJob.progress || 0);
+      const remixLookup = getRemixLookup(dbJob.metadata);
       const dbClipRows = await dbClips.findByJobId(jobId);
-      const transformClip = (clip: any) => {
-        const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
-        return {
-          id: clip.id,
-          title: clip.title,
-          description: clip.description || 'Descrição gerada automaticamente',
-          hashtags: clip.hashtags || [],
-          previewUrl: proxyUrl,
-          downloadUrl: clip.video_url || proxyUrl,
-          thumbnailUrl: clip.thumbnail_url,
-          duration: clip.duration,
-          status: 'ready',
-          start: clip.start_time,
-          end: clip.end_time,
-        };
-      };
 
       return {
         jobId: dbJob.id,
@@ -559,7 +577,9 @@ export async function registerRoutes(app: FastifyInstance) {
         status: dbState,
         currentStep: dbJob.current_step || 'ingest',
         progress: { progress: progressValue, message: dbJob.current_step_message || '' },
-        result: dbState === 'completed' ? { clips: dbClipRows.map(transformClip) } : null,
+        result: dbState === 'completed'
+          ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
+          : null,
         error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
         finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
       };
@@ -594,28 +614,12 @@ export async function registerRoutes(app: FastifyInstance) {
     }, 'GET /jobs/:jobId - returnvalue debug');
 
     // Helper to transform raw clip data to frontend format
-    const transformClip = (clip: any) => {
-      const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
-      return {
-        id: clip.id,
-        title: clip.title,
-        description: clip.description || clip.transcript || clip.reason || 'Descrição gerada automaticamente',
-        hashtags: clip.hashtags || clip.keywords || [],
-        previewUrl: proxyUrl,
-        downloadUrl: clip.storagePath || clip.video_url || proxyUrl,
-        thumbnailUrl: clip.thumbnail || clip.thumbnail_url,
-        duration: clip.duration,
-        status: 'ready',
-        start: clip.start ?? clip.start_time,
-        end: clip.end ?? clip.end_time,
-        score: clip.score,
-      };
-    };
+    const remixLookup = getRemixLookup(dbJob?.metadata);
 
     if (result && result.clips && Array.isArray(result.clips) && result.clips.length > 0) {
       result = {
         ...result,
-        clips: result.clips.map(transformClip),
+        clips: result.clips.map((clip: any) => transformClipForResponse(clip, jobId, remixLookup)),
       };
     } else if (status.state === 'completed') {
       // Fallback: fetch clips from PostgreSQL database when BullMQ returnvalue has no clips
@@ -626,7 +630,7 @@ export async function registerRoutes(app: FastifyInstance) {
           logger.info({ jobId, clipCount: dbClipRows.length }, 'Found clips in database');
           result = {
             ...(result || {}),
-            clips: dbClipRows.map(transformClip),
+            clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)),
           };
         } else {
           logger.warn({ jobId }, 'No clips found in database either');
@@ -789,28 +793,12 @@ export async function registerRoutes(app: FastifyInstance) {
         }
 
         // Helper to transform clip data
-        const transformClip = (clip: any) => {
-          const proxyUrl = `${env.baseUrl}/clips/${jobId}/${clip.id}.mp4`;
-          return {
-            id: clip.id,
-            title: clip.title,
-            description: clip.description || clip.transcript || clip.reason || 'Descrição gerada automaticamente',
-            hashtags: clip.hashtags || clip.keywords || [],
-            previewUrl: proxyUrl,
-            downloadUrl: clip.storagePath || clip.video_url || proxyUrl,
-            thumbnailUrl: clip.thumbnail || clip.thumbnail_url,
-            duration: clip.duration,
-            status: 'ready',
-            start: clip.start ?? clip.start_time,
-            end: clip.end ?? clip.end_time,
-            score: clip.score,
-          };
-        };
+        const remixLookup = getRemixLookup(dbJob?.metadata);
 
         if (result && result.clips && Array.isArray(result.clips) && result.clips.length > 0) {
           result = {
             ...result,
-            clips: result.clips.map(transformClip),
+            clips: result.clips.map((clip: any) => transformClipForResponse(clip, jobId, remixLookup)),
           };
         } else {
           // Fallback: fetch clips from database
@@ -821,7 +809,7 @@ export async function registerRoutes(app: FastifyInstance) {
               logger.info({ jobId, clipCount: dbClipRows.length }, 'SSE: Found clips in database');
               result = {
                 ...(result || {}),
-                clips: dbClipRows.map(transformClip),
+                clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)),
               };
             }
           } catch (dbError: any) {

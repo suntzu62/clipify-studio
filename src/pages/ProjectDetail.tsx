@@ -42,6 +42,7 @@ import { createProjectTitle } from '@/lib/youtube-metadata';
 import posthog from 'posthog-js';
 import { isValidYouTubeUrl } from '@/lib/youtube';
 import { cn } from '@/lib/utils';
+import type { RemixVariant } from '@/hooks/useClipList';
 
 // Rotating tips shown during processing
 const PROCESSING_TIPS = [
@@ -75,6 +76,33 @@ const STEP_DETAILS: Record<string, { label: string; activeLabel: string }> = {
   export: { label: 'Exportação', activeLabel: 'Finalizando e preparando downloads...' },
 };
 
+const REMIX_PLATFORM_LABELS: Record<RemixVariant['platform'], string> = {
+  youtube_shorts: 'YouTube Shorts',
+  instagram_reels: 'Instagram Reels',
+  tiktok: 'TikTok',
+  linkedin: 'LinkedIn',
+};
+
+const REMIX_GOAL_LABELS = {
+  viral: 'Viralizar',
+  conversion: 'Converter',
+  authority: 'Autoridade',
+  engagement: 'Engajar',
+} as const;
+
+const REMIX_HOOK_LABELS = {
+  bold: 'Bold',
+  curiosity: 'Curiosidade',
+  teaching: 'Educacional',
+  story: 'Story',
+} as const;
+
+const REMIX_COPY_LABELS = {
+  punchy: 'Punchy',
+  conversational: 'Conversational',
+  expert: 'Expert',
+} as const;
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -86,6 +114,7 @@ export default function ProjectDetail() {
   const [tipIndex, setTipIndex] = useState(0);
   const [showResults, setShowResults] = useState(false);
   const [playerClipIndex, setPlayerClipIndex] = useState<number | null>(null);
+  const [selectedRemixClipId, setSelectedRemixClipId] = useState<string | null>(null);
   const telemetryFired = useRef<'none' | 'completed' | 'failed'>('none');
 
   // Use unified job status hook
@@ -291,6 +320,9 @@ export default function ProjectDetail() {
   };
 
   const sortedClips = getSortedClips();
+  const remixReadyClips = sortedClips.filter((clip) => clip.remixPackage?.variants?.length);
+  const selectedRemixClip =
+    remixReadyClips.find((clip) => clip.id === selectedRemixClipId) || remixReadyClips[0] || null;
   const isProcessing = job?.status === 'active' || job?.status === 'queued';
   const isCompleted = job?.status === 'completed';
   const isFailed = job?.status === 'failed';
@@ -312,6 +344,48 @@ export default function ProjectDetail() {
     if (stepId === currentStep) return 'active';
     if (si < ci) return 'completed';
     return 'pending';
+  };
+
+  useEffect(() => {
+    if (remixReadyClips.length === 0) {
+      if (selectedRemixClipId !== null) {
+        setSelectedRemixClipId(null);
+      }
+      return;
+    }
+
+    const stillExists = remixReadyClips.some((clip) => clip.id === selectedRemixClipId);
+    if (!stillExists) {
+      setSelectedRemixClipId(remixReadyClips[0].id);
+    }
+  }, [remixReadyClips, selectedRemixClipId]);
+
+  const copyText = async (label: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast({
+        title: `${label} copiado`,
+        description: 'Conteúdo enviado para a área de transferência.',
+      });
+    } catch (error) {
+      toast({
+        title: `Falha ao copiar ${label.toLowerCase()}`,
+        description: 'Não foi possível copiar agora.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const buildVariantCopy = (variant: RemixVariant) => {
+    return [
+      `PLATAFORMA: ${REMIX_PLATFORM_LABELS[variant.platform]}`,
+      `HOOK: ${variant.hook}`,
+      `TITULO: ${variant.title}`,
+      `DESCRICAO: ${variant.description}`,
+      `CTA: ${variant.cta}`,
+      `HASHTAGS: ${variant.hashtags.join(' ')}`,
+      `NOTAS: ${variant.editingNotes.join(' | ')}`,
+    ].join('\n');
   };
 
   // --- Loading state ---
@@ -410,6 +484,193 @@ export default function ProjectDetail() {
               />
             ))}
           </div>
+
+          {selectedRemixClip?.remixPackage && (
+            <section className="mb-8 rounded-3xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl overflow-hidden">
+              <div className="border-b border-white/[0.06] px-6 py-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-purple-300/70 mb-2">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Remix Por Plataforma
+                  </div>
+                  <h2 className="text-xl font-semibold text-white">Pacote pronto para reaproveitar os clips</h2>
+                  <p className="text-sm text-white/45 mt-1">
+                    Hooks, títulos, CTA e copy ajustados por canal para o clipe selecionado.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge className="bg-purple-500/15 text-purple-200 border-purple-500/25">
+                    Meta: {REMIX_GOAL_LABELS[selectedRemixClip.remixPackage.goal]}
+                  </Badge>
+                  <Badge className="bg-white/[0.06] text-white/70 border-white/[0.08]">
+                    Hook: {REMIX_HOOK_LABELS[selectedRemixClip.remixPackage.hookStyle]}
+                  </Badge>
+                  <Badge className="bg-white/[0.06] text-white/70 border-white/[0.08]">
+                    Copy: {REMIX_COPY_LABELS[selectedRemixClip.remixPackage.captionStyle]}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="px-6 py-5 border-b border-white/[0.06]">
+                <div className="flex flex-wrap gap-2">
+                  {remixReadyClips.map((clip, index) => (
+                    <button
+                      key={clip.id}
+                      type="button"
+                      onClick={() => setSelectedRemixClipId(clip.id)}
+                      className={cn(
+                        'rounded-full px-3 py-1.5 text-xs transition-all border',
+                        selectedRemixClip.id === clip.id
+                          ? 'bg-purple-500/18 text-white border-purple-500/35'
+                          : 'bg-white/[0.03] text-white/55 border-white/[0.08] hover:text-white hover:bg-white/[0.06]'
+                      )}
+                    >
+                      {`Clipe ${index + 1}`}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4 rounded-2xl border border-white/[0.06] bg-[#0c0c14] px-4 py-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-xs uppercase tracking-[0.18em] text-white/30 mb-2">Clipe Base</p>
+                      <h3 className="text-base font-semibold text-white">{selectedRemixClip.title}</h3>
+                      <p className="text-sm text-white/45 mt-1 max-w-3xl">{selectedRemixClip.description}</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.08]"
+                      onClick={() => copyText('pacote completo', JSON.stringify(selectedRemixClip.remixPackage, null, 2))}
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      Copiar JSON
+                    </Button>
+                  </div>
+
+                  {selectedRemixClip.remixPackage.altHooks.length > 0 && (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <p className="text-xs uppercase tracking-[0.18em] text-white/30">Hooks Alternativos</p>
+                        <button
+                          type="button"
+                          onClick={() => copyText('hooks alternativos', selectedRemixClip.remixPackage!.altHooks.join('\n'))}
+                          className="text-xs text-purple-300/80 hover:text-purple-200"
+                        >
+                          Copiar hooks
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedRemixClip.remixPackage.altHooks.map((hook, index) => (
+                          <button
+                            key={`${selectedRemixClip.id}-hook-${index}`}
+                            type="button"
+                            onClick={() => copyText('hook', hook)}
+                            className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs text-white/70 hover:text-white hover:bg-white/[0.07] text-left"
+                          >
+                            {hook}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-6 py-6 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {selectedRemixClip.remixPackage.variants.map((variant) => (
+                  <article
+                    key={`${selectedRemixClip.id}-${variant.platform}`}
+                    className="rounded-2xl border border-white/[0.08] bg-[#0c0c14] p-5"
+                  >
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-base font-semibold text-white">
+                            {REMIX_PLATFORM_LABELS[variant.platform]}
+                          </h3>
+                          {variant.platform === selectedRemixClip.remixPackage!.primaryPlatform && (
+                            <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/25">
+                              Principal
+                            </Badge>
+                          )}
+                          <Badge className="bg-white/[0.06] text-white/60 border-white/[0.08]">
+                            {variant.aspectRatio}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-white/35 mt-1">{variant.cta}</p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-white/[0.08] bg-white/[0.03] text-white hover:bg-white/[0.08]"
+                        onClick={() => copyText(REMIX_PLATFORM_LABELS[variant.platform], buildVariantCopy(variant))}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copiar
+                      </Button>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-white/30 mb-2">Hook</p>
+                        <button
+                          type="button"
+                          onClick={() => copyText('hook', variant.hook)}
+                          className="w-full rounded-xl border border-purple-500/20 bg-purple-500/[0.08] px-3 py-3 text-left text-sm text-purple-100 hover:bg-purple-500/[0.12]"
+                        >
+                          {variant.hook}
+                        </button>
+                      </div>
+
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-white/30 mb-2">Título</p>
+                        <p className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 text-sm text-white/85">
+                          {variant.title}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-white/30 mb-2">Descrição</p>
+                        <p className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 text-sm text-white/70">
+                          {variant.description}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-white/30 mb-2">Hashtags</p>
+                        <div className="flex flex-wrap gap-2">
+                          {variant.hashtags.map((hashtag) => (
+                            <button
+                              key={`${selectedRemixClip.id}-${variant.platform}-${hashtag}`}
+                              type="button"
+                              onClick={() => copyText('hashtag', hashtag)}
+                              className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs text-white/70 hover:text-white hover:bg-white/[0.07]"
+                            >
+                              {hashtag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-white/30 mb-2">Notas de edição</p>
+                        <div className="space-y-2">
+                          {variant.editingNotes.map((note, index) => (
+                            <div
+                              key={`${selectedRemixClip.id}-${variant.platform}-note-${index}`}
+                              className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white/60"
+                            >
+                              {note}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Shared Player Modal with navigation */}
           <ClipPlayerModal

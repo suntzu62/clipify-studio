@@ -185,6 +185,28 @@ export const DEFAULT_PLATFORM_REMIX: PlatformRemix = {
 
 export type AspectRatio = '9:16' | '1:1' | '4:5' | '16:9';
 
+export interface PlatformRemixVariant {
+  platform: RemixPlatform;
+  aspectRatio: AspectRatio;
+  hook: string;
+  title: string;
+  description: string;
+  hashtags: string[];
+  cta: string;
+  editingNotes: string[];
+}
+
+export interface ClipRemixPackage {
+  enabled: boolean;
+  primaryPlatform: RemixPlatform;
+  goal: RemixGoal;
+  hookStyle: RemixHookStyle;
+  captionStyle: RemixCaptionStyle;
+  generateAltHooks: boolean;
+  altHooks: string[];
+  variants: PlatformRemixVariant[];
+}
+
 export interface JobData {
   jobId: string;
   userId: string;
@@ -317,6 +339,7 @@ export interface Clip {
   storagePath: string;
   thumbnail?: string;
   subtitleSettings?: SubtitlePreferences;
+  remixPackage?: ClipRemixPackage;
 }
 
 export interface HighlightAnalysis {
@@ -332,6 +355,7 @@ export interface HighlightSegment {
   description?: string;
   reason: string;
   keywords: string[];
+  remixPackage?: ClipRemixPackage;
 }
 
 // ============================================

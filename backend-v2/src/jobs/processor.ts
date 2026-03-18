@@ -219,6 +219,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
 
     const bucket = env.supabase.bucket;
     const clips: Clip[] = [];
+    const remixByClipId: Record<string, NonNullable<Clip['remixPackage']>> = {};
 
     for (const [idx, segment] of highlightAnalysis.segments.entries()) {
       const clipId = `clip-${idx}`;
@@ -274,9 +275,14 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
           keywords: renderedClip.segment.keywords,
           storagePath: videoUpload.publicUrl,
           thumbnail: thumbnailUpload.publicUrl,
+          remixPackage: renderedClip.segment.remixPackage,
         };
 
         clips.push(clipData);
+
+        if (renderedClip.segment.remixPackage) {
+          remixByClipId[renderedClip.id] = renderedClip.segment.remixPackage;
+        }
 
         await dbClips.upsert({
           id: renderedClip.id,
@@ -394,9 +400,35 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     await updateProgress(job, 'completed', 100, 'Processamento completo!');
 
     // Atualizar status do job para completed
+    const currentJob = await dbJobs.findById(jobId);
+    const currentMetadata = (() => {
+      if (currentJob?.metadata && typeof currentJob.metadata === 'object' && !Array.isArray(currentJob.metadata)) {
+        return currentJob.metadata;
+      }
+
+      if (typeof currentJob?.metadata === 'string') {
+        try {
+          const parsed = JSON.parse(currentJob.metadata);
+          return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+          return {};
+        }
+      }
+
+      return {};
+    })();
+    const nextMetadata = Object.keys(remixByClipId).length > 0
+      ? {
+          ...currentMetadata,
+          platformRemix,
+          remixByClipId,
+        }
+      : currentMetadata;
+
     await dbJobs.update(jobId, {
       status: 'completed',
       completed_at: new Date(),
+      metadata: nextMetadata,
     });
 
     const processingTime = Date.now() - startTime;

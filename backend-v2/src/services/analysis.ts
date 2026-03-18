@@ -1,6 +1,15 @@
 import OpenAI from 'openai';
 import { createLogger } from '../config/logger.js';
-import type { Transcript, HighlightAnalysis, HighlightSegment, PlatformRemix } from '../types/index.js';
+import type {
+  Transcript,
+  HighlightAnalysis,
+  HighlightSegment,
+  PlatformRemix,
+  ClipRemixPackage,
+  PlatformRemixVariant,
+  RemixPlatform,
+  AspectRatio,
+} from '../types/index.js';
 import { detectScenes } from './scene-detection.js';
 
 const logger = createLogger('analysis');
@@ -159,17 +168,19 @@ export async function analyzeHighlights(
       maxDuration
     );
 
+    const remixedSegments = applyPlatformRemix(validatedSegments, platformRemix);
+
     logger.info(
       {
         detectedScenes: detectedScenes.length,
         rankedScenes: analysis.rankings.length,
-        finalClips: validatedSegments.length,
+        finalClips: remixedSegments.length,
       },
       'Highlight analysis completed with scene detection'
     );
 
     return {
-      segments: validatedSegments,
+      segments: remixedSegments,
       reasoning: analysis.reasoning,
     };
   } catch (error: any) {
@@ -232,8 +243,15 @@ async function fallbackAIAnalysis(
   const responseText = completion.choices[0]?.message?.content || '';
   const analysis = parseAIResponse(responseText);
 
+  const validatedSegments = validateSegments(
+    analysis.segments,
+    transcript.duration,
+    minDuration,
+    maxDuration
+  );
+
   return {
-    segments: validateSegments(analysis.segments, transcript.duration, minDuration, maxDuration),
+    segments: applyPlatformRemix(validatedSegments, platformRemix),
     reasoning: analysis.reasoning,
   };
 }
@@ -467,6 +485,232 @@ function formatCaptionStyleLabel(captionStyle: PlatformRemix['captionStyle']): s
     case 'expert':
       return 'didática, precisa e mais premium';
   }
+}
+
+function getPlatformAspectRatio(platform: RemixPlatform): AspectRatio {
+  if (platform === 'linkedin') {
+    return '4:5';
+  }
+
+  return '9:16';
+}
+
+function sanitizeHashtag(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
+}
+
+function buildHashtags(segment: HighlightSegment, platform: RemixPlatform): string[] {
+  const base = [
+    ...segment.keywords,
+    formatPlatformLabel(platform),
+    'clip',
+  ]
+    .map(sanitizeHashtag)
+    .filter((value) => value.length >= 3);
+
+  return Array.from(new Set(base))
+    .slice(0, 5)
+    .map((value) => `#${value}`);
+}
+
+function buildVariantHook(
+  segment: HighlightSegment,
+  platformRemix: PlatformRemix,
+  platform: RemixPlatform
+): string {
+  const focusByGoal: Record<PlatformRemix['goal'], string> = {
+    viral: 'isso muda o jogo',
+    conversion: 'isso pode virar resultado rapido',
+    authority: 'a maioria erra justamente aqui',
+    engagement: 'quero ver se voce concorda com isso',
+  };
+
+  const baseHook = segment.title.replace(/[.!?]+$/g, '').trim();
+  const platformLead = platform === 'linkedin'
+    ? 'Insight rapido:'
+    : platform === 'tiktok'
+      ? 'Para tudo:'
+      : platform === 'instagram_reels'
+        ? 'Vale salvar isso:'
+        : 'Olha isso:';
+
+  switch (platformRemix.hookStyle) {
+    case 'curiosity':
+      return `${platformLead} por que ${baseHook.toLowerCase()}?`;
+    case 'teaching':
+      return `${platformLead} ${baseHook}. ${focusByGoal[platformRemix.goal]}.`;
+    case 'story':
+      return `${platformLead} o momento em que ${baseHook.toLowerCase()}.`;
+    case 'bold':
+    default:
+      return `${platformLead} ${baseHook}.`;
+  }
+}
+
+function buildAltHooks(
+  segment: HighlightSegment,
+  platformRemix: PlatformRemix,
+  primaryHook: string
+): string[] {
+  if (!platformRemix.generateAltHooks) {
+    return [];
+  }
+
+  const title = segment.title.replace(/[.!?]+$/g, '').trim();
+  const options = [
+    primaryHook,
+    `O erro que quase todo mundo comete sobre ${title.toLowerCase()}.`,
+    `Se voce quer ${formatGoalLabel(platformRemix.goal)}, presta atencao nisso.`,
+    `Em poucos segundos voce entende por que ${title.toLowerCase()}.`,
+  ];
+
+  return Array.from(new Set(options))
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function buildVariantDescription(
+  segment: HighlightSegment,
+  platformRemix: PlatformRemix,
+  platform: RemixPlatform
+): string {
+  const baseDescription = (segment.description || segment.reason || '').trim();
+  const platformTail: Record<RemixPlatform, string> = {
+    youtube_shorts: 'Entrega contexto rapido, payoff cedo e fecha a ideia sem depender do video longo.',
+    instagram_reels: 'Mantem ritmo clean, linguagem premium e alta compartilhabilidade.',
+    tiktok: 'Entra direto na tensao, com leitura simples e alto potencial de scroll stop.',
+    linkedin: 'Transforma o trecho em insight claro, acionavel e com tom mais profissional.',
+  };
+
+  return [baseDescription, platformTail[platform]]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function buildVariantCta(platformRemix: PlatformRemix, platform: RemixPlatform): string {
+  const byGoal: Record<PlatformRemix['goal'], string> = {
+    viral: 'Se isso fez sentido, salva e compartilha com quem precisa ver.',
+    conversion: 'Se quiser aplicar isso no seu negocio, clica no link da bio ou chama no direct.',
+    authority: 'Se voce trabalha com isso, comenta sua leitura e eu aprofundo no proximo video.',
+    engagement: 'Comenta a sua opiniao e manda para alguem que vai discordar de voce.',
+  };
+
+  if (platform === 'linkedin' && platformRemix.goal === 'conversion') {
+    return 'Se isso conversa com o seu contexto, me chama no inbox para aprofundar a estrategia.';
+  }
+
+  return byGoal[platformRemix.goal];
+}
+
+function buildEditingNotes(platform: RemixPlatform): string[] {
+  const notes: Record<RemixPlatform, string[]> = {
+    youtube_shorts: [
+      'Abrir com o hook em texto nos primeiros 2 segundos.',
+      'Manter cortes limpos e contexto visual minimo.',
+    ],
+    instagram_reels: [
+      'Usar legenda mais limpa e enquadramento estavel.',
+      'Privilegiar transicoes suaves e visual premium.',
+    ],
+    tiktok: [
+      'Acelerar o primeiro corte e destacar palavras-chave.',
+      'Usar texto maior e ritmo mais agressivo.',
+    ],
+    linkedin: [
+      'Segurar um beat inicial mais calmo e texto mais discreto.',
+      'Destacar insight e takeaway final na tela.',
+    ],
+  };
+
+  return notes[platform];
+}
+
+function buildVariantTitle(
+  segment: HighlightSegment,
+  platformRemix: PlatformRemix,
+  platform: RemixPlatform
+): string {
+  const baseTitle = segment.title.trim();
+  const suffixByPlatform: Record<RemixPlatform, string> = {
+    youtube_shorts: 'para Shorts',
+    instagram_reels: 'para Reels',
+    tiktok: 'para TikTok',
+    linkedin: 'para LinkedIn',
+  };
+
+  if (platformRemix.goal === 'authority' && platform === 'linkedin') {
+    return `${baseTitle}: o insight que muda a execucao`;
+  }
+
+  if (platformRemix.goal === 'conversion') {
+    return `${baseTitle} que gera acao`;
+  }
+
+  return `${baseTitle} ${suffixByPlatform[platform]}`.trim();
+}
+
+function buildPlatformVariant(
+  segment: HighlightSegment,
+  platformRemix: PlatformRemix,
+  platform: RemixPlatform
+): PlatformRemixVariant {
+  return {
+    platform,
+    aspectRatio: getPlatformAspectRatio(platform),
+    hook: buildVariantHook(segment, platformRemix, platform),
+    title: buildVariantTitle(segment, platformRemix, platform),
+    description: buildVariantDescription(segment, platformRemix, platform),
+    hashtags: buildHashtags(segment, platform),
+    cta: buildVariantCta(platformRemix, platform),
+    editingNotes: buildEditingNotes(platform),
+  };
+}
+
+function buildClipRemixPackage(
+  segment: HighlightSegment,
+  platformRemix: PlatformRemix
+): ClipRemixPackage {
+  const platforms = Array.from(
+    new Set([platformRemix.primaryPlatform, ...platformRemix.targetPlatforms])
+  );
+  const primaryVariant = buildPlatformVariant(segment, platformRemix, platformRemix.primaryPlatform);
+
+  return {
+    enabled: true,
+    primaryPlatform: platformRemix.primaryPlatform,
+    goal: platformRemix.goal,
+    hookStyle: platformRemix.hookStyle,
+    captionStyle: platformRemix.captionStyle,
+    generateAltHooks: platformRemix.generateAltHooks,
+    altHooks: buildAltHooks(segment, platformRemix, primaryVariant.hook),
+    variants: platforms.map((platform) => {
+      if (platform === platformRemix.primaryPlatform) {
+        return primaryVariant;
+      }
+
+      return buildPlatformVariant(segment, platformRemix, platform);
+    }),
+  };
+}
+
+function applyPlatformRemix(
+  segments: HighlightSegment[],
+  platformRemix?: PlatformRemix
+): HighlightSegment[] {
+  if (!platformRemix?.enabled) {
+    return segments;
+  }
+
+  return segments.map((segment) => ({
+    ...segment,
+    remixPackage: buildClipRemixPackage(segment, platformRemix),
+  }));
 }
 
 function buildPlatformPlaybook(platformRemix: PlatformRemix): string {

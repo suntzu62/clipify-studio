@@ -3,6 +3,28 @@ import { getBackendUrl } from './backend-url';
 
 const BACKEND_URL = getBackendUrl();
 
+interface RemixVariant {
+  platform: 'tiktok' | 'instagram_reels' | 'youtube_shorts' | 'linkedin';
+  aspectRatio: '9:16' | '1:1' | '4:5' | '16:9';
+  hook: string;
+  title: string;
+  description: string;
+  hashtags: string[];
+  cta: string;
+  editingNotes: string[];
+}
+
+interface ClipRemixPackage {
+  enabled: boolean;
+  primaryPlatform: RemixVariant['platform'];
+  goal: 'viral' | 'conversion' | 'authority' | 'engagement';
+  hookStyle: 'bold' | 'curiosity' | 'teaching' | 'story';
+  captionStyle: 'punchy' | 'conversational' | 'expert';
+  generateAltHooks: boolean;
+  altHooks: string[];
+  variants: RemixVariant[];
+}
+
 // Helper function to generate job ID (matching edge function)
 async function generateJobId(sourceIdentifier: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -54,6 +76,7 @@ export interface Job {
       thumbnailUrl?: string;
       duration: number;
       status: 'processing' | 'ready' | 'failed';
+      remixPackage?: ClipRemixPackage;
     }>;
     previewUrl?: string;
     downloadUrl?: string;
