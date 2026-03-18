@@ -229,8 +229,18 @@ async function uploadToLocalStorage(
     // Criar diretórios se não existirem
     await fs.mkdir(dirname(destPath), { recursive: true });
 
-    // Copiar arquivo
-    await fs.copyFile(sourceFilePath, destPath);
+    // Evita duplicar arquivos grandes no disco: move no mesmo filesystem,
+    // e so faz copy+unlink se o rename nao for possivel.
+    try {
+      await fs.rename(sourceFilePath, destPath);
+    } catch (moveError: any) {
+      if (moveError?.code !== 'EXDEV' && moveError?.code !== 'EPERM') {
+        throw moveError;
+      }
+
+      await fs.copyFile(sourceFilePath, destPath);
+      await fs.unlink(sourceFilePath).catch(() => undefined);
+    }
 
     // URL pública para servir o arquivo
     // O servidor deve ter uma rota para servir arquivos de /clips/*
@@ -244,6 +254,9 @@ async function uploadToLocalStorage(
       publicUrl,
     };
   } catch (error: any) {
+    const storagePath = env.localStoragePath || './uploads';
+    const destPath = join(storagePath, path);
+    await fs.rm(destPath, { force: true }).catch(() => undefined);
     logger.error({ error: error.message, path }, 'Local file upload failed');
     throw new Error(`Local upload failed: ${error.message}`);
   }

@@ -24,7 +24,7 @@ const envSchema = z.object({
   SUPABASE_STORAGE_BUCKET: z.string().default('raw'),
 
   // Local Storage (alternativa ao Supabase Storage)
-  LOCAL_STORAGE_PATH: z.string().default('./uploads'),
+  LOCAL_STORAGE_PATH: z.string().optional(),
 
   // Redis
   REDIS_URL: z.string().optional(),
@@ -83,6 +83,14 @@ if (!parsed.success) {
   process.exit(1);
 }
 
+const defaultLocalStoragePath =
+  parsed.data.NODE_ENV === 'production' ? '/tmp/clipify-storage' : './uploads';
+const configuredLocalStoragePath = parsed.data.LOCAL_STORAGE_PATH?.trim();
+const effectiveLocalStoragePath =
+  configuredLocalStoragePath && configuredLocalStoragePath !== './uploads'
+    ? configuredLocalStoragePath
+    : defaultLocalStoragePath;
+
 export const env = {
   // Server
   port: parseInt(parsed.data.PORT, 10),
@@ -106,7 +114,7 @@ export const env = {
   },
 
   // Storage
-  localStoragePath: parsed.data.LOCAL_STORAGE_PATH,
+  localStoragePath: effectiveLocalStoragePath,
 
   // Redis
   redis: (() => {
