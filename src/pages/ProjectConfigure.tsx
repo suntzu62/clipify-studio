@@ -21,7 +21,10 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  DEFAULT_PLATFORM_REMIX,
+  type PlatformRemix,
   type ProjectConfig,
+  type RemixPlatform,
   type SubtitlePreferences,
 } from '@/types/project-config';
 import { cn } from '@/lib/utils';
@@ -168,6 +171,58 @@ const STYLE_PRESETS: StylePreset[] = [
   },
 ];
 
+const PLATFORM_OPTIONS: Array<{
+  value: RemixPlatform;
+  label: string;
+  description: string;
+  recommendedAspectRatio: '9:16' | '4:5';
+}> = [
+  {
+    value: 'youtube_shorts',
+    label: 'YouTube Shorts',
+    description: 'Mais contexto, clareza e payoff cedo.',
+    recommendedAspectRatio: '9:16',
+  },
+  {
+    value: 'instagram_reels',
+    label: 'Instagram Reels',
+    description: 'Mais clean, premium e compartilhavel.',
+    recommendedAspectRatio: '9:16',
+  },
+  {
+    value: 'tiktok',
+    label: 'TikTok',
+    description: 'Mais agressivo, direto e scroll-stopping.',
+    recommendedAspectRatio: '9:16',
+  },
+  {
+    value: 'linkedin',
+    label: 'LinkedIn',
+    description: 'Mais autoridade, insight e tom profissional.',
+    recommendedAspectRatio: '4:5',
+  },
+];
+
+const REMIX_GOALS: Array<{ value: PlatformRemix['goal']; label: string; description: string }> = [
+  { value: 'viral', label: 'Viralizar', description: 'Gancho forte e retenção alta.' },
+  { value: 'conversion', label: 'Converter', description: 'Levar para clique, lead ou venda.' },
+  { value: 'authority', label: 'Autoridade', description: 'Posicionar expertise e credibilidade.' },
+  { value: 'engagement', label: 'Engajar', description: 'Gerar comentário, share e save.' },
+];
+
+const HOOK_STYLE_OPTIONS: Array<{ value: PlatformRemix['hookStyle']; label: string }> = [
+  { value: 'bold', label: 'Bold' },
+  { value: 'curiosity', label: 'Curiosidade' },
+  { value: 'teaching', label: 'Ensino' },
+  { value: 'story', label: 'Story' },
+];
+
+const CAPTION_STYLE_OPTIONS: Array<{ value: PlatformRemix['captionStyle']; label: string }> = [
+  { value: 'punchy', label: 'Punchy' },
+  { value: 'conversational', label: 'Conversa' },
+  { value: 'expert', label: 'Expert' },
+];
+
 // ── Helpers ──────────────────────────────────────────────────────
 const clampOpacity = (opacity: number) => Math.max(0, Math.min(1, opacity));
 
@@ -288,6 +343,19 @@ export default function ProjectConfigure() {
     [],
   );
 
+  const updatePlatformRemix = useCallback(
+    <K extends keyof PlatformRemix>(key: K, value: PlatformRemix[K]) => {
+      setConfig((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          platformRemix: { ...prev.platformRemix, [key]: value },
+        };
+      });
+    },
+    [],
+  );
+
   const handlePresetChange = useCallback(
     (presetId: string) => {
       setSelectedPreset(presetId);
@@ -321,11 +389,20 @@ export default function ProjectConfigure() {
         if (!data.clipSettings || !data.subtitlePreferences) {
           throw new Error('Dados de configuração incompletos');
         }
-        setConfig(data);
+        setConfig({
+          ...data,
+          platformRemix: data.platformRemix || DEFAULT_PLATFORM_REMIX,
+        });
         // Apply "Viral Boost" as default
         const viral = STYLE_PRESETS[0];
         setConfig((prev) =>
-          prev ? { ...prev, subtitlePreferences: { ...prev.subtitlePreferences, ...viral.values } } : prev,
+          prev
+            ? {
+                ...prev,
+                subtitlePreferences: { ...prev.subtitlePreferences, ...viral.values },
+                platformRemix: prev.platformRemix || DEFAULT_PLATFORM_REMIX,
+              }
+            : prev,
         );
       } catch (error: unknown) {
         console.error('Failed to load temp config:', error);
@@ -356,6 +433,7 @@ export default function ProjectConfigure() {
       const requestBody = {
         clipSettings: config.clipSettings,
         subtitlePreferences: config.subtitlePreferences,
+        platformRemix: config.platformRemix,
         timeframe: config.timeframe,
         genre: config.genre,
         specificMoments: config.specificMoments,
@@ -429,6 +507,52 @@ export default function ProjectConfigure() {
 
   const youtubeId = extractYoutubeId(config.youtubeUrl);
   const activePreset = STYLE_PRESETS.find((p) => p.id === selectedPreset) || STYLE_PRESETS[0];
+  const platformRemix = config.platformRemix || DEFAULT_PLATFORM_REMIX;
+
+  const handlePrimaryPlatformChange = (platform: RemixPlatform) => {
+    const recommendedAspectRatio = PLATFORM_OPTIONS.find((option) => option.value === platform)?.recommendedAspectRatio || '9:16';
+    const dedupedTargets = Array.from(new Set([platform, ...platformRemix.targetPlatforms]));
+    setAspectRatio(recommendedAspectRatio);
+    setConfig((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        platformRemix: {
+          ...prev.platformRemix,
+          primaryPlatform: platform,
+          targetPlatforms: dedupedTargets,
+        },
+      };
+    });
+  };
+
+  const toggleTargetPlatform = (platform: RemixPlatform) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+
+      const currentTargets = prev.platformRemix.targetPlatforms;
+      const hasPlatform = currentTargets.includes(platform);
+      let nextTargets = hasPlatform
+        ? currentTargets.filter((item) => item !== platform)
+        : [...currentTargets, platform];
+
+      if (nextTargets.length === 0) {
+        nextTargets = [prev.platformRemix.primaryPlatform];
+      }
+
+      if (!nextTargets.includes(prev.platformRemix.primaryPlatform)) {
+        nextTargets = [prev.platformRemix.primaryPlatform, ...nextTargets];
+      }
+
+      return {
+        ...prev,
+        platformRemix: {
+          ...prev.platformRemix,
+          targetPlatforms: nextTargets,
+        },
+      };
+    });
+  };
 
   // Build preview styles
   const sp = config.subtitlePreferences;
@@ -712,6 +836,162 @@ export default function ProjectConfigure() {
                     />
                   </motion.button>
                 ))}
+              </div>
+            </motion.section>
+
+            <motion.section
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.22 }}
+            >
+              <div className="mb-5 flex items-center gap-3">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-fuchsia-500/20 text-fuchsia-400">
+                  <Zap className="h-3.5 w-3.5" />
+                </div>
+                <div>
+                  <h2 className="text-[15px] font-semibold text-white/90">Remix por plataforma</h2>
+                  <p className="text-[11px] text-white/30">
+                    Ajusta hook, copy e selecao dos clipes para cada canal.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+                  <div>
+                    <p className="text-[13px] font-medium text-white/80">Ativar remix automatico</p>
+                    <p className="text-[11px] text-white/30">
+                      Otimiza a analise para plataforma, meta e estilo de hook.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={platformRemix.enabled}
+                    onCheckedChange={(checked) => updatePlatformRemix('enabled', checked)}
+                  />
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {platformRemix.enabled && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.25 }}
+                      className="space-y-4 overflow-hidden"
+                    >
+                      <div>
+                        <p className="mb-3 text-[12px] text-white/45">Plataforma principal</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {PLATFORM_OPTIONS.map((platform) => (
+                            <button
+                              key={platform.value}
+                              type="button"
+                              onClick={() => handlePrimaryPlatformChange(platform.value)}
+                              className={cn(
+                                'rounded-xl border p-3 text-left transition-all',
+                                platformRemix.primaryPlatform === platform.value
+                                  ? 'border-fuchsia-400/40 bg-fuchsia-500/10'
+                                  : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12]',
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-[13px] font-medium text-white/85">{platform.label}</span>
+                                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-white/45">
+                                  {platform.recommendedAspectRatio}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-[11px] leading-relaxed text-white/35">
+                                {platform.description}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="mb-3 text-[12px] text-white/45">Meta do remix</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {REMIX_GOALS.map((goal) => (
+                            <button
+                              key={goal.value}
+                              type="button"
+                              onClick={() => updatePlatformRemix('goal', goal.value)}
+                              className={cn(
+                                'rounded-xl border p-3 text-left transition-all',
+                                platformRemix.goal === goal.value
+                                  ? 'border-violet-400/40 bg-violet-500/10'
+                                  : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12]',
+                              )}
+                            >
+                              <p className="text-[13px] font-medium text-white/85">{goal.label}</p>
+                              <p className="mt-1 text-[11px] leading-relaxed text-white/35">{goal.description}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+                          <p className="mb-2 text-[12px] text-white/45">Hook principal</p>
+                          <QuickSelect
+                            label="Estilo"
+                            value={platformRemix.hookStyle}
+                            onChange={(value) => updatePlatformRemix('hookStyle', value as PlatformRemix['hookStyle'])}
+                            options={HOOK_STYLE_OPTIONS}
+                          />
+                        </div>
+                        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+                          <p className="mb-2 text-[12px] text-white/45">Estilo da copy</p>
+                          <QuickSelect
+                            label="Copy"
+                            value={platformRemix.captionStyle}
+                            onChange={(value) => updatePlatformRemix('captionStyle', value as PlatformRemix['captionStyle'])}
+                            options={CAPTION_STYLE_OPTIONS}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-[12px] font-medium text-white/75">Gerar hooks alternativos</p>
+                            <p className="text-[11px] text-white/30">
+                              Faz a IA favorecer aberturas mais reaproveitaveis e testaveis.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={platformRemix.generateAltHooks}
+                            onCheckedChange={(checked) => updatePlatformRemix('generateAltHooks', checked)}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="mb-3 text-[12px] text-white/45">Tambem quero reaproveitar em</p>
+                        <div className="flex flex-wrap gap-2">
+                          {PLATFORM_OPTIONS.map((platform) => {
+                            const selected = platformRemix.targetPlatforms.includes(platform.value);
+                            return (
+                              <button
+                                key={platform.value}
+                                type="button"
+                                onClick={() => toggleTargetPlatform(platform.value)}
+                                className={cn(
+                                  'rounded-full border px-3 py-1.5 text-[11px] transition-all',
+                                  selected
+                                    ? 'border-white/20 bg-white/[0.08] text-white/85'
+                                    : 'border-white/[0.06] bg-white/[0.02] text-white/35 hover:text-white/65',
+                                )}
+                              >
+                                {platform.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </motion.section>
 

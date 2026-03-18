@@ -11,6 +11,7 @@ import {
   StartJobFromTempSchema,
   DEFAULT_CLIP_SETTINGS,
   DEFAULT_SUBTITLE_PREFERENCES,
+  DEFAULT_PLATFORM_REMIX,
   type ProjectConfig,
   type SubtitlePreferences,
 } from '../types/index.js';
@@ -386,25 +387,20 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get('/jobs', async (request, reply) => {
     try {
       const query = request.query as { userId?: string; includeLegacy?: string } | undefined;
-      const requestedUserId = query?.userId?.trim();
       const includeLegacy = query?.includeLegacy === 'true';
       const requestUserId = getRequestUserId(request);
 
-      const userIds = new Set<string>();
-
-      if (requestUserId) {
-        if (requestedUserId && requestedUserId !== requestUserId) {
-          return reply.status(403).send({
-            error: 'FORBIDDEN',
-            message: 'You can only access your own jobs',
-          });
-        }
-        userIds.add(requestUserId);
-      } else {
-        if (requestedUserId) userIds.add(requestedUserId);
-        if (includeLegacy) userIds.add('dev-user');
-        if (userIds.size === 0) userIds.add('dev-user');
+      // Require authentication — never allow unauthenticated access to jobs
+      if (!requestUserId) {
+        return reply.status(401).send({
+          error: 'UNAUTHORIZED',
+          message: 'Authentication required to access jobs',
+        });
       }
+
+      const userIds = new Set<string>();
+      userIds.add(requestUserId);
+      if (includeLegacy) userIds.add('dev-user');
 
       logger.info({ userIds: Array.from(userIds) }, 'Fetching all jobs for users');
 
@@ -447,7 +443,7 @@ export async function registerRoutes(app: FastifyInstance) {
       });
 
       logger.info({
-        requestedUserId,
+        userId: requestUserId,
         includeLegacy,
         count: withClipData.length,
       }, 'Found jobs for users');
@@ -1015,6 +1011,7 @@ export async function registerRoutes(app: FastifyInstance) {
       userId: effectiveUserId,
       clipSettings: DEFAULT_CLIP_SETTINGS,
       subtitlePreferences: DEFAULT_SUBTITLE_PREFERENCES,
+      platformRemix: DEFAULT_PLATFORM_REMIX,
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 3600 * 1000), // 1 hour expiration
     };
@@ -1144,6 +1141,7 @@ export async function registerRoutes(app: FastifyInstance) {
       clipCount: finalConfig.clipSettings.clipCount,
       clipSettings: finalConfig.clipSettings,
       subtitlePreferences: finalConfig.subtitlePreferences as SubtitlePreferences,
+      platformRemix: finalConfig.platformRemix,
       timeframe: finalConfig.timeframe,
       genre: finalConfig.genre,
       specificMoments: finalConfig.specificMoments,

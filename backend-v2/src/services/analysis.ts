@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { createLogger } from '../config/logger.js';
-import type { Transcript, HighlightAnalysis, HighlightSegment } from '../types/index.js';
+import type { Transcript, HighlightAnalysis, HighlightSegment, PlatformRemix } from '../types/index.js';
 import { detectScenes } from './scene-detection.js';
 
 const logger = createLogger('analysis');
@@ -17,6 +17,7 @@ interface AnalysisOptions {
   model?: 'ClipAnything' | 'Smart' | 'Fast';
   genre?: string;
   specificMoments?: string;
+  platformRemix?: PlatformRemix;
 }
 
 /**
@@ -35,6 +36,7 @@ export async function analyzeHighlights(
     model = 'ClipAnything',
     genre,
     specificMoments,
+    platformRemix,
   } = options;
 
   logger.info(
@@ -46,6 +48,7 @@ export async function analyzeHighlights(
       model,
       genre,
       hasSpecificMoments: Boolean(specificMoments),
+      platformRemix,
     },
     'Starting highlight analysis'
   );
@@ -97,7 +100,7 @@ export async function analyzeHighlights(
       targetDuration,
       clipCount,
       detectedScenes.length,
-      buildUserFocusContext({ model, genre, specificMoments })
+      buildUserFocusContext({ model, genre, specificMoments, platformRemix })
     );
 
     logger.debug('Sending scenes to OpenAI for ranking and metadata generation');
@@ -126,24 +129,27 @@ export async function analyzeHighlights(
     const analysis = parseRankingResponse(responseText);
 
     // STEP 5: Map AI response back to detected scenes
-    const enrichedSegments: HighlightSegment[] = analysis.rankings.map((ranking) => {
+    const enrichedSegments: HighlightSegment[] = [];
+
+    for (const ranking of analysis.rankings) {
       const sceneIndex = ranking.sceneIndex - 1; // Convert 1-based to 0-based
       const scene = detectedScenes[sceneIndex];
 
       if (!scene) {
         logger.warn({ sceneIndex, ranking }, 'Scene index out of bounds, skipping');
-        return null;
+        continue;
       }
 
-      return {
+      enrichedSegments.push({
         start: scene.start,
         end: scene.end,
         score: ranking.score,
         title: ranking.title,
+        description: ranking.description,
         reason: ranking.reason,
         keywords: ranking.keywords,
-      };
-    }).filter((seg): seg is HighlightSegment => seg !== null);
+      });
+    }
 
     // Validate and adjust segments
     const validatedSegments = validateSegments(
@@ -190,6 +196,7 @@ async function fallbackAIAnalysis(
     model = 'ClipAnything',
     genre,
     specificMoments,
+    platformRemix,
   } = options;
 
   logger.info('Using fallback AI-based analysis');
@@ -202,7 +209,7 @@ async function fallbackAIAnalysis(
     clipCount,
     minDuration,
     maxDuration,
-    buildUserFocusContext({ model, genre, specificMoments })
+    buildUserFocusContext({ model, genre, specificMoments, platformRemix })
   );
 
   const completion = await openai.chat.completions.create({
@@ -371,6 +378,7 @@ function buildUserFocusContext(input: {
   model?: 'ClipAnything' | 'Smart' | 'Fast';
   genre?: string;
   specificMoments?: string;
+  platformRemix?: PlatformRemix;
 }): string {
   const hints: string[] = [];
 
@@ -392,12 +400,102 @@ function buildUserFocusContext(input: {
     hints.push(`- Objetivo do usuário: ${input.specificMoments}.`);
   }
 
+  if (input.platformRemix?.enabled) {
+    const targetPlatforms = input.platformRemix.targetPlatforms.map(formatPlatformLabel).join(', ');
+    hints.push(`- Plataforma principal do remix: ${formatPlatformLabel(input.platformRemix.primaryPlatform)}.`);
+    hints.push(`- Plataformas alvo secundárias: ${targetPlatforms}.`);
+    hints.push(`- Meta principal do remix: ${formatGoalLabel(input.platformRemix.goal)}.`);
+    hints.push(`- Estilo de hook desejado: ${formatHookStyleLabel(input.platformRemix.hookStyle)}.`);
+    hints.push(`- Estilo de legenda/copy: ${formatCaptionStyleLabel(input.platformRemix.captionStyle)}.`);
+    hints.push(`- Gerar variações com hooks alternativos: ${input.platformRemix.generateAltHooks ? 'sim' : 'não'}.`);
+    hints.push(buildPlatformPlaybook(input.platformRemix));
+  }
+
   if (hints.length === 0) {
     return '';
   }
 
   return `FOCO E RESTRIÇÕES ADICIONAIS DO USUÁRIO:
 ${hints.join('\n')}`;
+}
+
+function formatPlatformLabel(platform: PlatformRemix['primaryPlatform']): string {
+  switch (platform) {
+    case 'tiktok':
+      return 'TikTok';
+    case 'instagram_reels':
+      return 'Instagram Reels';
+    case 'youtube_shorts':
+      return 'YouTube Shorts';
+    case 'linkedin':
+      return 'LinkedIn';
+  }
+}
+
+function formatGoalLabel(goal: PlatformRemix['goal']): string {
+  switch (goal) {
+    case 'viral':
+      return 'alcance viral e retenção forte';
+    case 'conversion':
+      return 'conversão, clique ou ação comercial';
+    case 'authority':
+      return 'autoridade e percepção de expertise';
+    case 'engagement':
+      return 'comentários, compartilhamentos e salvamentos';
+  }
+}
+
+function formatHookStyleLabel(hookStyle: PlatformRemix['hookStyle']): string {
+  switch (hookStyle) {
+    case 'bold':
+      return 'afirmações fortes e pattern interrupt';
+    case 'curiosity':
+      return 'curiosidade, mistério e payoff';
+    case 'teaching':
+      return 'ensino prático com promessa clara';
+    case 'story':
+      return 'narrativa e construção emocional';
+  }
+}
+
+function formatCaptionStyleLabel(captionStyle: PlatformRemix['captionStyle']): string {
+  switch (captionStyle) {
+    case 'punchy':
+      return 'curta, forte e altamente escaneável';
+    case 'conversational':
+      return 'natural, humana e próxima';
+    case 'expert':
+      return 'didática, precisa e mais premium';
+  }
+}
+
+function buildPlatformPlaybook(platformRemix: PlatformRemix): string {
+  const primaryRules: Record<PlatformRemix['primaryPlatform'], string[]> = {
+    tiktok: [
+      'TikTok: abra o clipe o mais cedo possível com tensão, surpresa ou promessa muito clara.',
+      'TikTok: prefira frases curtas, ritmo alto e linguagem mais coloquial.',
+      'TikTok: priorize hooks que interrompem o scroll e despertam curiosidade instantânea.',
+    ],
+    instagram_reels: [
+      'Instagram Reels: mantenha o hook forte, mas com acabamento mais clean e aspiracional.',
+      'Instagram Reels: prefira linguagem mais refinada, visualmente elegante e fácil de compartilhar.',
+      'Instagram Reels: títulos e descrições devem soar premium, diretos e social-first.',
+    ],
+    youtube_shorts: [
+      'YouTube Shorts: garanta contexto rápido e payoff cedo; o clipe precisa funcionar sozinho.',
+      'YouTube Shorts: priorize clareza, retenção e títulos altamente compreensíveis.',
+      'YouTube Shorts: evite depender de contexto externo; o momento precisa fechar a ideia.',
+    ],
+    linkedin: [
+      'LinkedIn: priorize credibilidade, clareza intelectual e aprendizado acionável.',
+      'LinkedIn: reduza gírias, aumente o tom de autoridade e foque em insights profissionais.',
+      'LinkedIn: descrições devem incentivar comentário, reflexão ou salvamento, não só entretenimento.',
+    ],
+  };
+
+  return `PLAYBOOK DO REMIX POR PLATAFORMA:
+- ${primaryRules[platformRemix.primaryPlatform].join('\n- ')}
+- Escolha títulos, descrições e keywords que favoreçam a plataforma principal sem perder reaproveitamento nas demais.`;
 }
 
 /**
@@ -408,6 +506,7 @@ function parseRankingResponse(responseText: string): {
     sceneIndex: number;
     score: number;
     title: string;
+    description?: string;
     reason: string;
     keywords: string[];
   }>;
@@ -435,6 +534,7 @@ function parseRankingResponse(responseText: string): {
         sceneIndex: Number(rank.sceneIndex),
         score: Number(rank.score) || 0.5,
         title: String(rank.title || 'Clip sem título'),
+        description: typeof rank.description === 'string' ? rank.description : '',
         reason: String(rank.reason || ''),
         keywords: Array.isArray(rank.keywords) ? rank.keywords : [],
       })),
@@ -473,6 +573,7 @@ function parseAIResponse(responseText: string): HighlightAnalysis {
         end: Number(seg.end),
         score: Number(seg.score) || 0.5,
         title: String(seg.title || 'Clip sem título'),
+        description: typeof seg.description === 'string' ? seg.description : '',
         reason: String(seg.reason || ''),
         keywords: Array.isArray(seg.keywords) ? seg.keywords : [],
       })),

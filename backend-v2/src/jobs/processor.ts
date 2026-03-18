@@ -67,6 +67,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
   const timeframe = job.data.timeframe;
   const genre = job.data.genre;
   const specificMoments = job.data.specificMoments;
+  const platformRemix = job.data.platformRemix;
 
   const effectiveTargetDuration = clipSettings?.targetDuration ?? targetDuration ?? 60;
   const effectiveClipCount = clipSettings?.clipCount ?? clipCount ?? 8;
@@ -89,6 +90,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       hasTimeframe: Boolean(timeframe),
       genre,
       hasSpecificMoments: Boolean(specificMoments),
+      platformRemix,
       aspectRatio: effectiveAspectRatio,
     },
     'Starting video processing'
@@ -178,6 +180,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       model: clippingModel,
       genre,
       specificMoments,
+      platformRemix,
     });
 
     logger.info(
@@ -350,6 +353,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
               uploadPath: job.data.uploadPath,
               targetDuration: effectiveTargetDuration,
               clipCount: effectiveClipCount,
+              platformRemix: job.data.platformRemix,
               timeframe: job.data.timeframe,
               genre: job.data.genre,
               specificMoments: job.data.specificMoments,

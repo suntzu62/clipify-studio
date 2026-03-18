@@ -36,6 +36,49 @@ export const SubtitlePreferencesSchema = z.object({
 
 export type SubtitlePreferencesInput = z.infer<typeof SubtitlePreferencesSchema>;
 
+export const RemixPlatformSchema = z.enum([
+  'tiktok',
+  'instagram_reels',
+  'youtube_shorts',
+  'linkedin',
+]);
+
+export const RemixGoalSchema = z.enum([
+  'viral',
+  'conversion',
+  'authority',
+  'engagement',
+]);
+
+export const RemixHookStyleSchema = z.enum([
+  'bold',
+  'curiosity',
+  'teaching',
+  'story',
+]);
+
+export const RemixCaptionStyleSchema = z.enum([
+  'punchy',
+  'conversational',
+  'expert',
+]);
+
+export const PlatformRemixSchema = z.object({
+  enabled: z.boolean(),
+  primaryPlatform: RemixPlatformSchema,
+  targetPlatforms: z.array(RemixPlatformSchema).min(1).max(4),
+  goal: RemixGoalSchema,
+  hookStyle: RemixHookStyleSchema,
+  captionStyle: RemixCaptionStyleSchema,
+  generateAltHooks: z.boolean(),
+});
+
+export type RemixPlatform = z.infer<typeof RemixPlatformSchema>;
+export type RemixGoal = z.infer<typeof RemixGoalSchema>;
+export type RemixHookStyle = z.infer<typeof RemixHookStyleSchema>;
+export type RemixCaptionStyle = z.infer<typeof RemixCaptionStyleSchema>;
+export type PlatformRemix = z.infer<typeof PlatformRemixSchema>;
+
 // ============================================
 // TEMPORARY CONFIGURATION TYPES (OpusClip-style workflow)
 // ============================================
@@ -79,6 +122,7 @@ export const ProjectConfigSchema = z.object({
   userId: z.string(),
   clipSettings: ClipSettingsSchema,
   subtitlePreferences: SubtitlePreferencesSchema,
+  platformRemix: PlatformRemixSchema,
   timeframe: TimeframeConfigSchema.optional(),
   genre: z.string().optional(),
   specificMoments: z.string().optional(),
@@ -107,6 +151,7 @@ export type CreateTempConfigInput = z.infer<typeof CreateTempConfigSchema>;
 export const StartJobFromTempSchema = z.object({
   clipSettings: ClipSettingsSchema,
   subtitlePreferences: SubtitlePreferencesSchema,
+  platformRemix: PlatformRemixSchema,
   timeframe: TimeframeConfigSchema.optional(),
   genre: z.string().optional(),
   specificMoments: z.string().optional(),
@@ -122,6 +167,16 @@ export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   minDuration: 30,
   maxDuration: 90,
   clipCount: 8,
+};
+
+export const DEFAULT_PLATFORM_REMIX: PlatformRemix = {
+  enabled: true,
+  primaryPlatform: 'youtube_shorts',
+  targetPlatforms: ['youtube_shorts', 'instagram_reels', 'tiktok'],
+  goal: 'viral',
+  hookStyle: 'bold',
+  captionStyle: 'punchy',
+  generateAltHooks: true,
 };
 
 // ============================================
@@ -141,6 +196,7 @@ export interface JobData {
   clipCount: number;
   clipSettings?: ClipSettings;
   subtitlePreferences?: SubtitlePreferences;
+  platformRemix?: PlatformRemix;
   timeframe?: TimeframeConfig;
   genre?: string;
   specificMoments?: string;

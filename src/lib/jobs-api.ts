@@ -436,6 +436,15 @@ export async function startJobFromTempConfig(
     };
     genre?: string;
     specificMoments?: string;
+    platformRemix?: {
+      enabled: boolean;
+      primaryPlatform: 'tiktok' | 'instagram_reels' | 'youtube_shorts' | 'linkedin';
+      targetPlatforms: Array<'tiktok' | 'instagram_reels' | 'youtube_shorts' | 'linkedin'>;
+      goal: 'viral' | 'conversion' | 'authority' | 'engagement';
+      hookStyle: 'bold' | 'curiosity' | 'teaching' | 'story';
+      captionStyle: 'punchy' | 'conversational' | 'expert';
+      generateAltHooks: boolean;
+    };
   },
   getToken?: () => Promise<string | null>
 ): Promise<{ jobId: string; status: string; message?: string }> {

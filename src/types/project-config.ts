@@ -15,6 +15,9 @@ export interface ProjectConfig {
   // Preferências de legendas
   subtitlePreferences: SubtitlePreferences;
 
+  // Remix automático por plataforma
+  platformRemix: PlatformRemix;
+
   // Timeframe (processar apenas parte do vídeo)
   timeframe?: TimeframeConfig;
 
@@ -64,6 +67,39 @@ export interface SubtitlePreferences {
   marginVertical: number; // 20-300
 }
 
+export type RemixPlatform =
+  | 'tiktok'
+  | 'instagram_reels'
+  | 'youtube_shorts'
+  | 'linkedin';
+
+export type RemixGoal =
+  | 'viral'
+  | 'conversion'
+  | 'authority'
+  | 'engagement';
+
+export type RemixHookStyle =
+  | 'bold'
+  | 'curiosity'
+  | 'teaching'
+  | 'story';
+
+export type RemixCaptionStyle =
+  | 'punchy'
+  | 'conversational'
+  | 'expert';
+
+export interface PlatformRemix {
+  enabled: boolean;
+  primaryPlatform: RemixPlatform;
+  targetPlatforms: RemixPlatform[];
+  goal: RemixGoal;
+  hookStyle: RemixHookStyle;
+  captionStyle: RemixCaptionStyle;
+  generateAltHooks: boolean;
+}
+
 export interface TimeframeConfig {
   startTime: number; // segundos
   endTime: number; // segundos
@@ -108,6 +144,16 @@ export const DEFAULT_SUBTITLE_PREFERENCES: SubtitlePreferences = {
   shadowColor: '#000000',
   maxCharsPerLine: 28,
   marginVertical: 260,
+};
+
+export const DEFAULT_PLATFORM_REMIX: PlatformRemix = {
+  enabled: true,
+  primaryPlatform: 'youtube_shorts',
+  targetPlatforms: ['youtube_shorts', 'instagram_reels', 'tiktok'],
+  goal: 'viral',
+  hookStyle: 'bold',
+  captionStyle: 'punchy',
+  generateAltHooks: true,
 };
 
 export const GENRE_OPTIONS: { value: GenreType; label: string; icon: string }[] = [
