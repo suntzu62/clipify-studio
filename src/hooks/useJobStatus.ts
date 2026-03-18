@@ -192,7 +192,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     // Initial fetch
     fetchEnrichedData();
 
-    // Set up polling interval every 20 seconds
+    // Set up polling interval every 8 seconds so rendered clips appear quickly.
     const pollInterval = setInterval(() => {
       if (!isJobTerminal(jobStatus) && !enrichedDataFetched) {
         fetchEnrichedData();
@@ -201,7 +201,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
         clearInterval(pollInterval);
         setEnrichedDataFetched(true);
       }
-    }, 20000);
+    }, 8000);
 
     return () => {
       console.log('[useJobStatus] Cleaning up enrichment polling');

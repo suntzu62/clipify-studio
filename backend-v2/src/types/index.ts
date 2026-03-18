@@ -10,7 +10,7 @@ export const CreateJobSchema = z.object({
   uploadPath: z.string().optional(),
   userId: z.string().uuid(),
   targetDuration: z.number().min(15).max(90).default(60),
-  clipCount: z.number().min(1).max(20).default(8),
+  clipCount: z.number().min(1).max(30).default(14),
 });
 
 export type CreateJobInput = z.infer<typeof CreateJobSchema>;
@@ -89,7 +89,7 @@ export const ClipSettingsSchema = z.object({
   targetDuration: z.number().min(30).max(90),
   minDuration: z.number().min(15).max(60),
   maxDuration: z.number().min(60).max(120),
-  clipCount: z.number().min(3).max(20),
+  clipCount: z.number().min(3).max(30),
 });
 
 export type ClipSettings = z.infer<typeof ClipSettingsSchema>;
@@ -163,10 +163,10 @@ export type StartJobFromTempInput = z.infer<typeof StartJobFromTempSchema>;
 export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   aiClipping: true,
   model: 'ClipAnything',
-  targetDuration: 60,
-  minDuration: 30,
-  maxDuration: 90,
-  clipCount: 8,
+  targetDuration: 40,
+  minDuration: 20,
+  maxDuration: 60,
+  clipCount: 14,
 };
 
 export const DEFAULT_PLATFORM_REMIX: PlatformRemix = {

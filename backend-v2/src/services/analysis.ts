@@ -851,7 +851,21 @@ function validateSegments(
 
     // Check duration
     if (duration < minDuration) {
-      logger.warn({ segment: seg, duration }, 'Segment too short, skipping');
+      const desiredEnd = Math.min(videoDuration, seg.start + minDuration);
+      const desiredStart = Math.max(0, desiredEnd - minDuration);
+      const adjustedSeg = {
+        ...seg,
+        start: desiredStart,
+        end: desiredEnd,
+      };
+
+      if (adjustedSeg.end - adjustedSeg.start < Math.min(minDuration * 0.75, minDuration - 2)) {
+        logger.warn({ segment: seg, duration }, 'Segment too short even after padding, skipping');
+        continue;
+      }
+
+      logger.info({ original: seg, adjusted: adjustedSeg }, 'Segment padded to preserve clip count');
+      validated.push(adjustedSeg);
       continue;
     }
 

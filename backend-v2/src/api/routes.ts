@@ -540,15 +540,17 @@ export async function registerRoutes(app: FastifyInstance) {
       const remixLookup = getRemixLookup(dbJob.metadata);
       const dbClipRows = await dbClips.findByJobId(jobId);
 
+      const resultPayload = dbClipRows.length > 0
+        ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
+        : null;
+
       return {
         jobId: dbJob.id,
         state: dbState,
         status: dbState,
         currentStep: dbJob.current_step || 'ingest',
         progress: { progress: progressValue, message: dbJob.current_step_message || '' },
-        result: dbState === 'completed'
-          ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
-          : null,
+        result: resultPayload,
         error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
         finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
       };
@@ -571,15 +573,17 @@ export async function registerRoutes(app: FastifyInstance) {
       const remixLookup = getRemixLookup(dbJob.metadata);
       const dbClipRows = await dbClips.findByJobId(jobId);
 
+      const resultPayload = dbClipRows.length > 0
+        ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
+        : null;
+
       return {
         jobId: dbJob.id,
         state: dbState,
         status: dbState,
         currentStep: dbJob.current_step || 'ingest',
         progress: { progress: progressValue, message: dbJob.current_step_message || '' },
-        result: dbState === 'completed'
-          ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
-          : null,
+        result: resultPayload,
         error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
         finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
       };
@@ -621,18 +625,18 @@ export async function registerRoutes(app: FastifyInstance) {
         ...result,
         clips: result.clips.map((clip: any) => transformClipForResponse(clip, jobId, remixLookup)),
       };
-    } else if (status.state === 'completed') {
-      // Fallback: fetch clips from PostgreSQL database when BullMQ returnvalue has no clips
-      logger.info({ jobId }, 'No clips in returnvalue, fetching from database');
+    } else {
+      // Fetch ready clips from the database even while the job is still active.
+      logger.info({ jobId, state: status.state }, 'No clips in returnvalue, checking database for partial results');
       try {
         const dbClipRows = await dbClips.findByJobId(jobId);
         if (dbClipRows.length > 0) {
-          logger.info({ jobId, clipCount: dbClipRows.length }, 'Found clips in database');
+          logger.info({ jobId, clipCount: dbClipRows.length, state: status.state }, 'Found clips in database');
           result = {
             ...(result || {}),
             clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)),
           };
-        } else {
+        } else if (status.state === 'completed') {
           logger.warn({ jobId }, 'No clips found in database either');
         }
       } catch (dbError: any) {

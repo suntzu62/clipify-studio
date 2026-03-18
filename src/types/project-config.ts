@@ -121,10 +121,10 @@ export type GenreType =
 export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   aiClipping: true,
   model: 'ClipAnything',
-  targetDuration: 60,
-  minDuration: 30,
-  maxDuration: 90,
-  clipCount: 8,
+  targetDuration: 40,
+  minDuration: 20,
+  maxDuration: 60,
+  clipCount: 14,
 };
 
 export const DEFAULT_SUBTITLE_PREFERENCES: SubtitlePreferences = {

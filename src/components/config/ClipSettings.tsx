@@ -130,12 +130,12 @@ export const ClipSettings = ({ settings, onChange }: ClipSettingsProps) => {
               onValueChange={([value]) => updateSetting('targetDuration', value)}
               min={30}
               max={90}
-              step={10}
+              step={5}
               className="w-full"
             />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>30s (curto)</span>
-              <span>60s (ideal)</span>
+              <span>40-45s (mais clips)</span>
               <span>90s (longo)</span>
             </div>
           </div>
@@ -205,17 +205,17 @@ export const ClipSettings = ({ settings, onChange }: ClipSettingsProps) => {
             value={[settings.clipCount]}
             onValueChange={([value]) => updateSetting('clipCount', value)}
             min={3}
-            max={20}
+            max={30}
             step={1}
             className="w-full"
           />
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>3 (poucos)</span>
-            <span>8 (recomendado)</span>
-            <span>15 (muitos)</span>
+            <span>14 (novo padrão)</span>
+            <span>30 (máximo)</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            💡 8-12 clipes é ideal para ter variedade sem perder qualidade
+            💡 Para vídeos longos, 14-20 clipes costuma entregar melhor cobertura do conteúdo
           </p>
         </CardContent>
       </Card>

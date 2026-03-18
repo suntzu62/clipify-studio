@@ -69,7 +69,7 @@ const envSchema = z.object({
   WORKER_STALLED_INTERVAL_MS: z.string().default('30000'),
   WORKER_MAX_STALLED_COUNT: z.string().default('3'),
   RENDER_SMART_CROP: z.string().default('false'),
-  RENDER_BATCH_CONCURRENCY: z.string().default('1'),
+  RENDER_BATCH_CONCURRENCY: z.string().default('2'),
   RENDER_FFMPEG_THREADS: z.string().default('2'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });

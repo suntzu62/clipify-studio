@@ -220,8 +220,13 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     const bucket = env.supabase.bucket;
     const clips: Clip[] = [];
     const remixByClipId: Record<string, NonNullable<Clip['remixPackage']>> = {};
+    const renderConcurrency = Math.max(1, env.render.batchConcurrency);
+    logger.info(
+      { jobId, renderConcurrency, selectedClipCount: highlightAnalysis.segments.length },
+      'Rendering clips with batch concurrency'
+    );
 
-    for (const [idx, segment] of highlightAnalysis.segments.entries()) {
+    const processRenderedClip = async (segment: typeof highlightAnalysis.segments[number], idx: number) => {
       const clipId = `clip-${idx}`;
       let clipOutputDir: string | undefined;
 
@@ -239,9 +244,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
             font: subtitlePreferences.font,
             preset: 'ultrafast',
             subtitlePreferences,
-            onProgress: async (progress: number, message: string) => {
-              await updateProgress(job, 'render', progress, message);
-            },
+            onProgress: undefined,
           }
         );
 
@@ -250,19 +253,20 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
         const clipStoragePath = `clips/${jobId}/${renderedClip.id}.mp4`;
         const thumbnailStoragePath = `clips/${jobId}/${renderedClip.id}.jpg`;
 
-        const videoUpload = await uploadFile(
-          bucket,
-          clipStoragePath,
-          renderedClip.videoPath,
-          'video/mp4'
-        );
-
-        const thumbnailUpload = await uploadFile(
-          bucket,
-          thumbnailStoragePath,
-          renderedClip.thumbnailPath,
-          'image/jpeg'
-        );
+        const [videoUpload, thumbnailUpload] = await Promise.all([
+          uploadFile(
+            bucket,
+            clipStoragePath,
+            renderedClip.videoPath,
+            'video/mp4'
+          ),
+          uploadFile(
+            bucket,
+            thumbnailStoragePath,
+            renderedClip.thumbnailPath,
+            'image/jpeg'
+          ),
+        ]);
 
         const clipData = {
           id: renderedClip.id,
@@ -277,12 +281,6 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
           thumbnail: thumbnailUpload.publicUrl,
           remixPackage: renderedClip.segment.remixPackage,
         };
-
-        clips.push(clipData);
-
-        if (renderedClip.segment.remixPackage) {
-          remixByClipId[renderedClip.id] = renderedClip.segment.remixPackage;
-        }
 
         await dbClips.upsert({
           id: renderedClip.id,
@@ -302,16 +300,47 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
         });
 
         logger.info({ jobId, clipId: renderedClip.id, storageUrl: videoUpload.publicUrl }, 'Clip rendered, uploaded and saved to database');
-      } catch (clipError: any) {
-        logger.error(
-          { jobId, clipId, clipIndex: idx, error: clipError.message, stack: clipError.stack },
-          'Failed to render/upload clip, skipping to next'
-        );
+
+        return {
+          clipData,
+          remixPackage: renderedClip.segment.remixPackage,
+        };
       } finally {
         if (clipOutputDir) {
           await cleanupRenderDir(clipOutputDir);
         }
       }
+    };
+
+    for (let startIndex = 0; startIndex < highlightAnalysis.segments.length; startIndex += renderConcurrency) {
+      const batch = highlightAnalysis.segments.slice(startIndex, startIndex + renderConcurrency);
+      await updateProgress(
+        job,
+        'render',
+        65 + Math.floor((10 * startIndex) / highlightAnalysis.segments.length),
+        `Renderizando clipes ${startIndex + 1}-${Math.min(startIndex + batch.length, highlightAnalysis.segments.length)} de ${highlightAnalysis.segments.length}...`
+      );
+
+      const batchResults = await Promise.allSettled(
+        batch.map((segment, batchIndex) => processRenderedClip(segment, startIndex + batchIndex))
+      );
+
+      batchResults.forEach((result, batchIndex) => {
+        const clipId = `clip-${startIndex + batchIndex}`;
+
+        if (result.status === 'fulfilled') {
+          clips.push(result.value.clipData);
+          if (result.value.remixPackage) {
+            remixByClipId[clipId] = result.value.remixPackage;
+          }
+          return;
+        }
+
+        logger.error(
+          { jobId, clipId, clipIndex: startIndex + batchIndex, error: result.reason?.message || String(result.reason) },
+          'Failed to render/upload clip, skipping to next'
+        );
+      });
     }
 
     if (clips.length === 0) {
