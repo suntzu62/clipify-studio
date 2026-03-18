@@ -454,14 +454,18 @@ export async function startJobFromTempConfig(
     const token = getToken ? await getToken() : null;
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_API_KEY,
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     } as Record<string, string>;
+
+    if (import.meta.env.VITE_API_KEY) {
+      headers['x-api-key'] = import.meta.env.VITE_API_KEY;
+    }
 
     const resp = await fetch(`${BACKEND_URL}/jobs/temp/${tempId}/start`, {
       method: 'POST',
       headers,
       body: JSON.stringify(config),
+      credentials: 'include',
     });
 
     const data = await resp.json().catch(() => ({}));

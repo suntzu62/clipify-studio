@@ -378,8 +378,15 @@ export default function ProjectConfigure() {
       try {
         const baseUrl = getBackendUrl();
         const apiKey = import.meta.env.VITE_API_KEY || '';
+        const headers: Record<string, string> = {};
+
+        if (apiKey) {
+          headers['X-API-Key'] = apiKey;
+        }
+
         const response = await fetchWithTimeout(`${baseUrl}/jobs/temp/${tempId}`, {
-          headers: { 'X-API-Key': apiKey },
+          headers,
+          credentials: 'include',
         }, 20000);
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
@@ -430,6 +437,14 @@ export default function ProjectConfigure() {
     try {
       const baseUrl = getBackendUrl();
       const apiKey = import.meta.env.VITE_API_KEY || '';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+      }
+
       const requestBody = {
         clipSettings: config.clipSettings,
         subtitlePreferences: config.subtitlePreferences,
@@ -441,7 +456,8 @@ export default function ProjectConfigure() {
       };
       const response = await fetchWithTimeout(`${baseUrl}/jobs/temp/${tempId}/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+        headers,
+        credentials: 'include',
         body: JSON.stringify(requestBody),
       }, 30000);
       const responseData = await response.json();
