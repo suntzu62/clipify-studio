@@ -1,4 +1,4 @@
-import { supabaseFunctions } from '@/integrations/supabase/client';
+import { supabaseFunctions, isSupabaseConfigured } from '@/integrations/supabase/client';
 
 export interface WorkerHealthStatus {
   configured: boolean;
@@ -25,6 +25,15 @@ export interface WorkerHealthStatus {
 
 export async function checkWorkerHealth(): Promise<WorkerHealthStatus> {
   try {
+    if (!isSupabaseConfigured || !supabaseFunctions) {
+      return {
+        configured: false,
+        isHealthy: false,
+        error: 'Supabase functions client is not configured',
+        timestamp: new Date().toISOString()
+      };
+    }
+
     const { data, error } = await supabaseFunctions.functions.invoke<WorkerHealthStatus>('worker-health', {
       method: 'GET'
     });

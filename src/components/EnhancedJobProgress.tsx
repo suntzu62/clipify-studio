@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 import { CheckCircle, Clock, AlertCircle, Loader2, Youtube, Upload } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -86,7 +86,7 @@ export function EnhancedJobProgress({
   
   useEffect(() => {
     const checkYouTubeConnection = async () => {
-      if (!user?.id) return;
+      if (!user?.id || !isSupabaseConfigured || !supabase) return;
       const { data } = await (supabase as any)
         .from('youtube_accounts')
         .select('id')

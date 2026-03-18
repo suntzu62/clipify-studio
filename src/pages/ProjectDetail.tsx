@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -28,9 +28,7 @@ import { useClipList } from '@/hooks/useClipList';
 import { ClipCardPro } from '@/components/clips/ClipCardPro';
 import { ClipPlayerModal } from '@/components/clips/ClipPlayerModal';
 import { ClipCardEnhanced as ClipCard } from '@/components/clips/ClipCardEnhanced';
-import { VideoDebugPanel } from '@/components/debug/VideoDebugPanel';
 import { ClipDebugPanel } from '@/components/debug/ClipDebugPanel';
-import { WorkerDiagnosticPanel } from '@/components/WorkerDiagnosticPanel';
 import { SubtitleSettingsWarning } from '@/components/SubtitleSettingsWarning';
 import { EmptyState } from '@/components/EmptyState';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -102,6 +100,18 @@ const REMIX_COPY_LABELS = {
   conversational: 'Conversational',
   expert: 'Expert',
 } as const;
+
+const WorkerDiagnosticPanel = lazy(() =>
+  import('@/components/WorkerDiagnosticPanel').then((module) => ({
+    default: module.WorkerDiagnosticPanel,
+  }))
+);
+
+const VideoDebugPanel = lazy(() =>
+  import('@/components/debug/VideoDebugPanel').then((module) => ({
+    default: module.VideoDebugPanel,
+  }))
+);
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -1030,18 +1040,20 @@ export default function ProjectDetail() {
                   Debug & Diagnostics
                 </AccordionTrigger>
                 <AccordionContent className="space-y-4">
-                  <WorkerDiagnosticPanel
-                    jobId={id || ''}
-                    jobStatus={jobStatus?.status}
-                    workerHealth={jobStatus?.workerHealth}
-                    onRefresh={reconnect}
-                  />
-                  <VideoDebugPanel
-                    jobStatus={jobStatus}
-                    clipDebugInfo={debugInfo}
-                    connectionInfo={{ isConnected, connectionType, error }}
-                    onRefresh={() => window.location.reload()}
-                  />
+                  <Suspense fallback={<div className="text-xs text-white/30">Carregando diagnosticos...</div>}>
+                    <WorkerDiagnosticPanel
+                      jobId={id || ''}
+                      jobStatus={jobStatus?.status}
+                      workerHealth={jobStatus?.workerHealth}
+                      onRefresh={reconnect}
+                    />
+                    <VideoDebugPanel
+                      jobStatus={jobStatus}
+                      clipDebugInfo={debugInfo}
+                      connectionInfo={{ isConnected, connectionType, error }}
+                      onRefresh={() => window.location.reload()}
+                    />
+                  </Suspense>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>

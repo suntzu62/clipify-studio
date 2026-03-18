@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
 
 export interface UsageData {
   plan: "free" | "pro" | "scale";
@@ -18,10 +18,19 @@ export interface BillingError {
   remaining?: number;
 }
 
+function getRequiredSupabaseClient() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase functions client is not configured");
+  }
+
+  return supabase;
+}
+
 export const createCheckoutSession = async (plan: "pro" | "scale", sessionToken: string) => {
   console.log("Creating checkout session", { plan });
+  const client = getRequiredSupabaseClient();
   
-  const { data, error } = await supabase.functions.invoke("create-checkout", {
+  const { data, error } = await client.functions.invoke("create-checkout", {
     body: { plan },
     headers: {
       Authorization: `Bearer ${sessionToken}`,
@@ -38,8 +47,9 @@ export const createCheckoutSession = async (plan: "pro" | "scale", sessionToken:
 
 export const createCustomerPortalSession = async (sessionToken: string) => {
   console.log("Creating customer portal session");
+  const client = getRequiredSupabaseClient();
   
-  const { data, error } = await supabase.functions.invoke("customer-portal", {
+  const { data, error } = await client.functions.invoke("customer-portal", {
     body: {},
     headers: {
       Authorization: `Bearer ${sessionToken}`,
@@ -56,8 +66,9 @@ export const createCustomerPortalSession = async (sessionToken: string) => {
 
 export const getUsage = async (sessionToken: string): Promise<UsageData> => {
   console.log("Getting usage data");
+  const client = getRequiredSupabaseClient();
   
-  const { data, error } = await supabase.functions.invoke("get-usage", {
+  const { data, error } = await client.functions.invoke("get-usage", {
     body: {},
     headers: {
       Authorization: `Bearer ${sessionToken}`,
@@ -78,8 +89,9 @@ export const incrementUsage = async (
   idempotencyKey: string
 ) => {
   console.log("Incrementing usage", { usage, idempotencyKey });
+  const client = getRequiredSupabaseClient();
   
-  const { data, error } = await supabase.functions.invoke("increment-usage", {
+  const { data, error } = await client.functions.invoke("increment-usage", {
     body: { 
       minutes: usage.minutes || 0, 
       shorts: usage.shorts || 0, 

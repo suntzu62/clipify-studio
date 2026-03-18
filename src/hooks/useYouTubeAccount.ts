@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
 
 interface YouTubeAccount {
   channel_id: string | null;
@@ -14,7 +14,7 @@ export const useYouTubeAccount = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !isSupabaseConfigured || !supabase) {
       setLoading(false);
       return;
     }
