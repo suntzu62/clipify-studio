@@ -261,6 +261,31 @@ export const clips = {
     return result.rows;
   },
 
+  async findSummaryByJobId(jobId: string) {
+    const result = await pool.query(
+      `SELECT
+        id,
+        job_id,
+        title,
+        description,
+        hashtags,
+        start_time,
+        end_time,
+        duration,
+        video_url,
+        thumbnail_url,
+        storage_path,
+        thumbnail_storage_path,
+        created_at,
+        updated_at
+      FROM clips
+      WHERE job_id = $1
+      ORDER BY start_time ASC`,
+      [jobId]
+    );
+    return result.rows;
+  },
+
   async findByUserId(userId: string) {
     const result = await pool.query(
       'SELECT * FROM clips WHERE user_id = $1 ORDER BY created_at DESC',

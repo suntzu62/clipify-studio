@@ -592,42 +592,53 @@ export async function getJobStatus(
   getToken?: () => Promise<string | null>
 ): Promise<Job> {
   const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12000);
 
-  if (useBackendAPI) {
-    const token = getToken ? await getToken() : null;
-    const headers = {
-      'x-api-key': import.meta.env.VITE_API_KEY,
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    } as Record<string, string>;
+  try {
+    if (useBackendAPI) {
+      const token = getToken ? await getToken() : null;
+      const headers = {
+        'x-api-key': import.meta.env.VITE_API_KEY,
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      } as Record<string, string>;
 
-    const response = await fetch(
-      `${BACKEND_URL}/jobs/${jobId}`,
-      { headers }
-    );
+      const response = await fetch(
+        `${BACKEND_URL}/jobs/${jobId}`,
+        { headers, signal: controller.signal }
+      );
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`job-status failed: ${response.status} ${response.statusText} - ${text}`);
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`job-status failed: ${response.status} ${response.statusText} - ${text}`);
+      }
+
+      return await response.json();
+    } else {
+      // Production: use backend API
+      const headers = {
+        ...(await getAuthHeader(getToken)),
+        'x-api-key': import.meta.env.VITE_API_KEY,
+      } as Record<string, string>;
+      
+      const response = await fetch(
+        `${BACKEND_URL}/jobs/${jobId}`,
+        { headers, credentials: 'include', signal: controller.signal }
+      );
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`job-status failed: ${response.status} ${response.statusText} - ${text}`);
+      }
+
+      return await response.json();
     }
-
-    return await response.json();
-  } else {
-    // Production: use backend API
-    const headers = {
-      ...(await getAuthHeader(getToken)),
-      'x-api-key': import.meta.env.VITE_API_KEY,
-    } as Record<string, string>;
-    
-    const response = await fetch(
-      `${BACKEND_URL}/jobs/${jobId}`,
-      { headers, credentials: 'include' }
-    );
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`job-status failed: ${response.status} ${response.statusText} - ${text}`);
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('job-status timeout');
     }
-
-    return await response.json();
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }

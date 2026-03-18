@@ -170,6 +170,15 @@ function transformClipForResponse(
   };
 }
 
+async function fetchJobClipSummaries(jobId: string) {
+  try {
+    return await withTimeout(dbClips.findSummaryByJobId(jobId), 1500);
+  } catch (error: any) {
+    logger.warn({ jobId, error: error?.message || String(error) }, 'Clip summary lookup timed out');
+    return [];
+  }
+}
+
 async function enforceUsageLimits(
   reply: FastifyReply,
   userId: string,
@@ -538,7 +547,7 @@ export async function registerRoutes(app: FastifyInstance) {
       const dbState = dbJob.status || 'queued';
       const progressValue = Number(dbJob.progress || 0);
       const remixLookup = getRemixLookup(dbJob.metadata);
-      const dbClipRows = await dbClips.findByJobId(jobId);
+      const dbClipRows = await fetchJobClipSummaries(jobId);
 
       const resultPayload = dbClipRows.length > 0
         ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
@@ -571,7 +580,7 @@ export async function registerRoutes(app: FastifyInstance) {
       const dbState = dbJob.status || 'queued';
       const progressValue = Number(dbJob.progress || 0);
       const remixLookup = getRemixLookup(dbJob.metadata);
-      const dbClipRows = await dbClips.findByJobId(jobId);
+      const dbClipRows = await fetchJobClipSummaries(jobId);
 
       const resultPayload = dbClipRows.length > 0
         ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
@@ -629,7 +638,7 @@ export async function registerRoutes(app: FastifyInstance) {
       // Fetch ready clips from the database even while the job is still active.
       logger.info({ jobId, state: status.state }, 'No clips in returnvalue, checking database for partial results');
       try {
-        const dbClipRows = await dbClips.findByJobId(jobId);
+        const dbClipRows = await fetchJobClipSummaries(jobId);
         if (dbClipRows.length > 0) {
           logger.info({ jobId, clipCount: dbClipRows.length, state: status.state }, 'Found clips in database');
           result = {
@@ -808,7 +817,7 @@ export async function registerRoutes(app: FastifyInstance) {
           // Fallback: fetch clips from database
           logger.info({ jobId }, 'SSE completed: no clips in returnvalue, fetching from database');
           try {
-            const dbClipRows = await dbClips.findByJobId(jobId);
+            const dbClipRows = await fetchJobClipSummaries(jobId);
             if (dbClipRows.length > 0) {
               logger.info({ jobId, clipCount: dbClipRows.length }, 'SSE: Found clips in database');
               result = {
