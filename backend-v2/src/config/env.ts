@@ -69,8 +69,9 @@ const envSchema = z.object({
   WORKER_STALLED_INTERVAL_MS: z.string().default('30000'),
   WORKER_MAX_STALLED_COUNT: z.string().default('3'),
   RENDER_SMART_CROP: z.string().default('false'),
-  RENDER_BATCH_CONCURRENCY: z.string().default('2'),
-  RENDER_FFMPEG_THREADS: z.string().default('2'),
+  RENDER_BATCH_CONCURRENCY: z.string().default('3'),
+  RENDER_FFMPEG_THREADS: z.string().default('0'),
+  RENDER_QUALITY_MODE: z.enum(['turbo', 'balanced', 'quality']).default('turbo'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -210,6 +211,7 @@ export const env = {
     smartCrop: parsed.data.RENDER_SMART_CROP === 'true',
     batchConcurrency: parseInt(parsed.data.RENDER_BATCH_CONCURRENCY, 10),
     ffmpegThreads: parseInt(parsed.data.RENDER_FFMPEG_THREADS, 10),
+    qualityMode: parsed.data.RENDER_QUALITY_MODE,
   },
   logLevel: parsed.data.LOG_LEVEL,
 } as const;

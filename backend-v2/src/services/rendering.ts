@@ -62,10 +62,10 @@ type RenderClipOptions = {
 };
 
 const PRESET_PROFILE = {
-  ultrafast: { crf: '22', videoBitrate: '5M', maxrate: '6M', bufsize: '10M' },
-  superfast: { crf: '21', videoBitrate: '6M', maxrate: '8M', bufsize: '12M' },
-  veryfast: { crf: '20', videoBitrate: '7M', maxrate: '9M', bufsize: '14M' },
-  fast: { crf: '19', videoBitrate: '8M', maxrate: '10M', bufsize: '16M' },
+  ultrafast: { crf: '24', videoBitrate: '3M', maxrate: '4M', bufsize: '6M' },
+  superfast: { crf: '23', videoBitrate: '4M', maxrate: '5M', bufsize: '8M' },
+  veryfast: { crf: '22', videoBitrate: '5M', maxrate: '6M', bufsize: '10M' },
+  fast: { crf: '20', videoBitrate: '7M', maxrate: '9M', bufsize: '14M' },
   medium: { crf: '18', videoBitrate: '10M', maxrate: '12M', bufsize: '20M' },
 } as const;
 
@@ -308,8 +308,10 @@ async function renderSingleClip(
 
     const vf = vfFilters.join(',');
 
-    // Audio normalization
-    const af = 'loudnorm=I=-14:LRA=11:TP=-1.5';
+    const isTurboMode = env.render.qualityMode === 'turbo';
+    const af = isTurboMode
+      ? 'aresample=async=1:min_hard_comp=0.100:first_pts=0'
+      : 'loudnorm=I=-14:LRA=11:TP=-1.5';
 
     // Render video
     await new Promise<void>((resolve, reject) => {
@@ -323,9 +325,10 @@ async function renderSingleClip(
           '-af', af,
           '-c:v', 'libx264',
           '-preset', options.preset,
-          '-threads', String(Math.max(1, env.render.ffmpegThreads)),
-          '-profile:v', 'high',
-          '-level', '4.2',
+          '-threads', String(Math.max(0, env.render.ffmpegThreads)),
+          '-profile:v', isTurboMode ? 'baseline' : 'high',
+          '-level', isTurboMode ? '3.1' : '4.2',
+          ...(isTurboMode ? ['-tune', 'zerolatency'] : []),
           '-pix_fmt', 'yuv420p',
           '-crf', encodeProfile.crf,
           '-b:v', encodeProfile.videoBitrate,
@@ -334,9 +337,9 @@ async function renderSingleClip(
           '-g', '60',
           '-keyint_min', '30',
           '-c:a', 'aac',
-          '-b:a', '160k',
+          '-b:a', isTurboMode ? '96k' : '160k',
           '-ac', '2',
-          '-ar', '48000',
+          '-ar', isTurboMode ? '44100' : '48000',
           '-movflags', '+faststart',
         ])
         .output(videoOutputPath)
@@ -526,11 +529,38 @@ function generateThumbnail(
  * Usa resoluções MENORES para evitar upscale excessivo e preservar qualidade
  */
 export function getResolutionForFormat(format: '9:16' | '16:9' | '1:1' | '4:5'): { width: number; height: number } {
+  const qualityMode = env.render.qualityMode;
+
+  if (qualityMode === 'turbo') {
+    switch (format) {
+      case '9:16':
+        return { width: 720, height: 1280 };
+      case '1:1':
+        return { width: 720, height: 720 };
+      case '4:5':
+        return { width: 864, height: 1080 };
+      case '16:9':
+      default:
+        return { width: 1280, height: 720 };
+    }
+  }
+
+  if (qualityMode === 'balanced') {
+    switch (format) {
+      case '9:16':
+        return { width: 900, height: 1600 };
+      case '1:1':
+        return { width: 900, height: 900 };
+      case '4:5':
+        return { width: 1080, height: 1350 };
+      case '16:9':
+      default:
+        return { width: 1600, height: 900 };
+    }
+  }
+
   switch (format) {
     case '9:16':
-      // 1080x1920 para MÁXIMA QUALIDADE
-      // Vídeo 1920x1080 -> crop 608x1080 -> scale para 1080x1920 (1.78x upscale)
-      // Qualidade superior, arquivo maior mas vale a pena
       return { width: 1080, height: 1920 };
     case '1:1':
       return { width: 1080, height: 1080 };
