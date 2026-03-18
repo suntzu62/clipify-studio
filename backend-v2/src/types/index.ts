@@ -21,6 +21,7 @@ export const SubtitlePreferencesSchema = z.object({
   font: z.enum(['Arial', 'Inter', 'Roboto', 'Montserrat', 'Poppins']),
   fontSize: z.number().min(16).max(48),
   fontColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  highlightColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
   backgroundColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
   backgroundOpacity: z.number().min(0).max(1),
   bold: z.boolean(),
@@ -295,6 +296,7 @@ export interface SubtitlePreferences {
   font: SubtitleFont;
   fontSize: number; // em pixels
   fontColor: string; // hex color (ex: '#FFFFFF')
+  highlightColor: string; // hex color for karaoke/progressive emphasis
   backgroundColor: string; // hex color (ex: '#000000')
   backgroundOpacity: number; // 0-1
   bold: boolean;
@@ -314,6 +316,7 @@ export const DEFAULT_SUBTITLE_PREFERENCES: SubtitlePreferences = {
   font: 'Inter',
   fontSize: 32,  // AUMENTADO de 20 para 32px - muito mais legível!
   fontColor: '#FFFFFF',
+  highlightColor: '#A855F7',
   backgroundColor: '#000000',
   backgroundOpacity: 0.85,  // Mais opaco para máximo contraste
   bold: true,

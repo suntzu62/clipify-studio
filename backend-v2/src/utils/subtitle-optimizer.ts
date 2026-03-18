@@ -43,14 +43,28 @@ export function smartLineBreak(text: string, maxCharsPerLine: number): string[] 
   return lines;
 }
 
+function normalizeHex(hex: string, fallback: string = '#FFFFFF'): string {
+  return /^#[0-9A-Fa-f]{6}$/.test(hex) ? hex : fallback;
+}
+
+function escapeAssText(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/{/g, '\\{')
+    .replace(/}/g, '\\}')
+    .trim();
+}
+
 /**
  * Converte cor hex para formato ASS (&HAABBGGRR)
  */
-function hexToAssColor(hex: string): string {
-  const r = hex.substring(1, 3);
-  const g = hex.substring(3, 5);
-  const b = hex.substring(5, 7);
-  return `&H00${b}${g}${r}`;
+function hexToAssColor(hex: string, opacity: number = 1): string {
+  const safeHex = normalizeHex(hex);
+  const r = safeHex.substring(1, 3);
+  const g = safeHex.substring(3, 5);
+  const b = safeHex.substring(5, 7);
+  const alpha = opacityToAssAlpha(opacity);
+  return `&H${alpha}${b}${g}${r}`;
 }
 
 /**
@@ -59,6 +73,56 @@ function hexToAssColor(hex: string): string {
 function opacityToAssAlpha(opacity: number): string {
   const alpha = Math.round((1 - opacity) * 255);
   return alpha.toString(16).padStart(2, '0').toUpperCase();
+}
+
+function getSecondaryColor(preferences: SubtitlePreferences): string {
+  return normalizeHex(
+    preferences.highlightColor || preferences.outlineColor || preferences.shadowColor || preferences.fontColor,
+    preferences.fontColor
+  );
+}
+
+function getBorderStyle(preferences: SubtitlePreferences): 1 | 3 {
+  return preferences.backgroundOpacity > 0.02 ? 3 : 1;
+}
+
+function buildDialogueText(
+  segment: TranscriptSegment,
+  start: number,
+  end: number,
+  preferences: SubtitlePreferences
+): string {
+  const safeText = escapeAssText(segment.text);
+  const baseLines =
+    preferences.format === 'single-line'
+      ? [safeText.replace(/\s+/g, ' ').trim()]
+      : smartLineBreak(safeText, preferences.maxCharsPerLine);
+  const baseText = baseLines.join('\\N');
+
+  if (preferences.format === 'karaoke') {
+    const words = safeText.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      return baseText;
+    }
+
+    const totalCentiseconds = Math.max(20, Math.round((end - start) * 100));
+    const baseUnit = Math.max(8, Math.floor(totalCentiseconds / words.length));
+    let remaining = totalCentiseconds - baseUnit * words.length;
+
+    return words
+      .map((word) => {
+        const extra = remaining > 0 ? 1 : 0;
+        remaining -= extra;
+        return `{\\kf${baseUnit + extra}}${word}`;
+      })
+      .join(' ');
+  }
+
+  if (preferences.format === 'progressive') {
+    return `{\\fad(120,140)\\blur0.6}${baseText}`;
+  }
+
+  return baseText;
 }
 
 /**
@@ -129,6 +193,7 @@ export function generateASS(
     font,
     fontSize,
     fontColor,
+    highlightColor,
     backgroundColor,
     backgroundOpacity,
     bold,
@@ -150,6 +215,15 @@ export function generateASS(
   const scaledMarginV = Math.round(preferences.marginVertical * (playRes.y / 1280));
   const scaledMarginH = Math.round(30 * (playRes.x / 720));
   const scaledOutlineWidth = Math.round(outlineWidth * fontScale);
+  const borderStyle = getBorderStyle(preferences);
+  const primaryColor = hexToAssColor(fontColor, 1);
+  const secondaryColor = hexToAssColor(getSecondaryColor(preferences), 1);
+  const outlineColorAss = hexToAssColor(outlineColor, 1);
+  const backColorAss = borderStyle === 3
+    ? hexToAssColor(backgroundColor, backgroundOpacity)
+    : hexToAssColor(shadow ? shadowColor : backgroundColor, shadow ? 0.55 : 0);
+  const shadowDepth = shadow ? Math.max(1, Math.round(fontScale * 2)) : 0;
+  const outlineDepth = outline ? Math.max(1, scaledOutlineWidth) : 0;
 
   const header = `[Script Info]
 Title: Generated Subtitles
@@ -161,7 +235,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${font},${scaledFontSize},${hexToAssColor(fontColor)},${hexToAssColor(fontColor)},${hexToAssColor(outlineColor)},${hexToAssColor(backgroundColor)}${opacityToAssAlpha(backgroundOpacity)},${bold ? '-1' : '0'},${italic ? '-1' : '0'},0,0,100,100,0,0,${outline ? '1' : '0'},${outline ? scaledOutlineWidth : '0'},${shadow ? '2' : '0'},${getAssAlignment(position)},${scaledMarginH},${scaledMarginH},${scaledMarginV},1
+Style: Default,${font},${scaledFontSize},${primaryColor},${secondaryColor},${outlineColorAss},${backColorAss},${bold ? '-1' : '0'},${italic ? '-1' : '0'},0,0,100,100,0,0,${borderStyle},${outlineDepth},${shadowDepth},${getAssAlignment(position)},${scaledMarginH},${scaledMarginH},${scaledMarginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -173,25 +247,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       const start = Math.max(0, seg.start - startOffset);
       const end = Math.max(0, seg.end - startOffset);
 
-      // Apply smart line break
-      const lines = smartLineBreak(seg.text.trim(), maxCharsPerLine);
-      const text = lines.join('\\N'); // \N is ASS line break
-
-      // Format karaoke effect if needed
-      let formattedText = text;
-      if (preferences.format === 'karaoke') {
-        // Add karaoke timing tags
-        const words = seg.text.trim().split(' ');
-        const duration = end - start;
-        const timePerWord = (duration / words.length) * 100; // centiseconds
-
-        formattedText = words
-          .map((word) => `{\\k${Math.round(timePerWord)}}${word}`)
-          .join(' ');
-      } else if (preferences.format === 'progressive') {
-        // Add fade-in effect
-        formattedText = `{\\fad(200,200)}${text}`;
-      }
+      const formattedText = buildDialogueText(seg, start, end, {
+        ...preferences,
+        maxCharsPerLine,
+        fontColor,
+        highlightColor,
+      });
 
       return `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${formattedText}`;
     })

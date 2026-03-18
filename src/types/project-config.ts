@@ -54,6 +54,7 @@ export interface SubtitlePreferences {
   font: 'Arial' | 'Inter' | 'Roboto' | 'Montserrat' | 'Poppins';
   fontSize: number; // 16-48
   fontColor: string; // hex
+  highlightColor: string; // hex
   backgroundColor: string; // hex
   backgroundOpacity: number; // 0-1
   bold: boolean;
@@ -133,6 +134,7 @@ export const DEFAULT_SUBTITLE_PREFERENCES: SubtitlePreferences = {
   font: 'Inter',
   fontSize: 32,
   fontColor: '#FFFFFF',
+  highlightColor: '#A855F7',
   backgroundColor: '#000000',
   backgroundOpacity: 0.85,
   bold: true,
