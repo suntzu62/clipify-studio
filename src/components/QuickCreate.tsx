@@ -32,7 +32,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
 
   const [url, setUrl] = useState('');
   const [objective, setObjective] = useState('');
-  const [targetDuration, setTargetDuration] = useState<30 | 60 | 90>(60);
+  const [targetDuration, setTargetDuration] = useState<30 | 60 | 90>(30);
   const [subtitleStyle, setSubtitleStyle] = useState<'viral' | 'clean'>('viral');
   const [oneClickMode, setOneClickMode] = useState(isOneClickAvailable);
   const [showQuickOptions, setShowQuickOptions] = useState(false);
@@ -50,7 +50,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
         targetDuration: 30,
         minDuration: 15,
         maxDuration: 60,
-        clipCount: 18,
+        clipCount: 24,
         model: 'Fast',
       };
     }
@@ -71,7 +71,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
       targetDuration: 60,
       minDuration: 20,
       maxDuration: 60,
-      clipCount: 14,
+      clipCount: 18,
       model: 'ClipAnything',
     };
   };

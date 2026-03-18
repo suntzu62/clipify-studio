@@ -9,8 +9,8 @@ export const CreateJobSchema = z.object({
   youtubeUrl: z.string().url().optional(),
   uploadPath: z.string().optional(),
   userId: z.string().uuid(),
-  targetDuration: z.number().min(15).max(90).default(60),
-  clipCount: z.number().min(1).max(30).default(14),
+  targetDuration: z.number().min(15).max(90).default(30),
+  clipCount: z.number().min(1).max(30).default(24),
 });
 
 export type CreateJobInput = z.infer<typeof CreateJobSchema>;
@@ -164,10 +164,10 @@ export type StartJobFromTempInput = z.infer<typeof StartJobFromTempSchema>;
 export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   aiClipping: true,
   model: 'ClipAnything',
-  targetDuration: 40,
-  minDuration: 20,
+  targetDuration: 30,
+  minDuration: 15,
   maxDuration: 60,
-  clipCount: 14,
+  clipCount: 24,
 };
 
 export const DEFAULT_PLATFORM_REMIX: PlatformRemix = {

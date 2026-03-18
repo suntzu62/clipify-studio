@@ -25,6 +25,7 @@ interface SceneDetectionOptions {
   maxSceneDuration?: number; // seconds
   padding?: number; // seconds to add at start/end for smooth transitions
   targetSceneCount?: number;
+  mergeThreshold?: number;
 }
 
 /**
@@ -43,6 +44,7 @@ export async function detectScenes(
     maxSceneDuration = 90,
     padding = 0.4, // 400ms padding
     targetSceneCount = 10,
+    mergeThreshold = 2.5,
   } = options;
 
   logger.info(
@@ -72,11 +74,22 @@ export async function detectScenes(
     boundaries,
     minSceneDuration,
     maxSceneDuration,
-    padding
+    padding,
+    mergeThreshold
   );
 
+  const fallbackScenes = createFallbackScenes(
+    transcript,
+    minSceneDuration,
+    maxSceneDuration,
+    padding,
+    targetSceneCount
+  );
+
+  const candidateScenes = dedupeScenes([...scenes, ...fallbackScenes]);
+
   // Step 3: Rank scenes by confidence
-  const rankedScenes = scenes.sort((a, b) => b.confidence - a.confidence);
+  const rankedScenes = candidateScenes.sort((a, b) => b.confidence - a.confidence);
 
   // Step 4: Select top scenes
   const selectedScenes = rankedScenes.slice(0, Math.min(targetSceneCount, rankedScenes.length));
@@ -84,6 +97,7 @@ export async function detectScenes(
   logger.info(
     {
       totalScenes: scenes.length,
+      candidateScenes: candidateScenes.length,
       selectedScenes: selectedScenes.length,
       avgDuration: selectedScenes.reduce((sum, s) => sum + s.duration, 0) / selectedScenes.length,
     },
@@ -231,13 +245,14 @@ function createScenesFromBoundaries(
   boundaries: SceneBoundary[],
   minDuration: number,
   maxDuration: number,
-  padding: number
+  padding: number,
+  mergeThreshold: number
 ): DetectedScene[] {
   // Sort boundaries by timestamp
   const sortedBoundaries = [...boundaries].sort((a, b) => a.timestamp - b.timestamp);
 
   // Merge nearby boundaries (within 5 seconds)
-  const mergedBoundaries = mergeBoundaries(sortedBoundaries, 5.0);
+  const mergedBoundaries = mergeBoundaries(sortedBoundaries, mergeThreshold);
 
   // Create scenes between boundaries
   const scenes: DetectedScene[] = [];
@@ -297,6 +312,98 @@ function createScenesFromBoundaries(
 
   // Filter out scenes that are too long (keep relaxed minimum for more candidates)
   return scenes.filter((scene) => scene.duration <= maxDuration * 1.2);
+}
+
+function createFallbackScenes(
+  transcript: Transcript,
+  minDuration: number,
+  maxDuration: number,
+  padding: number,
+  targetSceneCount: number
+): DetectedScene[] {
+  if (transcript.segments.length === 0) {
+    return [];
+  }
+
+  const idealDuration = Math.max(minDuration, Math.min(maxDuration, (minDuration + maxDuration) / 2));
+  const step = Math.max(6, Math.floor(Math.max(minDuration * 0.55, idealDuration * 0.45)));
+  const candidateStarts = new Set<number>();
+  const maxCandidates = Math.max(targetSceneCount * 3, 30);
+
+  for (let cursor = 0; cursor < transcript.duration; cursor += step) {
+    candidateStarts.add(Number(cursor.toFixed(2)));
+  }
+
+  for (const segment of transcript.segments) {
+    if (candidateStarts.size >= maxCandidates) {
+      break;
+    }
+
+    const snappedStart = Math.max(0, Math.floor(segment.start / Math.max(4, Math.floor(step / 2))) * Math.max(4, Math.floor(step / 2)));
+    candidateStarts.add(Number(snappedStart.toFixed(2)));
+  }
+
+  const starts = Array.from(candidateStarts)
+    .filter((start) => start < transcript.duration - Math.max(8, minDuration * 0.5))
+    .sort((a, b) => a - b)
+    .slice(0, maxCandidates);
+
+  return starts.flatMap((start) => {
+    const rawEnd = Math.min(transcript.duration, start + idealDuration);
+    const rawStart = Math.max(0, rawEnd - idealDuration);
+    const paddedStart = Math.max(0, rawStart - padding);
+    const paddedEnd = Math.min(transcript.duration, rawEnd + padding);
+    const sceneSegments = transcript.segments.filter(
+      (seg) => seg.end > paddedStart && seg.start < paddedEnd
+    );
+
+    if (sceneSegments.length === 0) {
+      return [];
+    }
+
+    const sceneStart = Math.max(0, Math.min(...sceneSegments.map((seg) => seg.start), paddedStart));
+    const sceneEnd = Math.min(
+      transcript.duration,
+      Math.max(...sceneSegments.map((seg) => seg.end), paddedEnd)
+    );
+    const duration = sceneEnd - sceneStart;
+
+    if (duration < Math.max(8, minDuration * 0.6) || duration > maxDuration * 1.15) {
+      return [];
+    }
+
+    const text = sceneSegments.map((seg) => seg.text).join(' ').trim();
+    const words = text.split(/\s+/).filter(Boolean);
+    const wordDensity = duration > 0 ? words.length / duration : 0;
+    const triggerBonus = /[!?]|\b\d+\b|\b(como|porque|segredo|erro|atencao|olha)\b/i.test(text) ? 0.08 : 0;
+    const densityBonus = Math.min(0.25, wordDensity / 10);
+    const confidence = Math.min(0.78, 0.38 + densityBonus + triggerBonus);
+
+    return [{
+      start: sceneStart,
+      end: sceneEnd,
+      duration,
+      segments: sceneSegments,
+      text,
+      confidence,
+      boundaryTypes: ['fallback_window'],
+    }];
+  });
+}
+
+function dedupeScenes(scenes: DetectedScene[]): DetectedScene[] {
+  const unique = new Map<string, DetectedScene>();
+
+  for (const scene of scenes) {
+    const key = `${Math.round(scene.start)}-${Math.round(scene.end)}`;
+    const existing = unique.get(key);
+
+    if (!existing || scene.confidence > existing.confidence) {
+      unique.set(key, scene);
+    }
+  }
+
+  return Array.from(unique.values());
 }
 
 /**

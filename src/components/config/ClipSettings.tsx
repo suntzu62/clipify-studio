@@ -135,7 +135,7 @@ export const ClipSettings = ({ settings, onChange }: ClipSettingsProps) => {
             />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>30s (curto)</span>
-              <span>40-45s (mais clips)</span>
+              <span>30-35s (mais clips)</span>
               <span>90s (longo)</span>
             </div>
           </div>
@@ -211,11 +211,11 @@ export const ClipSettings = ({ settings, onChange }: ClipSettingsProps) => {
           />
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>3 (poucos)</span>
-            <span>14 (novo padrão)</span>
+            <span>24 (novo padrão)</span>
             <span>30 (máximo)</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            💡 Para vídeos longos, 14-20 clipes costuma entregar melhor cobertura do conteúdo
+            💡 Para vídeos longos, 20-30 clipes costuma entregar melhor cobertura do conteúdo
           </p>
         </CardContent>
       </Card>

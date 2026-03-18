@@ -10,7 +10,7 @@ import type {
   RemixPlatform,
   AspectRatio,
 } from '../types/index.js';
-import { detectScenes } from './scene-detection.js';
+import { detectScenes, type DetectedScene } from './scene-detection.js';
 
 const logger = createLogger('analysis');
 
@@ -67,7 +67,7 @@ export async function analyzeHighlights(
     logger.info('Detecting scenes using multi-criteria analysis');
 
     const detectedScenes = await detectScenes(transcript, {
-      minSilenceDuration: 1.0,
+      minSilenceDuration: 0.45,
       minSceneDuration: minDuration,
       maxSceneDuration: maxDuration,
       padding: 0.4, // 400ms padding for smooth transitions
@@ -83,7 +83,7 @@ export async function analyzeHighlights(
     );
 
     // STEP 2: If we don't have enough scenes, fall back to AI-based analysis
-    if (detectedScenes.length < clipCount) {
+    if (detectedScenes.length === 0) {
       logger.warn(
         { detectedScenes: detectedScenes.length, required: clipCount },
         'Not enough scenes detected, using fallback AI analysis'
@@ -102,12 +102,14 @@ export async function analyzeHighlights(
       })
       .join('\n---\n');
 
+    const rankingTarget = Math.min(clipCount, detectedScenes.length);
+
     // STEP 4: Call AI to rank and generate metadata for scenes
     const prompt = buildRankingPrompt(
       scenesText,
       transcript.duration,
       targetDuration,
-      clipCount,
+      rankingTarget,
       detectedScenes.length,
       buildUserFocusContext({ model, genre, specificMoments, platformRemix })
     );
@@ -139,15 +141,18 @@ export async function analyzeHighlights(
 
     // STEP 5: Map AI response back to detected scenes
     const enrichedSegments: HighlightSegment[] = [];
+    const usedSceneIndexes = new Set<number>();
 
     for (const ranking of analysis.rankings) {
       const sceneIndex = ranking.sceneIndex - 1; // Convert 1-based to 0-based
       const scene = detectedScenes[sceneIndex];
 
-      if (!scene) {
-        logger.warn({ sceneIndex, ranking }, 'Scene index out of bounds, skipping');
+      if (!scene || usedSceneIndexes.has(sceneIndex)) {
+        logger.warn({ sceneIndex, ranking }, 'Invalid or duplicate scene index, skipping');
         continue;
       }
+
+      usedSceneIndexes.add(sceneIndex);
 
       enrichedSegments.push({
         start: scene.start,
@@ -160,15 +165,17 @@ export async function analyzeHighlights(
       });
     }
 
-    // Validate and adjust segments
-    const validatedSegments = validateSegments(
+    const completedSegments = ensureClipCoverage(
       enrichedSegments,
-      transcript.duration,
+      detectedScenes,
+      transcript,
+      clipCount,
+      targetDuration,
       minDuration,
       maxDuration
     );
 
-    const remixedSegments = applyPlatformRemix(validatedSegments, platformRemix);
+    const remixedSegments = applyPlatformRemix(completedSegments, platformRemix);
 
     logger.info(
       {
@@ -242,16 +249,26 @@ async function fallbackAIAnalysis(
 
   const responseText = completion.choices[0]?.message?.content || '';
   const analysis = parseAIResponse(responseText);
+  const fallbackScenes = await detectScenes(transcript, {
+    minSilenceDuration: 0.45,
+    minSceneDuration: minDuration,
+    maxSceneDuration: maxDuration,
+    padding: 0.4,
+    targetSceneCount: Math.max(clipCount * 3, 20),
+  });
 
-  const validatedSegments = validateSegments(
+  const completedSegments = ensureClipCoverage(
     analysis.segments,
-    transcript.duration,
+    fallbackScenes,
+    transcript,
+    clipCount,
+    targetDuration,
     minDuration,
     maxDuration
   );
 
   return {
-    segments: applyPlatformRemix(validatedSegments, platformRemix),
+    segments: applyPlatformRemix(completedSegments, platformRemix),
     reasoning: analysis.reasoning,
   };
 }
@@ -740,6 +757,193 @@ function buildPlatformPlaybook(platformRemix: PlatformRemix): string {
   return `PLAYBOOK DO REMIX POR PLATAFORMA:
 - ${primaryRules[platformRemix.primaryPlatform].join('\n- ')}
 - Escolha títulos, descrições e keywords que favoreçam a plataforma principal sem perder reaproveitamento nas demais.`;
+}
+
+function ensureClipCoverage(
+  segments: HighlightSegment[],
+  detectedScenes: DetectedScene[],
+  transcript: Transcript,
+  clipCount: number,
+  targetDuration: number,
+  minDuration: number,
+  maxDuration: number
+): HighlightSegment[] {
+  let completed = dedupeSegments(
+    validateSegments(segments, transcript.duration, minDuration, maxDuration)
+  );
+
+  if (completed.length < clipCount) {
+    completed = fillMissingSegmentsFromScenes(completed, detectedScenes, clipCount);
+  }
+
+  if (completed.length < clipCount) {
+    completed = fillMissingSegmentsFromTranscript(
+      completed,
+      transcript,
+      clipCount,
+      targetDuration,
+      minDuration,
+      maxDuration
+    );
+  }
+
+  return dedupeSegments(
+    validateSegments(completed, transcript.duration, minDuration, maxDuration)
+  ).slice(0, clipCount);
+}
+
+function fillMissingSegmentsFromScenes(
+  existingSegments: HighlightSegment[],
+  scenes: DetectedScene[],
+  clipCount: number
+): HighlightSegment[] {
+  const completed = [...existingSegments];
+
+  for (const scene of scenes.sort((a, b) => b.confidence - a.confidence)) {
+    if (completed.length >= clipCount) {
+      break;
+    }
+
+    const candidate = createAutoSegmentFromScene(scene, completed.length + 1);
+    if (hasHeavyOverlap(candidate, completed)) {
+      continue;
+    }
+
+    completed.push(candidate);
+  }
+
+  return completed;
+}
+
+function fillMissingSegmentsFromTranscript(
+  existingSegments: HighlightSegment[],
+  transcript: Transcript,
+  clipCount: number,
+  targetDuration: number,
+  minDuration: number,
+  maxDuration: number
+): HighlightSegment[] {
+  const completed = [...existingSegments];
+  const desiredDuration = Math.max(minDuration, Math.min(maxDuration, targetDuration));
+  const step = Math.max(8, Math.floor(desiredDuration * 0.55));
+
+  for (let cursor = 0; cursor < transcript.duration && completed.length < clipCount; cursor += step) {
+    const start = Math.max(0, Math.min(cursor, Math.max(0, transcript.duration - desiredDuration)));
+    const end = Math.min(transcript.duration, start + desiredDuration);
+    const sceneSegments = transcript.segments.filter((seg) => seg.end > start && seg.start < end);
+
+    if (sceneSegments.length === 0) {
+      continue;
+    }
+
+    const sceneStart = Math.max(0, Math.min(...sceneSegments.map((seg) => seg.start), start));
+    const sceneEnd = Math.min(transcript.duration, Math.max(...sceneSegments.map((seg) => seg.end), end));
+    const scene: DetectedScene = {
+      start: sceneStart,
+      end: sceneEnd,
+      duration: sceneEnd - sceneStart,
+      segments: sceneSegments,
+      text: sceneSegments.map((seg) => seg.text).join(' '),
+      confidence: 0.42,
+      boundaryTypes: ['coverage_fill'],
+    };
+
+    const candidate = createAutoSegmentFromScene(scene, completed.length + 1);
+    if (hasHeavyOverlap(candidate, completed)) {
+      continue;
+    }
+
+    completed.push(candidate);
+  }
+
+  return completed;
+}
+
+function createAutoSegmentFromScene(scene: DetectedScene, ordinal: number): HighlightSegment {
+  const summaryText = scene.text.trim();
+  const title = buildAutoTitle(summaryText, ordinal);
+  const description = buildAutoDescription(summaryText);
+
+  return {
+    start: scene.start,
+    end: scene.end,
+    score: Math.max(0.45, Math.min(0.89, scene.confidence)),
+    title,
+    description,
+    reason: 'Trecho adicional selecionado automaticamente para ampliar a cobertura do vídeo.',
+    keywords: extractKeywords(summaryText),
+  };
+}
+
+function buildAutoTitle(text: string, ordinal: number): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  const base = cleaned
+    .split(/[.!?]/)[0]
+    .split(/\s+/)
+    .slice(0, 8)
+    .join(' ')
+    .trim();
+
+  if (!base) {
+    return `Clip extra ${ordinal}`;
+  }
+
+  const normalized = base.charAt(0).toUpperCase() + base.slice(1);
+  return normalized.length > 60 ? `${normalized.slice(0, 57).trim()}...` : normalized;
+}
+
+function buildAutoDescription(text: string): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  if (!cleaned) {
+    return 'Trecho complementar detectado automaticamente para aumentar a cobertura do conteúdo.';
+  }
+
+  const summary = cleaned.split(/\s+/).slice(0, 22).join(' ');
+  return summary.length > 150 ? `${summary.slice(0, 147).trim()}...` : summary;
+}
+
+function extractKeywords(text: string): string[] {
+  const stopwords = new Set([
+    'para', 'com', 'que', 'isso', 'essa', 'esse', 'você', 'voce', 'mas', 'uma', 'uns',
+    'umas', 'dos', 'das', 'por', 'pra', 'porque', 'como', 'quando', 'onde', 'depois',
+    'sobre', 'aqui', 'ali', 'tem', 'tudo', 'nada', 'muito', 'mais', 'menos', 'ser',
+  ]);
+
+  const words = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .match(/[a-z0-9]{4,}/g) || [];
+
+  return Array.from(new Set(words.filter((word) => !stopwords.has(word)))).slice(0, 5);
+}
+
+function dedupeSegments(segments: HighlightSegment[]): HighlightSegment[] {
+  const unique: HighlightSegment[] = [];
+
+  for (const segment of segments) {
+    if (!hasHeavyOverlap(segment, unique)) {
+      unique.push(segment);
+    }
+  }
+
+  return unique;
+}
+
+function hasHeavyOverlap(candidate: HighlightSegment, existingSegments: HighlightSegment[]): boolean {
+  return existingSegments.some((segment) => {
+    const overlapStart = Math.max(candidate.start, segment.start);
+    const overlapEnd = Math.min(candidate.end, segment.end);
+    const overlap = Math.max(0, overlapEnd - overlapStart);
+
+    if (overlap === 0) {
+      return false;
+    }
+
+    const candidateDuration = Math.max(1, candidate.end - candidate.start);
+    const existingDuration = Math.max(1, segment.end - segment.start);
+    return overlap / candidateDuration > 0.75 || overlap / existingDuration > 0.75;
+  });
 }
 
 /**

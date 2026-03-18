@@ -300,8 +300,8 @@ export async function registerRoutes(app: FastifyInstance) {
       userId: z.string().uuid(),
       storagePath: z.string(),
       fileName: z.string(),
-      targetDuration: z.number().min(15).max(90).default(60),
-      clipCount: z.number().min(1).max(20).default(8),
+      targetDuration: z.number().min(15).max(90).default(30),
+      clipCount: z.number().min(1).max(30).default(24),
     });
 
     const parsed = schema.safeParse(request.body);
