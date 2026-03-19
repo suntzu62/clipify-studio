@@ -10,7 +10,7 @@ export const CreateJobSchema = z.object({
   uploadPath: z.string().optional(),
   userId: z.string().uuid(),
   targetDuration: z.number().min(15).max(90).default(30),
-  clipCount: z.number().min(1).max(30).default(24),
+  clipCount: z.number().min(1).max(30).default(30),
 });
 
 export type CreateJobInput = z.infer<typeof CreateJobSchema>;
@@ -167,7 +167,7 @@ export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   targetDuration: 30,
   minDuration: 15,
   maxDuration: 60,
-  clipCount: 24,
+  clipCount: 30,
 };
 
 export const DEFAULT_PLATFORM_REMIX: PlatformRemix = {

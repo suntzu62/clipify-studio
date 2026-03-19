@@ -175,7 +175,7 @@ export async function createProject(input: CreateProjectInput, currentUserId?: s
       sourceType: 'youtube',
       youtubeUrl: input.youtube_url.trim(),
       targetDuration: 30,
-      clipCount: 24,
+      clipCount: 30,
     }),
   });
 

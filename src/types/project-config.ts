@@ -125,7 +125,7 @@ export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   targetDuration: 30,
   minDuration: 15,
   maxDuration: 60,
-  clipCount: 24,
+  clipCount: 30,
 };
 
 export const DEFAULT_SUBTITLE_PREFERENCES: SubtitlePreferences = {

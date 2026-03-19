@@ -57,14 +57,19 @@ function buildJobScopedClipId(jobId: string, clipIndex: number): string {
   return `${jobId}-clip-${clipIndex}`;
 }
 
+interface EffectiveClipPlan {
+  clipCount: number;
+  targetDuration: number;
+  minDuration: number;
+  maxDuration: number;
+  minimumAcceptedClipCount: number;
+}
+
 function getMinimumAcceptedClipCount(
   requestedClipCount: number,
-  durationSeconds: number,
-  minDuration: number
+  durationSeconds: number
 ): number {
   const requestCap = Math.max(1, requestedClipCount);
-  const capacityByMinute = Math.max(1, Math.floor(durationSeconds / 60));
-  const capacityByMinDuration = Math.max(1, Math.floor(durationSeconds / Math.max(10, minDuration)));
   const baselineFloor = durationSeconds >= 8 * 60
     ? 10
     : durationSeconds >= 5 * 60
@@ -73,8 +78,59 @@ function getMinimumAcceptedClipCount(
 
   return Math.min(
     requestCap,
-    Math.max(1, Math.min(capacityByMinDuration, Math.max(baselineFloor, capacityByMinute)))
+    Math.max(baselineFloor, Math.ceil(requestCap * 0.4))
   );
+}
+
+function deriveEffectiveClipPlan(
+  durationSeconds: number,
+  requestedTargetDuration: number,
+  requestedClipCount: number,
+  requestedMinDuration: number,
+  requestedMaxDuration: number
+): EffectiveClipPlan {
+  const recommendedClipCount = durationSeconds >= 10 * 60
+    ? 30
+    : durationSeconds >= 8 * 60
+      ? 24
+      : durationSeconds >= 5 * 60
+        ? 16
+        : durationSeconds >= 3 * 60
+          ? 10
+          : requestedClipCount;
+
+  const clipCount = Math.min(30, Math.max(requestedClipCount, recommendedClipCount));
+  const recommendedTargetDuration = durationSeconds >= 12 * 60
+    ? 20
+    : durationSeconds >= 8 * 60
+      ? 22
+      : durationSeconds >= 5 * 60
+        ? 25
+        : requestedTargetDuration;
+
+  const targetDuration = Math.max(
+    15,
+    Math.min(requestedTargetDuration, recommendedTargetDuration)
+  );
+  const minDuration = durationSeconds >= 10 * 60
+    ? 10
+    : durationSeconds >= 6 * 60
+      ? 12
+      : requestedMinDuration;
+  const safeMinDuration = Math.max(10, Math.min(requestedMinDuration, minDuration));
+  const maxDurationCap = durationSeconds >= 8 * 60 ? 45 : 60;
+  const maxDuration = Math.max(
+    targetDuration + 10,
+    Math.min(requestedMaxDuration, maxDurationCap)
+  );
+
+  return {
+    clipCount,
+    targetDuration,
+    minDuration: safeMinDuration,
+    maxDuration,
+    minimumAcceptedClipCount: getMinimumAcceptedClipCount(clipCount, durationSeconds),
+  };
 }
 
 /**
@@ -97,10 +153,10 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
   const specificMoments = job.data.specificMoments;
   const platformRemix = job.data.platformRemix;
 
-  const effectiveTargetDuration = clipSettings?.targetDuration ?? targetDuration ?? 60;
-  const effectiveClipCount = clipSettings?.clipCount ?? clipCount ?? 8;
-  const effectiveMinDuration = clipSettings?.minDuration ?? 30;
-  const effectiveMaxDuration = clipSettings?.maxDuration ?? 90;
+  const requestedTargetDuration = clipSettings?.targetDuration ?? targetDuration ?? 60;
+  const requestedClipCount = clipSettings?.clipCount ?? clipCount ?? 8;
+  const requestedMinDuration = clipSettings?.minDuration ?? 30;
+  const requestedMaxDuration = clipSettings?.maxDuration ?? 90;
   const clippingModel = clipSettings?.model ?? 'ClipAnything';
   const effectiveAspectRatio = job.data.aspectRatio || '9:16';
   const startTime = Date.now();
@@ -110,10 +166,10 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       jobId,
       userId,
       sourceType,
-      targetDuration: effectiveTargetDuration,
-      clipCount: effectiveClipCount,
-      minDuration: effectiveMinDuration,
-      maxDuration: effectiveMaxDuration,
+      targetDuration: requestedTargetDuration,
+      clipCount: requestedClipCount,
+      minDuration: requestedMinDuration,
+      maxDuration: requestedMaxDuration,
       model: clippingModel,
       hasTimeframe: Boolean(timeframe),
       genre,
@@ -135,8 +191,8 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       source_type: sourceType,
       youtube_url: job.data.youtubeUrl,
       upload_path: job.data.uploadPath,
-      target_duration: effectiveTargetDuration,
-      clip_count: effectiveClipCount,
+      target_duration: requestedTargetDuration,
+      clip_count: requestedClipCount,
       status: 'processing',
     });
 
@@ -202,17 +258,19 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     await updateProgress(job, 'scenes', 40, 'Analisando cenas do vídeo...');
 
     const transcriptForAnalysis = applyTimeframeToTranscript(transcript, timeframe);
-    const minimumAcceptedClipCount = getMinimumAcceptedClipCount(
-      effectiveClipCount,
+    const clipPlan = deriveEffectiveClipPlan(
       transcriptForAnalysis.duration,
-      effectiveMinDuration
+      requestedTargetDuration,
+      requestedClipCount,
+      requestedMinDuration,
+      requestedMaxDuration
     );
 
     const highlightAnalysis = await analyzeHighlights(transcriptForAnalysis, {
-      targetDuration: effectiveTargetDuration,
-      clipCount: effectiveClipCount,
-      minDuration: effectiveMinDuration,
-      maxDuration: effectiveMaxDuration,
+      targetDuration: clipPlan.targetDuration,
+      clipCount: clipPlan.clipCount,
+      minDuration: clipPlan.minDuration,
+      maxDuration: clipPlan.maxDuration,
       model: clippingModel,
       genre,
       specificMoments,
@@ -223,7 +281,11 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       {
         jobId,
         highlightCount: highlightAnalysis.segments.length,
-        minimumAcceptedClipCount,
+        minimumAcceptedClipCount: clipPlan.minimumAcceptedClipCount,
+        requestedClipCount,
+        effectiveClipCount: clipPlan.clipCount,
+        effectiveTargetDuration: clipPlan.targetDuration,
+        effectiveMinDuration: clipPlan.minDuration,
       },
       'Scene analysis completed'
     );
@@ -402,16 +464,16 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       });
     }
 
-    if (clips.length < minimumAcceptedClipCount && failedClipIndexes.size > 0) {
+    if (clips.length < clipPlan.minimumAcceptedClipCount && failedClipIndexes.size > 0) {
       await updateProgress(
         job,
         'render',
         74,
-        `Recuperando clipes restantes (${clips.length}/${minimumAcceptedClipCount})...`
+        `Recuperando clipes restantes (${clips.length}/${clipPlan.minimumAcceptedClipCount})...`
       );
 
       for (const clipIndex of Array.from(failedClipIndexes).sort((a, b) => a - b)) {
-        if (clips.length >= minimumAcceptedClipCount) {
+        if (clips.length >= clipPlan.minimumAcceptedClipCount) {
           break;
         }
 
@@ -442,14 +504,20 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       }
     }
 
-    if (clips.length < minimumAcceptedClipCount) {
+    if (clips.length < clipPlan.minimumAcceptedClipCount) {
       throw new Error(
-        `Only ${clips.length} clips rendered successfully; minimum required for this video is ${minimumAcceptedClipCount}`
+        `Only ${clips.length} clips rendered successfully; minimum required for this video is ${clipPlan.minimumAcceptedClipCount}`
       );
     }
 
     logger.info(
-      { jobId, renderedCount: clips.length, minimumAcceptedClipCount },
+      {
+        jobId,
+        renderedCount: clips.length,
+        minimumAcceptedClipCount: clipPlan.minimumAcceptedClipCount,
+        requestedClipCount,
+        effectiveClipCount: clipPlan.clipCount,
+      },
       'Clips rendered successfully'
     );
 
@@ -487,8 +555,8 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
               sourceType,
               youtubeUrl: job.data.youtubeUrl,
               uploadPath: job.data.uploadPath,
-              targetDuration: effectiveTargetDuration,
-              clipCount: effectiveClipCount,
+              targetDuration: clipPlan.targetDuration,
+              clipCount: clipPlan.clipCount,
               platformRemix: job.data.platformRemix,
               timeframe: job.data.timeframe,
               genre: job.data.genre,

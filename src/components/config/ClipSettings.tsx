@@ -211,7 +211,7 @@ export const ClipSettings = ({ settings, onChange }: ClipSettingsProps) => {
           />
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>3 (poucos)</span>
-            <span>24 (novo padrão)</span>
+            <span>30 (novo padrão)</span>
             <span>30 (máximo)</span>
           </div>
           <p className="text-xs text-muted-foreground">

@@ -50,7 +50,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
         targetDuration: 30,
         minDuration: 15,
         maxDuration: 60,
-        clipCount: 24,
+        clipCount: 30,
         model: 'Fast',
       };
     }
@@ -61,7 +61,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
         targetDuration: 90,
         minDuration: 45,
         maxDuration: 120,
-        clipCount: 10,
+        clipCount: 18,
         model: 'ClipAnything',
       };
     }
@@ -71,7 +71,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
       targetDuration: 60,
       minDuration: 20,
       maxDuration: 60,
-      clipCount: 18,
+      clipCount: 30,
       model: 'ClipAnything',
     };
   };

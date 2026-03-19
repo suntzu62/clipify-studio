@@ -150,7 +150,7 @@ export async function enqueueFromUrl(
       youtubeUrl: normalizeYoutubeUrl(url),
       userId,
       targetDuration: 30,
-      clipCount: 24,
+      clipCount: 30,
     };
 
     const resp = await fetch(`${BACKEND_URL}/jobs`, {
@@ -183,7 +183,7 @@ export async function enqueueFromUrl(
         youtubeUrl: normalizeYoutubeUrl(url),
         userId: 'prod-user',
         targetDuration: 30,
-        clipCount: 24,
+        clipCount: 30,
       }),
       credentials: 'include',
     });
@@ -232,7 +232,7 @@ export async function enqueuePipeline(
       youtubeUrl: normalizeYoutubeUrl(youtubeUrl),
       userId,
       targetDuration: parseInt(targetDuration),
-      clipCount: 24,
+      clipCount: 30,
     };
 
     let retryCount = 0;
@@ -298,7 +298,7 @@ export async function enqueuePipeline(
             youtubeUrl: normalizeYoutubeUrl(youtubeUrl),
             userId: 'prod-user',
             targetDuration: parseInt(targetDuration),
-            clipCount: 24,
+            clipCount: 30,
           }),
           credentials: 'include',
         });
@@ -534,7 +534,7 @@ export async function createJobFromUpload(
       storagePath,
       fileName,
       targetDuration: 30,
-      clipCount: 24,
+      clipCount: 30,
     };
 
     const resp = await fetch(`${BACKEND_URL}/jobs/from-upload`, {
@@ -568,7 +568,7 @@ export async function createJobFromUpload(
       storagePath,
       fileName,
       targetDuration: 30,
-      clipCount: 24,
+      clipCount: 30,
     };
 
     const resp = await fetch(`${backendUrl}/jobs/from-upload`, {
