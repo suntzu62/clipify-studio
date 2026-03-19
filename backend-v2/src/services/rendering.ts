@@ -62,9 +62,9 @@ type RenderClipOptions = {
 };
 
 const PRESET_PROFILE = {
-  ultrafast: { crf: '24', videoBitrate: '3M', maxrate: '4M', bufsize: '6M' },
-  superfast: { crf: '23', videoBitrate: '4M', maxrate: '5M', bufsize: '8M' },
-  veryfast: { crf: '22', videoBitrate: '5M', maxrate: '6M', bufsize: '10M' },
+  ultrafast: { crf: '26', videoBitrate: '1800k', maxrate: '2400k', bufsize: '4M' },
+  superfast: { crf: '24', videoBitrate: '2500k', maxrate: '3200k', bufsize: '5M' },
+  veryfast: { crf: '22', videoBitrate: '3500k', maxrate: '4500k', bufsize: '7M' },
   fast: { crf: '20', videoBitrate: '7M', maxrate: '9M', bufsize: '14M' },
   medium: { crf: '18', videoBitrate: '10M', maxrate: '12M', bufsize: '20M' },
 } as const;
@@ -185,26 +185,31 @@ export async function renderClip(
   const outputDir = join('/tmp', `render-${clipId}-${Date.now()}`);
   await fs.mkdir(outputDir, { recursive: true });
 
-  const clip = await renderSingleClip(
-    videoPath,
-    segment,
-    transcript,
-    outputDir,
-    clipId,
-    {
-      clipIndex,
-      totalClips,
-      resolution,
-      format,
-      addSubtitles,
-      font,
-      preset,
-      subtitlePreferences,
-      onProgress,
-    }
-  );
+  try {
+    const clip = await renderSingleClip(
+      videoPath,
+      segment,
+      transcript,
+      outputDir,
+      clipId,
+      {
+        clipIndex,
+        totalClips,
+        resolution,
+        format,
+        addSubtitles,
+        font,
+        preset,
+        subtitlePreferences,
+        onProgress,
+      }
+    );
 
-  return { clip, outputDir };
+    return { clip, outputDir };
+  } catch (error) {
+    await cleanupRenderDir(outputDir);
+    throw error;
+  }
 }
 
 /**
@@ -534,14 +539,14 @@ export function getResolutionForFormat(format: '9:16' | '16:9' | '1:1' | '4:5'):
   if (qualityMode === 'turbo') {
     switch (format) {
       case '9:16':
-        return { width: 720, height: 1280 };
+        return { width: 540, height: 960 };
       case '1:1':
-        return { width: 720, height: 720 };
+        return { width: 540, height: 540 };
       case '4:5':
-        return { width: 864, height: 1080 };
+        return { width: 648, height: 810 };
       case '16:9':
       default:
-        return { width: 1280, height: 720 };
+        return { width: 960, height: 540 };
     }
   }
 
@@ -569,6 +574,22 @@ export function getResolutionForFormat(format: '9:16' | '16:9' | '1:1' | '4:5'):
     case '16:9':
     default:
       return { width: 1920, height: 1080 };
+  }
+}
+
+export function getEmergencyResolutionForFormat(
+  format: '9:16' | '16:9' | '1:1' | '4:5'
+): { width: number; height: number } {
+  switch (format) {
+    case '9:16':
+      return { width: 432, height: 768 };
+    case '1:1':
+      return { width: 432, height: 432 };
+    case '4:5':
+      return { width: 540, height: 675 };
+    case '16:9':
+    default:
+      return { width: 854, height: 480 };
   }
 }
 

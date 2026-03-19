@@ -5,7 +5,11 @@ import { DEFAULT_SUBTITLE_PREFERENCES } from '../types/index.js';
 import { downloadVideo, cleanupVideo } from '../services/download.js';
 import { transcribeVideo, cleanupAudio } from '../services/transcription.js';
 import { analyzeHighlights } from '../services/analysis.js';
-import { renderClip, cleanupRenderDir } from '../services/rendering.js';
+import {
+  renderClip,
+  cleanupRenderDir,
+  getEmergencyResolutionForFormat,
+} from '../services/rendering.js';
 import { uploadFile } from '../services/storage.js';
 import { env } from '../config/env.js';
 import { redis } from '../config/redis.js';
@@ -228,9 +232,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
 
     const processRenderedClip = async (segment: typeof highlightAnalysis.segments[number], idx: number) => {
       const clipId = `clip-${idx}`;
-      let clipOutputDir: string | undefined;
-
-      try {
+      const renderAndStore = async (attempt: 'primary' | 'fallback') => {
         const rendered = await renderClip(
           videoPath,
           segment,
@@ -240,7 +242,10 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
             clipIndex: idx,
             totalClips: highlightAnalysis.segments.length,
             format: effectiveAspectRatio,
-            addSubtitles: true,
+            resolution: attempt === 'fallback'
+              ? getEmergencyResolutionForFormat(effectiveAspectRatio)
+              : undefined,
+            addSubtitles: attempt === 'primary',
             font: subtitlePreferences.font,
             preset: 'ultrafast',
             subtitlePreferences,
@@ -248,67 +253,80 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
           }
         );
 
-        clipOutputDir = rendered.outputDir;
-        const renderedClip = rendered.clip;
-        const clipStoragePath = `clips/${jobId}/${renderedClip.id}.mp4`;
-        const thumbnailStoragePath = `clips/${jobId}/${renderedClip.id}.jpg`;
+        try {
+          const renderedClip = rendered.clip;
+          const clipStoragePath = `clips/${jobId}/${renderedClip.id}.mp4`;
+          const thumbnailStoragePath = `clips/${jobId}/${renderedClip.id}.jpg`;
 
-        const [videoUpload, thumbnailUpload] = await Promise.all([
-          uploadFile(
-            bucket,
-            clipStoragePath,
-            renderedClip.videoPath,
-            'video/mp4'
-          ),
-          uploadFile(
-            bucket,
-            thumbnailStoragePath,
-            renderedClip.thumbnailPath,
-            'image/jpeg'
-          ),
-        ]);
+          const [videoUpload, thumbnailUpload] = await Promise.all([
+            uploadFile(
+              bucket,
+              clipStoragePath,
+              renderedClip.videoPath,
+              'video/mp4'
+            ),
+            uploadFile(
+              bucket,
+              thumbnailStoragePath,
+              renderedClip.thumbnailPath,
+              'image/jpeg'
+            ),
+          ]);
 
-        const clipData = {
-          id: renderedClip.id,
-          title: renderedClip.segment.title,
-          start: renderedClip.segment.start,
-          end: renderedClip.segment.end,
-          duration: renderedClip.duration,
-          score: renderedClip.segment.score,
-          transcript: renderedClip.segment.reason,
-          keywords: renderedClip.segment.keywords,
-          storagePath: videoUpload.publicUrl,
-          thumbnail: thumbnailUpload.publicUrl,
-          remixPackage: renderedClip.segment.remixPackage,
-        };
+          const clipData = {
+            id: renderedClip.id,
+            title: renderedClip.segment.title,
+            start: renderedClip.segment.start,
+            end: renderedClip.segment.end,
+            duration: renderedClip.duration,
+            score: renderedClip.segment.score,
+            transcript: renderedClip.segment.reason,
+            keywords: renderedClip.segment.keywords,
+            storagePath: videoUpload.publicUrl,
+            thumbnail: thumbnailUpload.publicUrl,
+            remixPackage: renderedClip.segment.remixPackage,
+          };
 
-        await dbClips.upsert({
-          id: renderedClip.id,
-          job_id: jobId,
-          user_id: userId,
-          title: renderedClip.segment.title,
-          description: renderedClip.segment.description || renderedClip.segment.reason || '',
-          hashtags: renderedClip.segment.keywords || [],
-          start_time: renderedClip.segment.start,
-          end_time: renderedClip.segment.end,
-          duration: renderedClip.duration,
-          video_url: videoUpload.publicUrl,
-          thumbnail_url: thumbnailUpload.publicUrl,
-          storage_path: clipStoragePath,
-          thumbnail_storage_path: thumbnailStoragePath,
-          transcript: transcript,
-        });
+          await dbClips.upsert({
+            id: renderedClip.id,
+            job_id: jobId,
+            user_id: userId,
+            title: renderedClip.segment.title,
+            description: renderedClip.segment.description || renderedClip.segment.reason || '',
+            hashtags: renderedClip.segment.keywords || [],
+            start_time: renderedClip.segment.start,
+            end_time: renderedClip.segment.end,
+            duration: renderedClip.duration,
+            video_url: videoUpload.publicUrl,
+            thumbnail_url: thumbnailUpload.publicUrl,
+            storage_path: clipStoragePath,
+            thumbnail_storage_path: thumbnailStoragePath,
+            transcript: transcript,
+          });
 
-        logger.info({ jobId, clipId: renderedClip.id, storageUrl: videoUpload.publicUrl }, 'Clip rendered, uploaded and saved to database');
+          logger.info(
+            { jobId, clipId: renderedClip.id, attempt, storageUrl: videoUpload.publicUrl },
+            'Clip rendered, uploaded and saved to database'
+          );
 
-        return {
-          clipData,
-          remixPackage: renderedClip.segment.remixPackage,
-        };
-      } finally {
-        if (clipOutputDir) {
-          await cleanupRenderDir(clipOutputDir);
+          return {
+            clipData,
+            remixPackage: renderedClip.segment.remixPackage,
+          };
+        } finally {
+          await cleanupRenderDir(rendered.outputDir);
         }
+      };
+
+      try {
+        return await renderAndStore('primary');
+      } catch (primaryError: any) {
+        logger.warn(
+          { jobId, clipId, clipIndex: idx, error: primaryError.message },
+          'Primary clip render failed, retrying with emergency settings'
+        );
+
+        return await renderAndStore('fallback');
       }
     };
 
