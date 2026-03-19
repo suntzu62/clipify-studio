@@ -87,10 +87,32 @@ if (!parsed.success) {
 const defaultLocalStoragePath =
   parsed.data.NODE_ENV === 'production' ? '/tmp/clipify-storage' : './uploads';
 const configuredLocalStoragePath = parsed.data.LOCAL_STORAGE_PATH?.trim();
-const effectiveLocalStoragePath =
-  configuredLocalStoragePath && configuredLocalStoragePath !== './uploads'
-    ? configuredLocalStoragePath
-    : defaultLocalStoragePath;
+
+function resolveLocalStoragePath(): string {
+  if (!configuredLocalStoragePath || configuredLocalStoragePath === './uploads') {
+    return defaultLocalStoragePath;
+  }
+
+  if (parsed.data.NODE_ENV === 'production') {
+    const normalized = configuredLocalStoragePath.replace(/\\/g, '/');
+    const isEphemeralSafe =
+      normalized === '/tmp' ||
+      normalized.startsWith('/tmp/') ||
+      normalized === '/var/tmp' ||
+      normalized.startsWith('/var/tmp/');
+
+    if (!isEphemeralSafe) {
+      console.warn(
+        `Ignoring LOCAL_STORAGE_PATH="${configuredLocalStoragePath}" in production; using ${defaultLocalStoragePath} to avoid Render disk exhaustion.`
+      );
+      return defaultLocalStoragePath;
+    }
+  }
+
+  return configuredLocalStoragePath;
+}
+
+const effectiveLocalStoragePath = resolveLocalStoragePath();
 
 export const env = {
   // Server
