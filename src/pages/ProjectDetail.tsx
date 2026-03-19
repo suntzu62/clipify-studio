@@ -158,17 +158,21 @@ export default function ProjectDetail() {
 
   // Auto-switch to results when clips ready
   useEffect(() => {
-    if (readyCount > 0 && !showResults) {
+    const currentStatus = jobStatus?.status || job?.status;
+
+    if (readyCount > 0 && !showResults && (currentStatus === 'completed' || currentStatus === 'failed')) {
       const timer = setTimeout(() => {
         setShowResults(true);
         toast({
-          title: "Seus clips estao prontos!",
-          description: `${readyCount} clips foram gerados com sucesso`,
+          title: currentStatus === 'completed' ? "Seus clips estao prontos!" : "Resultado parcial disponivel",
+          description: currentStatus === 'completed'
+            ? `${readyCount} clips foram gerados com sucesso`
+            : `${readyCount} clips ficaram prontos, mas o processamento nao concluiu como esperado`,
         });
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [readyCount, showResults, toast]);
+  }, [jobStatus?.status, job?.status, readyCount, showResults, toast]);
 
   // Load job data
   useEffect(() => {
@@ -423,6 +427,8 @@ export default function ProjectDetail() {
 
   // --- RESULTS VIEW (when clips are ready) ---
   if (showResults && readyCount > 0) {
+    const isPartialResult = isFailed;
+
     return (
       <div className="min-h-screen bg-[#080810]">
         {/* Ambient orbs */}
@@ -437,8 +443,12 @@ export default function ProjectDetail() {
             <Button variant="ghost" onClick={() => navigate('/dashboard')} className="gap-2 text-white/60 hover:text-white hover:bg-white/5">
               <ArrowLeft className="w-4 h-4" /> Dashboard
             </Button>
-            <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
-              <CheckCircle2 className="w-3 h-3 mr-1" /> Concluido
+            <Badge className={cn(
+              isPartialResult
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+            )}>
+              <CheckCircle2 className="w-3 h-3 mr-1" /> {isPartialResult ? 'Parcial' : 'Concluido'}
             </Badge>
           </div>
         </header>
@@ -450,10 +460,12 @@ export default function ProjectDetail() {
               <Sparkles className="w-8 h-8 text-emerald-400" />
             </div>
             <h1 className="text-3xl font-bold text-white mb-2">
-              {readyCount} clips prontos!
+              {isPartialResult ? `${readyCount} clips parciais` : `${readyCount} clips prontos!`}
             </h1>
             <p className="text-white/50 text-sm max-w-md mx-auto">
-              Seus clips foram analisados com inteligencia viral. Baixe e poste nas redes sociais.
+              {isPartialResult
+                ? 'Parte dos clips ficou pronta, mas o processamento terminou abaixo da meta esperada. Recomendado reprocessar.'
+                : 'Seus clips foram analisados com inteligencia viral. Baixe e poste nas redes sociais.'}
             </p>
           </div>
 

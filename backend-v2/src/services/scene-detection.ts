@@ -361,18 +361,23 @@ function createFallbackScenes(
       return [];
     }
 
-    const sceneStart = Math.max(0, Math.min(...sceneSegments.map((seg) => seg.start), paddedStart));
-    const sceneEnd = Math.min(
-      transcript.duration,
-      Math.max(...sceneSegments.map((seg) => seg.end), paddedEnd)
-    );
+    const sceneStart = paddedStart;
+    const sceneEnd = paddedEnd;
     const duration = sceneEnd - sceneStart;
 
     if (duration < Math.max(8, minDuration * 0.6) || duration > maxDuration * 1.15) {
       return [];
     }
 
-    const text = sceneSegments.map((seg) => seg.text).join(' ').trim();
+    const text = sceneSegments
+      .map((seg) => {
+        const overlapStart = Math.max(sceneStart, seg.start);
+        const overlapEnd = Math.min(sceneEnd, seg.end);
+        return overlapEnd > overlapStart ? seg.text : '';
+      })
+      .filter(Boolean)
+      .join(' ')
+      .trim();
     const words = text.split(/\s+/).filter(Boolean);
     const wordDensity = duration > 0 ? words.length / duration : 0;
     const triggerBonus = /[!?]|\b\d+\b|\b(como|porque|segredo|erro|atencao|olha)\b/i.test(text) ? 0.08 : 0;

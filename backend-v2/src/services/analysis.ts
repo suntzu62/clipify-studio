@@ -861,31 +861,21 @@ function fillMissingSegmentsFromTranscript(
 ): HighlightSegment[] {
   const completed = [...existingSegments];
   const desiredDuration = Math.max(minDuration, Math.min(maxDuration, targetDuration));
-  const step = Math.max(8, Math.floor(desiredDuration * 0.55));
+  const step = Math.max(4, Math.floor(desiredDuration * 0.4));
 
   for (let cursor = 0; cursor < transcript.duration && completed.length < clipCount; cursor += step) {
     const start = Math.max(0, Math.min(cursor, Math.max(0, transcript.duration - desiredDuration)));
     const end = Math.min(transcript.duration, start + desiredDuration);
-    const sceneSegments = transcript.segments.filter((seg) => seg.end > start && seg.start < end);
+    const candidate = buildCoverageCandidateFromTranscriptWindow(
+      transcript,
+      start,
+      end,
+      completed.length + 1,
+      'coverage_fill',
+      0.42
+    );
 
-    if (sceneSegments.length === 0) {
-      continue;
-    }
-
-    const sceneStart = Math.max(0, Math.min(...sceneSegments.map((seg) => seg.start), start));
-    const sceneEnd = Math.min(transcript.duration, Math.max(...sceneSegments.map((seg) => seg.end), end));
-    const scene: DetectedScene = {
-      start: sceneStart,
-      end: sceneEnd,
-      duration: sceneEnd - sceneStart,
-      segments: sceneSegments,
-      text: sceneSegments.map((seg) => seg.text).join(' '),
-      confidence: 0.42,
-      boundaryTypes: ['coverage_fill'],
-    };
-
-    const candidate = createAutoSegmentFromScene(scene, completed.length + 1);
-    if (hasHeavyOverlap(candidate, completed, overlapThreshold)) {
+    if (!candidate || hasHeavyOverlap(candidate, completed, overlapThreshold)) {
       continue;
     }
 
@@ -983,7 +973,9 @@ function buildCoverageCandidateFromTranscriptWindow(
   transcript: Transcript,
   start: number,
   end: number,
-  ordinal: number
+  ordinal: number,
+  boundaryType: string = 'distributed_fill',
+  confidence: number = 0.51
 ): HighlightSegment | null {
   const exactSegments = transcript.segments.filter((seg) => seg.end > start && seg.start < end);
   const nearbySegments = exactSegments.length > 0
@@ -994,8 +986,8 @@ function buildCoverageCandidateFromTranscriptWindow(
     return null;
   }
 
-  const sceneStart = Math.max(0, Math.min(start, ...nearbySegments.map((seg) => seg.start)));
-  const sceneEnd = Math.min(transcript.duration, Math.max(end, ...nearbySegments.map((seg) => seg.end)));
+  const sceneStart = Math.max(0, start);
+  const sceneEnd = Math.min(transcript.duration, end);
   const duration = sceneEnd - sceneStart;
 
   if (duration <= 0) {
@@ -1008,9 +1000,22 @@ function buildCoverageCandidateFromTranscriptWindow(
       end: sceneEnd,
       duration,
       segments: nearbySegments,
-      text: nearbySegments.map((seg) => seg.text).join(' ').trim(),
-      confidence: 0.51,
-      boundaryTypes: ['distributed_fill'],
+      text: nearbySegments
+        .map((seg) => {
+          const safeStart = Math.max(sceneStart, seg.start);
+          const safeEnd = Math.min(sceneEnd, seg.end);
+          const overlap = Math.max(0, safeEnd - safeStart);
+          if (overlap <= 0) {
+            return '';
+          }
+
+          return seg.text;
+        })
+        .filter(Boolean)
+        .join(' ')
+        .trim(),
+      confidence,
+      boundaryTypes: [boundaryType],
     },
     ordinal
   );
