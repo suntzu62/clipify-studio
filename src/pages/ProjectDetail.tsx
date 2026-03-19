@@ -298,7 +298,14 @@ export default function ProjectDetail() {
     const m = String(msg);
     if (m.includes('QUOTA_EXCEEDED') || m.toLowerCase().includes('quota')) return 'Quota do YouTube atingida. Tente novamente em alguns minutos.';
     if (m.includes('401') || m.includes('unauthorized')) return 'Problema de autenticação. Recarregue a página.';
-    if (m.toLowerCase().includes('youtube') || m.toLowerCase().includes('blocked')) return 'YouTube temporariamente indisponível. Tente fazer upload do arquivo.';
+    if (
+      m.toLowerCase().includes('youtube') ||
+      m.toLowerCase().includes('blocked') ||
+      m.toLowerCase().includes('bot') ||
+      m.toLowerCase().includes('cookies') ||
+      m.toLowerCase().includes('visitor_data') ||
+      m.toLowerCase().includes('po_token')
+    ) return 'YouTube temporariamente indisponível. Tente fazer upload do arquivo.';
     if (m.toLowerCase().includes('timeout') || m.toLowerCase().includes('network')) return 'Conexão instável. Verificando status automaticamente...';
     if (m.toLowerCase().includes('private') || m.toLowerCase().includes('unavailable')) return 'Vídeo privado ou indisponível. Use apenas vídeos públicos.';
     return 'Ocorreu um erro no processamento. Tente novamente.';

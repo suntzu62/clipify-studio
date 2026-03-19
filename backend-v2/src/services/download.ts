@@ -37,6 +37,15 @@ interface DownloadResult {
   metadata: VideoMetadata;
 }
 
+interface YtDlpAttempt {
+  label: string;
+  format: string;
+  extractorArgs?: string;
+}
+
+const YTDLP_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+
 function createYtdlDownloadAgent() {
   if (!env.ytdlp.proxyUrl) {
     return undefined;
@@ -87,8 +96,23 @@ async function prepareYtDlpCookiesFile(): Promise<string | null> {
   }
 }
 
-function buildYtDlpExtractorArgs(): string {
-  const args = ['youtube:player_client=android,web', 'youtube:player_skip=webpage,configs'];
+function buildYtDlpExtractorArgs(
+  playerClients: string[] = ['android', 'web'],
+  options: { skipWebpage?: boolean; skipConfigs?: boolean } = {}
+): string {
+  const args = [`youtube:player_client=${playerClients.join(',')}`];
+  const skips: string[] = [];
+
+  if (options.skipWebpage !== false) {
+    skips.push('webpage');
+  }
+  if (options.skipConfigs !== false) {
+    skips.push('configs');
+  }
+  if (skips.length > 0) {
+    args.push(`youtube:player_skip=${skips.join(',')}`);
+  }
+
   if (env.ytdlp.visitorData) {
     args.push(`youtube:visitor_data=${env.ytdlp.visitorData}`);
   }
@@ -96,6 +120,58 @@ function buildYtDlpExtractorArgs(): string {
     args.push(`youtube:po_token=${env.ytdlp.poToken}`);
   }
   return args.join(';');
+}
+
+function getYtDlpAttempts(): YtDlpAttempt[] {
+  const attempts: YtDlpAttempt[] = [
+    {
+      label: 'android-web-adaptive',
+      format: 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/best',
+      extractorArgs: buildYtDlpExtractorArgs(['android', 'web']),
+    },
+    {
+      label: 'android-ios-tv',
+      format: 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/best',
+      extractorArgs: buildYtDlpExtractorArgs(['android', 'ios', 'tv_embedded']),
+    },
+    {
+      label: 'single-file-mp4',
+      format: 'best[ext=mp4]/best',
+      extractorArgs: buildYtDlpExtractorArgs(['android', 'ios'], { skipConfigs: false }),
+    },
+    {
+      label: 'default-extractor',
+      format: 'bestvideo+bestaudio/best',
+      extractorArgs: env.ytdlp.visitorData || env.ytdlp.poToken
+        ? buildYtDlpExtractorArgs(['android', 'web'], { skipWebpage: false, skipConfigs: false })
+        : undefined,
+    },
+  ];
+
+  const seen = new Set<string>();
+  return attempts.filter((attempt) => {
+    const key = `${attempt.format}::${attempt.extractorArgs || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function cleanupYtDlpArtifacts(outputDir: string, outputBase: string): Promise<void> {
+  try {
+    const files = await fs.readdir(outputDir);
+    const candidates = files.filter((file) =>
+      file === outputBase ||
+      file.startsWith(`${outputBase}.`) ||
+      file.startsWith(`${outputBase}-`)
+    );
+
+    await Promise.all(
+      candidates.map((file) => fs.unlink(path.join(outputDir, file)).catch(() => undefined))
+    );
+  } catch {
+    // ignore cleanup failures
+  }
 }
 
 // Removido - usamos os tipos nativos do fluent-ffmpeg
@@ -411,51 +487,13 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       // Arquivo não existe, ok
     }
 
-    // Chamar yt-dlp diretamente (sem script intermediário)
-    // Isso garante que o processo aguarde o download completo (incluindo HLS streaming)
     const outputDir = path.dirname(outputPath);
     const outputBase = path.basename(outputPath, path.extname(outputPath));
     const outputTemplate = path.join(outputDir, `${outputBase}.%(ext)s`);
     cookiesPath = await prepareYtDlpCookiesFile();
+    const attempts = getYtDlpAttempts();
+    let lastError: any;
 
-    // Ask yt-dlp to print final output path so we can resolve it reliably.
-    const ytDlpStdout = await youtubedl(url, {
-      format: 'bestvideo+bestaudio/best',
-      noPlaylist: true,
-      noCheckCertificates: true,
-      jsRuntimes: 'node',
-      extractorArgs: buildYtDlpExtractorArgs(),
-      output: outputTemplate,
-      print: 'after_move:filepath',
-      ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
-      ...(cookiesPath ? { cookies: cookiesPath } : {}),
-    } as any, {
-      timeout: 600000, // 10 minutos para downloads maiores
-    });
-
-    // Tentar localizar qualquer arquivo final gerado pelo yt-dlp
-    logger.info({ outputPath, outputTemplate }, 'Checking generated files after yt-dlp');
-
-    let fileSize = 0;
-    let resolvedOutputPath = outputPath;
-    const printedPath = String(ytDlpStdout || '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .pop();
-
-    if (printedPath) {
-      try {
-        const printedStats = await fs.stat(printedPath);
-        if (printedStats.isFile() && printedStats.size > 0) {
-          resolvedOutputPath = printedPath;
-          fileSize = printedStats.size;
-          logger.info({ printedPath, size: fileSize }, 'Resolved final file path from yt-dlp output');
-        }
-      } catch (error: any) {
-        logger.warn({ printedPath, error: error?.message }, 'Printed yt-dlp path not found on disk');
-      }
-    }
     const findGeneratedFile = async (): Promise<string | null> => {
       const files = await fs.readdir(outputDir);
       const candidates = files
@@ -479,99 +517,167 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
       return best?.file || null;
     };
 
-    if (fileSize === 0) {
+    for (const attempt of attempts) {
+      let fileSize = 0;
+      let resolvedOutputPath = outputPath;
+
       try {
-        const generated = await findGeneratedFile();
-        if (!generated) throw new Error('No generated file found');
-        resolvedOutputPath = generated;
-        const statsImmediate = await fs.stat(resolvedOutputPath);
-        fileSize = statsImmediate.size;
-        logger.info({ outputPath: resolvedOutputPath, size: fileSize }, 'Generated file exists immediately after download');
-      } catch (error: any) {
-        logger.warn({ outputPath, error: error.message }, 'File not found immediately - will retry with polling');
+        await cleanupYtDlpArtifacts(outputDir, outputBase);
 
-        // Listar arquivos no /tmp para debug
-        try {
-          const tmpFiles = await fs.readdir('/tmp');
-          const clipifyFiles = tmpFiles.filter(f => f.startsWith('clipify-'));
-          logger.info({ clipifyFiles }, 'Files in /tmp starting with clipify-');
-        } catch {}
+        const ytDlpStdout = await youtubedl(url, {
+          format: attempt.format,
+          noPlaylist: true,
+          noCheckCertificates: true,
+          jsRuntimes: 'node',
+          mergeOutputFormat: 'mp4',
+          userAgent: YTDLP_USER_AGENT,
+          referer: 'https://www.youtube.com/',
+          forceIpv4: true,
+          geoBypass: true,
+          extractorRetries: 3,
+          retries: 3,
+          fragmentRetries: 3,
+          concurrentFragments: 1,
+          output: outputTemplate,
+          print: 'after_move:filepath',
+          ...(attempt.extractorArgs ? { extractorArgs: attempt.extractorArgs } : {}),
+          ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
+          ...(cookiesPath ? { cookies: cookiesPath } : {}),
+        } as any, {
+          timeout: 600000,
+        });
 
-        // Se não existe, fazer polling
-        const maxRetries = 30;
-        let stableSize = 0;
-        let stableCount = 0;
+        logger.info({ url, outputPath, outputTemplate, attempt: attempt.label }, 'Checking generated files after yt-dlp');
 
-        for (let retry = 0; retry < maxRetries; retry++) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        const printedPath = String(ytDlpStdout || '')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .pop();
 
+        if (printedPath) {
+          try {
+            const printedStats = await fs.stat(printedPath);
+            if (printedStats.isFile() && printedStats.size > 0) {
+              resolvedOutputPath = printedPath;
+              fileSize = printedStats.size;
+              logger.info(
+                { printedPath, size: fileSize, attempt: attempt.label },
+                'Resolved final file path from yt-dlp output'
+              );
+            }
+          } catch (error: any) {
+            logger.warn({ printedPath, error: error?.message, attempt: attempt.label }, 'Printed yt-dlp path not found on disk');
+          }
+        }
+
+        if (fileSize === 0) {
           try {
             const generated = await findGeneratedFile();
             if (!generated) throw new Error('No generated file found');
             resolvedOutputPath = generated;
-            const stats = await fs.stat(resolvedOutputPath);
-            fileSize = stats.size;
+            const statsImmediate = await fs.stat(resolvedOutputPath);
+            fileSize = statsImmediate.size;
+            logger.info(
+              { outputPath: resolvedOutputPath, size: fileSize, attempt: attempt.label },
+              'Generated file exists immediately after download'
+            );
+          } catch (error: any) {
+            logger.warn({ outputPath, error: error.message, attempt: attempt.label }, 'File not found immediately - will retry with polling');
 
-            logger.info({ outputPath: resolvedOutputPath, size: fileSize, retry, stableCount }, 'File size check (polling)');
+            const maxRetries = 30;
+            let stableSize = 0;
+            let stableCount = 0;
 
-            if (fileSize > 0) {
-              if (fileSize === stableSize) {
-                stableCount++;
-                if (stableCount >= 2) {
-                  logger.info({ outputPath, finalSize: fileSize }, 'File size stable');
-                  break;
+            for (let retry = 0; retry < maxRetries; retry++) {
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+
+              try {
+                const generated = await findGeneratedFile();
+                if (!generated) throw new Error('No generated file found');
+                resolvedOutputPath = generated;
+                const stats = await fs.stat(resolvedOutputPath);
+                fileSize = stats.size;
+
+                logger.info(
+                  { outputPath: resolvedOutputPath, size: fileSize, retry, stableCount, attempt: attempt.label },
+                  'File size check (polling)'
+                );
+
+                if (fileSize > 0) {
+                  if (fileSize === stableSize) {
+                    stableCount++;
+                    if (stableCount >= 2) {
+                      logger.info({ outputPath, finalSize: fileSize, attempt: attempt.label }, 'File size stable');
+                      break;
+                    }
+                  } else {
+                    stableSize = fileSize;
+                    stableCount = 0;
+                  }
                 }
-              } else {
-                stableSize = fileSize;
-                stableCount = 0;
+              } catch (err: any) {
+                logger.warn({ outputPath, retry, error: err.message, attempt: attempt.label }, 'File still not found');
               }
             }
-          } catch (err: any) {
-            logger.warn({ outputPath, retry, error: err.message }, 'File still not found');
           }
+        }
+
+        if (fileSize === 0) {
+          throw new Error(`Downloaded file is empty after attempt ${attempt.label}`);
+        }
+
+        if (resolvedOutputPath !== outputPath) {
+          await fs.rename(resolvedOutputPath, outputPath);
+          logger.info({ from: resolvedOutputPath, to: outputPath, attempt: attempt.label }, 'Renamed yt-dlp output to expected path');
+        }
+
+        logger.info({ outputPath, size: fileSize, attempt: attempt.label }, 'File downloaded successfully');
+
+        const metadata = await extractMetadata(outputPath);
+
+        try {
+          const info = await youtubedl(url, {
+            dumpSingleJson: true,
+            noPlaylist: true,
+            userAgent: YTDLP_USER_AGENT,
+            referer: 'https://www.youtube.com/',
+            forceIpv4: true,
+            geoBypass: true,
+            ...(attempt.extractorArgs ? { extractorArgs: attempt.extractorArgs } : {}),
+            ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
+            ...(cookiesPath ? { cookies: cookiesPath } : {}),
+          } as any) as any;
+
+          metadata.id = info.id;
+          metadata.title = info.title || metadata.title;
+          metadata.thumbnail = info.thumbnail;
+        } catch (infoError) {
+          logger.warn({ error: infoError, attempt: attempt.label }, 'Could not fetch video info from yt-dlp');
+        }
+
+        logger.info({ metadata, outputPath, attempt: attempt.label }, 'Download with yt-dlp completed');
+        return metadata;
+      } catch (attemptError: any) {
+        lastError = attemptError;
+        logger.warn(
+          { url, outputPath, attempt: attempt.label, error: attemptError.message },
+          'yt-dlp attempt failed, trying next strategy'
+        );
+
+        try {
+          await cleanupYtDlpArtifacts(outputDir, outputBase);
+        } catch {
+          // ignore cleanup failures between attempts
         }
       }
     }
 
-    if (fileSize === 0) {
-      logger.error({ outputPath }, 'Downloaded file is empty or not found');
-      throw new Error('Downloaded file is empty');
-    }
-
-    // Normalize final path for the rest of the pipeline
-    if (resolvedOutputPath !== outputPath) {
-      await fs.rename(resolvedOutputPath, outputPath);
-      logger.info({ from: resolvedOutputPath, to: outputPath }, 'Renamed yt-dlp output to expected path');
-    }
-
-    logger.info({ outputPath, size: fileSize }, 'File downloaded successfully');
-
-    // Extrair metadata do arquivo baixado
-    const metadata = await extractMetadata(outputPath);
-
-    // Tentar obter informações adicionais do YouTube via yt-dlp --dump-json
-    try {
-      const info = await youtubedl(url, {
-        dumpSingleJson: true,
-        noPlaylist: true,
-        extractorArgs: buildYtDlpExtractorArgs(),
-        ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
-        ...(cookiesPath ? { cookies: cookiesPath } : {}),
-      } as any) as any;
-
-      metadata.id = info.id;
-      metadata.title = info.title || metadata.title;
-      metadata.thumbnail = info.thumbnail;
-    } catch (infoError) {
-      logger.warn({ error: infoError }, 'Could not fetch video info from yt-dlp');
-    }
-
-    logger.info({ metadata, outputPath }, 'Download with yt-dlp completed');
-    return metadata;
+    throw lastError || new Error('yt-dlp exhausted all download strategies');
   } catch (error: any) {
     const message = String(error?.message || error || '');
     const requiresAuth =
-      /sign in to confirm you're not a bot|cookies-from-browser|use --cookies|no title found in player responses|visitor_data|po_token/i.test(
+      /sign in to confirm you're not a bot|cookies-from-browser|use --cookies|no title found in player responses|visitor_data|po_token|bot/i.test(
         message
       );
 

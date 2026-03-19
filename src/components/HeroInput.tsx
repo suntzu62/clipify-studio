@@ -125,7 +125,14 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
         detectedErrorType = 'quota';
       } else if (errorLower.includes('private')) {
         detectedErrorType = 'private';
-      } else if (errorLower.includes('blocked') || errorLower.includes('region')) {
+      } else if (
+        errorLower.includes('blocked') ||
+        errorLower.includes('region') ||
+        errorLower.includes('bot') ||
+        errorLower.includes('cookies') ||
+        errorLower.includes('visitor_data') ||
+        errorLower.includes('po_token')
+      ) {
         detectedErrorType = 'blocked';
       } else if (errorLower.includes('age') || errorLower.includes('restricted')) {
         detectedErrorType = 'age';
