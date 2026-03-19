@@ -768,12 +768,28 @@ function ensureClipCoverage(
   minDuration: number,
   maxDuration: number
 ): HighlightSegment[] {
+  const overlapThreshold = getCoverageOverlapThreshold(
+    transcript.duration,
+    clipCount,
+    targetDuration,
+    minDuration
+  );
   let completed = dedupeSegments(
-    validateSegments(segments, transcript.duration, minDuration, maxDuration)
+    validateSegments(segments, transcript.duration, minDuration, maxDuration),
+    overlapThreshold
   );
 
   if (completed.length < clipCount) {
-    completed = fillMissingSegmentsFromScenes(completed, detectedScenes, clipCount);
+    completed = fillMissingSegmentsFromScenes(
+      completed,
+      detectedScenes,
+      clipCount,
+      overlapThreshold
+    );
+    completed = dedupeSegments(
+      validateSegments(completed, transcript.duration, minDuration, maxDuration),
+      overlapThreshold
+    );
   }
 
   if (completed.length < clipCount) {
@@ -783,19 +799,38 @@ function ensureClipCoverage(
       clipCount,
       targetDuration,
       minDuration,
-      maxDuration
+      maxDuration,
+      overlapThreshold
+    );
+    completed = dedupeSegments(
+      validateSegments(completed, transcript.duration, minDuration, maxDuration),
+      overlapThreshold
+    );
+  }
+
+  if (completed.length < clipCount) {
+    completed = fillMissingSegmentsWithCoveragePasses(
+      completed,
+      transcript,
+      clipCount,
+      targetDuration,
+      minDuration,
+      maxDuration,
+      overlapThreshold
     );
   }
 
   return dedupeSegments(
-    validateSegments(completed, transcript.duration, minDuration, maxDuration)
+    validateSegments(completed, transcript.duration, minDuration, maxDuration),
+    overlapThreshold
   ).slice(0, clipCount);
 }
 
 function fillMissingSegmentsFromScenes(
   existingSegments: HighlightSegment[],
   scenes: DetectedScene[],
-  clipCount: number
+  clipCount: number,
+  overlapThreshold: number
 ): HighlightSegment[] {
   const completed = [...existingSegments];
 
@@ -805,7 +840,7 @@ function fillMissingSegmentsFromScenes(
     }
 
     const candidate = createAutoSegmentFromScene(scene, completed.length + 1);
-    if (hasHeavyOverlap(candidate, completed)) {
+    if (hasHeavyOverlap(candidate, completed, overlapThreshold)) {
       continue;
     }
 
@@ -821,7 +856,8 @@ function fillMissingSegmentsFromTranscript(
   clipCount: number,
   targetDuration: number,
   minDuration: number,
-  maxDuration: number
+  maxDuration: number,
+  overlapThreshold: number
 ): HighlightSegment[] {
   const completed = [...existingSegments];
   const desiredDuration = Math.max(minDuration, Math.min(maxDuration, targetDuration));
@@ -849,7 +885,7 @@ function fillMissingSegmentsFromTranscript(
     };
 
     const candidate = createAutoSegmentFromScene(scene, completed.length + 1);
-    if (hasHeavyOverlap(candidate, completed)) {
+    if (hasHeavyOverlap(candidate, completed, overlapThreshold)) {
       continue;
     }
 
@@ -857,6 +893,150 @@ function fillMissingSegmentsFromTranscript(
   }
 
   return completed;
+}
+
+function fillMissingSegmentsWithCoveragePasses(
+  existingSegments: HighlightSegment[],
+  transcript: Transcript,
+  clipCount: number,
+  targetDuration: number,
+  minDuration: number,
+  maxDuration: number,
+  overlapThreshold: number
+): HighlightSegment[] {
+  let completed = [...existingSegments];
+  const averageSlotDuration = transcript.duration / Math.max(1, clipCount);
+  const candidateDurations = Array.from(
+    new Set([
+      Math.max(minDuration, Math.min(maxDuration, targetDuration)),
+      Math.max(minDuration, Math.min(maxDuration, Math.floor(averageSlotDuration))),
+      minDuration,
+    ])
+  ).sort((a, b) => a - b);
+
+  for (const desiredDuration of candidateDurations) {
+    completed = fillDistributedTranscriptCoverage(
+      completed,
+      transcript,
+      clipCount,
+      desiredDuration,
+      minDuration,
+      maxDuration,
+      overlapThreshold
+    );
+    completed = dedupeSegments(
+      validateSegments(completed, transcript.duration, minDuration, maxDuration),
+      overlapThreshold
+    );
+
+    if (completed.length >= clipCount) {
+      break;
+    }
+  }
+
+  return completed;
+}
+
+function fillDistributedTranscriptCoverage(
+  existingSegments: HighlightSegment[],
+  transcript: Transcript,
+  clipCount: number,
+  desiredDuration: number,
+  minDuration: number,
+  maxDuration: number,
+  overlapThreshold: number
+): HighlightSegment[] {
+  const completed = [...existingSegments];
+  const safeDuration = Math.max(minDuration, Math.min(maxDuration, desiredDuration));
+  const availableRange = Math.max(0, transcript.duration - safeDuration);
+  const interval = clipCount <= 1 ? 0 : availableRange / Math.max(1, clipCount - 1);
+  const offsets = [0, interval > 0 ? interval / 2 : 0];
+
+  for (const offset of offsets) {
+    for (let index = 0; index < clipCount && completed.length < clipCount; index += 1) {
+      const rawStart = Math.min(availableRange, (index * interval) + offset);
+      const start = Math.max(0, Number(rawStart.toFixed(2)));
+      const end = Math.min(transcript.duration, start + safeDuration);
+      const candidate = buildCoverageCandidateFromTranscriptWindow(
+        transcript,
+        start,
+        end,
+        completed.length + 1
+      );
+
+      if (!candidate || hasHeavyOverlap(candidate, completed, overlapThreshold)) {
+        continue;
+      }
+
+      completed.push(candidate);
+    }
+
+    if (completed.length >= clipCount) {
+      break;
+    }
+  }
+
+  return completed;
+}
+
+function buildCoverageCandidateFromTranscriptWindow(
+  transcript: Transcript,
+  start: number,
+  end: number,
+  ordinal: number
+): HighlightSegment | null {
+  const exactSegments = transcript.segments.filter((seg) => seg.end > start && seg.start < end);
+  const nearbySegments = exactSegments.length > 0
+    ? exactSegments
+    : transcript.segments.filter((seg) => seg.end > Math.max(0, start - 6) && seg.start < Math.min(transcript.duration, end + 6));
+
+  if (nearbySegments.length === 0) {
+    return null;
+  }
+
+  const sceneStart = Math.max(0, Math.min(start, ...nearbySegments.map((seg) => seg.start)));
+  const sceneEnd = Math.min(transcript.duration, Math.max(end, ...nearbySegments.map((seg) => seg.end)));
+  const duration = sceneEnd - sceneStart;
+
+  if (duration <= 0) {
+    return null;
+  }
+
+  return createAutoSegmentFromScene(
+    {
+      start: sceneStart,
+      end: sceneEnd,
+      duration,
+      segments: nearbySegments,
+      text: nearbySegments.map((seg) => seg.text).join(' ').trim(),
+      confidence: 0.51,
+      boundaryTypes: ['distributed_fill'],
+    },
+    ordinal
+  );
+}
+
+function getCoverageOverlapThreshold(
+  totalDuration: number,
+  clipCount: number,
+  targetDuration: number,
+  minDuration: number
+): number {
+  const averageSlot = totalDuration / Math.max(1, clipCount);
+
+  if (averageSlot <= minDuration + 2) {
+    return 0.92;
+  }
+
+  if (averageSlot <= targetDuration * 0.75) {
+    return 0.88;
+  }
+
+  if (averageSlot <= targetDuration) {
+    return 0.82;
+  }
+
+  return 0.75;
 }
 
 function createAutoSegmentFromScene(scene: DetectedScene, ordinal: number): HighlightSegment {
@@ -918,11 +1098,14 @@ function extractKeywords(text: string): string[] {
   return Array.from(new Set(words.filter((word) => !stopwords.has(word)))).slice(0, 5);
 }
 
-function dedupeSegments(segments: HighlightSegment[]): HighlightSegment[] {
+function dedupeSegments(
+  segments: HighlightSegment[],
+  overlapThreshold: number = 0.75
+): HighlightSegment[] {
   const unique: HighlightSegment[] = [];
 
   for (const segment of segments) {
-    if (!hasHeavyOverlap(segment, unique)) {
+    if (!hasHeavyOverlap(segment, unique, overlapThreshold)) {
       unique.push(segment);
     }
   }
@@ -930,7 +1113,11 @@ function dedupeSegments(segments: HighlightSegment[]): HighlightSegment[] {
   return unique;
 }
 
-function hasHeavyOverlap(candidate: HighlightSegment, existingSegments: HighlightSegment[]): boolean {
+function hasHeavyOverlap(
+  candidate: HighlightSegment,
+  existingSegments: HighlightSegment[],
+  overlapThreshold: number = 0.75
+): boolean {
   return existingSegments.some((segment) => {
     const overlapStart = Math.max(candidate.start, segment.start);
     const overlapEnd = Math.min(candidate.end, segment.end);
@@ -942,7 +1129,7 @@ function hasHeavyOverlap(candidate: HighlightSegment, existingSegments: Highligh
 
     const candidateDuration = Math.max(1, candidate.end - candidate.start);
     const existingDuration = Math.max(1, segment.end - segment.start);
-    return overlap / candidateDuration > 0.75 || overlap / existingDuration > 0.75;
+    return overlap / candidateDuration > overlapThreshold || overlap / existingDuration > overlapThreshold;
   });
 }
 

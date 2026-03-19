@@ -53,6 +53,30 @@ function applyTimeframeToTranscript(
   };
 }
 
+function buildJobScopedClipId(jobId: string, clipIndex: number): string {
+  return `${jobId}-clip-${clipIndex}`;
+}
+
+function getMinimumAcceptedClipCount(
+  requestedClipCount: number,
+  durationSeconds: number,
+  minDuration: number
+): number {
+  const requestCap = Math.max(1, requestedClipCount);
+  const capacityByMinute = Math.max(1, Math.floor(durationSeconds / 60));
+  const capacityByMinDuration = Math.max(1, Math.floor(durationSeconds / Math.max(10, minDuration)));
+  const baselineFloor = durationSeconds >= 8 * 60
+    ? 10
+    : durationSeconds >= 5 * 60
+      ? 6
+      : 3;
+
+  return Math.min(
+    requestCap,
+    Math.max(1, Math.min(capacityByMinDuration, Math.max(baselineFloor, capacityByMinute)))
+  );
+}
+
 /**
  * Processador principal - executa todas as etapas sequencialmente
  *
@@ -116,6 +140,9 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       status: 'processing',
     });
 
+    // Garantir que uma nova execução do mesmo job não herde clips antigos.
+    await dbClips.deleteByJobId(jobId);
+
     // ============================================
     // STEP 1: INGEST (Download/Upload)
     // ============================================
@@ -175,6 +202,11 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     await updateProgress(job, 'scenes', 40, 'Analisando cenas do vídeo...');
 
     const transcriptForAnalysis = applyTimeframeToTranscript(transcript, timeframe);
+    const minimumAcceptedClipCount = getMinimumAcceptedClipCount(
+      effectiveClipCount,
+      transcriptForAnalysis.duration,
+      effectiveMinDuration
+    );
 
     const highlightAnalysis = await analyzeHighlights(transcriptForAnalysis, {
       targetDuration: effectiveTargetDuration,
@@ -188,7 +220,11 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     });
 
     logger.info(
-      { jobId, highlightCount: highlightAnalysis.segments.length },
+      {
+        jobId,
+        highlightCount: highlightAnalysis.segments.length,
+        minimumAcceptedClipCount,
+      },
       'Scene analysis completed'
     );
 
@@ -225,13 +261,14 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     const clips: Clip[] = [];
     const remixByClipId: Record<string, NonNullable<Clip['remixPackage']>> = {};
     const renderConcurrency = Math.max(1, env.render.batchConcurrency);
+    const failedClipIndexes = new Set<number>();
     logger.info(
       { jobId, renderConcurrency, selectedClipCount: highlightAnalysis.segments.length },
       'Rendering clips with batch concurrency'
     );
 
     const processRenderedClip = async (segment: typeof highlightAnalysis.segments[number], idx: number) => {
-      const clipId = `clip-${idx}`;
+      const clipId = buildJobScopedClipId(jobId, idx);
       const renderAndStore = async (attempt: 'primary' | 'fallback') => {
         const rendered = await renderClip(
           videoPath,
@@ -344,29 +381,75 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       );
 
       batchResults.forEach((result, batchIndex) => {
-        const clipId = `clip-${startIndex + batchIndex}`;
+        const clipIndex = startIndex + batchIndex;
+        const clipId = buildJobScopedClipId(jobId, clipIndex);
 
         if (result.status === 'fulfilled') {
           clips.push(result.value.clipData);
+          failedClipIndexes.delete(clipIndex);
           if (result.value.remixPackage) {
             remixByClipId[clipId] = result.value.remixPackage;
           }
           return;
         }
 
+        failedClipIndexes.add(clipIndex);
+
         logger.error(
-          { jobId, clipId, clipIndex: startIndex + batchIndex, error: result.reason?.message || String(result.reason) },
+          { jobId, clipId, clipIndex, error: result.reason?.message || String(result.reason) },
           'Failed to render/upload clip, skipping to next'
         );
       });
     }
 
-    if (clips.length === 0) {
-      throw new Error('All clips failed to render');
+    if (clips.length < minimumAcceptedClipCount && failedClipIndexes.size > 0) {
+      await updateProgress(
+        job,
+        'render',
+        74,
+        `Recuperando clipes restantes (${clips.length}/${minimumAcceptedClipCount})...`
+      );
+
+      for (const clipIndex of Array.from(failedClipIndexes).sort((a, b) => a - b)) {
+        if (clips.length >= minimumAcceptedClipCount) {
+          break;
+        }
+
+        try {
+          const recovered = await processRenderedClip(
+            highlightAnalysis.segments[clipIndex],
+            clipIndex
+          );
+          const clipId = buildJobScopedClipId(jobId, clipIndex);
+
+          clips.push(recovered.clipData);
+          failedClipIndexes.delete(clipIndex);
+
+          if (recovered.remixPackage) {
+            remixByClipId[clipId] = recovered.remixPackage;
+          }
+
+          logger.info(
+            { jobId, clipId, clipIndex, recoveredCount: clips.length },
+            'Recovered clip during sequential retry pass'
+          );
+        } catch (retryError: any) {
+          logger.error(
+            { jobId, clipIndex, error: retryError.message },
+            'Sequential retry pass failed for clip'
+          );
+        }
+      }
+    }
+
+    if (clips.length < minimumAcceptedClipCount) {
+      throw new Error(
+        `Only ${clips.length} clips rendered successfully; minimum required for this video is ${minimumAcceptedClipCount}`
+      );
     }
 
     logger.info(
-      { jobId, renderedCount: clips.length },
+      { jobId, renderedCount: clips.length, minimumAcceptedClipCount },
       'Clips rendered successfully'
     );
 
@@ -418,7 +501,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
 
     // Salvar dados de cada clip (start, end, transcript)
     for (const clip of highlightAnalysis.segments.map((segment, idx) => ({
-      id: `clip-${idx}`,
+      id: buildJobScopedClipId(jobId, idx),
       segment,
     }))) {
       const clipReprocessKey = `reprocess:${jobId}:${clip.id}`;
