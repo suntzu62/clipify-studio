@@ -15,7 +15,7 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
   const [isConnected, setIsConnected] = useState(false);
   const [connectionType, setConnectionType] = useState<'sse' | 'polling' | 'none'>('none');
   const [error, setError] = useState<string | null>(null);
-  const [enrichedDataFetched, setEnrichedDataFetched] = useState(false);
+  const [finalSnapshotFetched, setFinalSnapshotFetched] = useState(false);
   const [stallStartAt, setStallStartAt] = useState<number | null>(null);
   const [stalled, setStalled] = useState(false);
   
@@ -36,6 +36,28 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     if (!status) return false;
     return status.status === 'completed' || status.status === 'failed';
   }, []);
+
+  const mergeJobStatus = useCallback((nextJob: Job) => {
+    setJobStatus(prevStatus => ({
+      ...prevStatus,
+      ...nextJob,
+      result: {
+        ...prevStatus?.result,
+        ...nextJob.result,
+        clips: nextJob.result?.clips || prevStatus?.result?.clips || []
+      }
+    } as JobStatus));
+  }, []);
+
+  useEffect(() => {
+    setJobStatus(null);
+    setIsConnected(false);
+    setConnectionType('none');
+    setError(null);
+    setFinalSnapshotFetched(false);
+    setStalled(false);
+    setStallStartAt(null);
+  }, [jobId, enabled]);
 
   // Subscribe to connection manager updates - FIXED: removed jobStatus from deps to prevent infinite loop
   useEffect(() => {
@@ -86,48 +108,35 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     }
   }, [startConnection, isJobTerminal, jobStatus]);
 
-  // Fallback: when job becomes terminal (completed) but has no clips, do one final GET fetch
+  // Always do one final GET fetch when the job becomes terminal so the page does not
+  // stay stuck with a partial in-flight snapshot after the backend already finished.
   useEffect(() => {
-    if (!enabled || !jobId || enrichedDataFetched) return;
+    if (!enabled || !jobId || finalSnapshotFetched) return;
     if (!isJobTerminal(jobStatus)) return;
 
-    const hasClips = jobStatus?.result?.clips && jobStatus.result.clips.length > 0;
-    if (hasClips) {
-      setEnrichedDataFetched(true);
-      return;
-    }
-
-    console.log('[useJobStatus] Job terminal but no clips, fetching enriched data as fallback');
+    console.log('[useJobStatus] Job terminal, fetching final snapshot');
 
     const fetchFallback = async () => {
       try {
         const enrichedJob: Job = await getJobStatus(jobId, getSupabaseToken);
         console.log('[useJobStatus] Fallback enriched data fetched:', enrichedJob);
-
-        setJobStatus(prevStatus => ({
-          ...prevStatus,
-          ...enrichedJob,
-          result: {
-            ...prevStatus?.result,
-            ...enrichedJob.result,
-            clips: enrichedJob.result?.clips || prevStatus?.result?.clips || []
-          }
-        } as JobStatus));
-
-        setEnrichedDataFetched(true);
+        mergeJobStatus(enrichedJob);
       } catch (error) {
         console.error('[useJobStatus] Fallback fetch failed:', error);
-        setEnrichedDataFetched(true);
+      } finally {
+        setFinalSnapshotFetched(true);
+        setStalled(false);
       }
     };
 
     fetchFallback();
-  }, [enabled, jobId, jobStatus?.status, enrichedDataFetched, isJobTerminal, getSupabaseToken]);
+  }, [enabled, jobId, jobStatus?.status, finalSnapshotFetched, isJobTerminal, getSupabaseToken, mergeJobStatus]);
 
-  // Periodic enrichment polling - fetch clips every 20 seconds while job is active
+  // Periodic enrichment polling - keep syncing while the job is active.
+  // Partial clips are not enough to stop polling because the backend may still
+  // complete later and the UI needs the terminal snapshot.
   useEffect(() => {
-    // Don't poll if job is terminal (completed or failed)
-    if (!enabled || !jobId || isJobTerminal(jobStatus) || enrichedDataFetched) {
+    if (!enabled || !jobId || isJobTerminal(jobStatus)) {
       return;
     }
 
@@ -144,44 +153,13 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
         console.log('[useJobStatus] Fetching enriched job status via polling');
         const enrichedJob: Job = await getJobStatus(jobId, getSupabaseToken);
         console.log('[useJobStatus] Enriched job status fetched:', enrichedJob);
-        
-        // If job failed, stop polling immediately
-        if (enrichedJob.status === 'failed') {
-          console.log('[useJobStatus] Job failed, stopping enrichment polling');
-          setEnrichedDataFetched(true);
-          setStalled(false);
-          setJobStatus(prevStatus => ({
-            ...prevStatus,
-            ...enrichedJob,
-            result: {
-              ...prevStatus?.result,
-              ...enrichedJob.result
-            }
-          } as JobStatus));
-          return;
-        }
-        
-        // Merge enriched data with current status, prioritizing enriched clips
-        setJobStatus(prevStatus => {
-          const hasClips = enrichedJob.result?.clips && enrichedJob.result.clips.length > 0;
-          console.log('[useJobStatus] Merging enriched data, hasClips:', hasClips);
-          
-          return {
-            ...prevStatus,
-            ...enrichedJob,
-            result: {
-              ...prevStatus?.result,
-              ...enrichedJob.result,
-              clips: enrichedJob.result?.clips || prevStatus?.result?.clips || []
-            }
-          } as JobStatus;
-        });
 
-        // Stop polling once we have clips or job is completed/failed
-        const isTerminal = (enrichedJob as Job).status === 'completed' || (enrichedJob as Job).status === 'failed';
-        if ((enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) || isTerminal) {
-          console.log('[useJobStatus] Clips found or job terminal, stopping enrichment polling');
-          setEnrichedDataFetched(true);
+        mergeJobStatus(enrichedJob);
+
+        const isTerminal = enrichedJob.status === 'completed' || enrichedJob.status === 'failed';
+        if (isTerminal) {
+          console.log('[useJobStatus] Job became terminal via polling');
+          setFinalSnapshotFetched(true);
           setStalled(false);
         }
       } catch (error) {
@@ -192,24 +170,23 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
     // Initial fetch
     fetchEnrichedData();
 
-    // Set up polling interval every 8 seconds so rendered clips appear quickly.
+    // Poll frequently so the UI reflects progress and completion without waiting
+    // for SSE to succeed.
     const pollInterval = setInterval(() => {
-      if (!isJobTerminal(jobStatus) && !enrichedDataFetched) {
+      if (!isJobTerminal(jobStatus)) {
         fetchEnrichedData();
       } else {
-        // Clear interval if job became terminal
         clearInterval(pollInterval);
-        setEnrichedDataFetched(true);
       }
-    }, 8000);
+    }, 5000);
 
     return () => {
       console.log('[useJobStatus] Cleaning up enrichment polling');
       clearInterval(pollInterval);
     };
-  }, [enabled, jobId, jobStatus?.status, enrichedDataFetched, isJobTerminal, getSupabaseToken]);
+  }, [enabled, jobId, jobStatus?.status, isJobTerminal, getSupabaseToken, mergeJobStatus]);
 
-  // Detect stalled processing (no clips and non-terminal for >10 minutes)
+  // Any meaningful progress resets the stall timer.
   useEffect(() => {
     if (!enabled || !jobId) return;
 
@@ -219,51 +196,58 @@ export const useJobStatus = ({ jobId, enabled = true }: UseJobStatusOptions) => 
       return;
     }
 
-    const hasClips = Boolean(jobStatus?.result?.clips && jobStatus.result.clips.length > 0);
-    if (hasClips || enrichedDataFetched) {
+    if (!jobStatus) return;
+
+    setStalled(false);
+    setStallStartAt(Date.now());
+  }, [
+    enabled,
+    jobId,
+    jobStatus?.status,
+    jobStatus?.currentStep,
+    jobStatus?.progress,
+    jobStatus?.pipelineStatus?.stage,
+    jobStatus?.pipelineStatus?.progress,
+    jobStatus?.result?.clips?.length,
+    jobStatus?.result?.clips?.filter(clip => clip.status === 'ready').length,
+    isJobTerminal
+  ]);
+
+  // Detect stalled processing when nothing changes for >10 minutes.
+  useEffect(() => {
+    if (!enabled || !jobId) return;
+
+    if (isJobTerminal(jobStatus)) {
       setStalled(false);
       setStallStartAt(null);
       return;
     }
-
-    if (jobStatus && stallStartAt === null) {
-      setStallStartAt(Date.now());
-    }
+    if (stallStartAt === null) return;
 
     let timeout: any;
-    if (stallStartAt !== null) {
-      const elapsed = Date.now() - stallStartAt;
-      const remaining = Math.max(0, 10 * 60 * 1000 - elapsed); // 10 minutes window
-      timeout = setTimeout(() => setStalled(true), remaining);
-    }
+    const elapsed = Date.now() - stallStartAt;
+    const remaining = Math.max(0, 10 * 60 * 1000 - elapsed);
+    timeout = setTimeout(() => setStalled(true), remaining);
 
     return () => {
       if (timeout) clearTimeout(timeout);
     };
-  }, [enabled, jobId, jobStatus?.status, jobStatus?.result?.clips?.length, enrichedDataFetched, stallStartAt, isJobTerminal]);
+  }, [enabled, jobId, jobStatus?.status, stallStartAt, isJobTerminal]);
 
   // Manual refresh to fetch enriched data immediately
   const refreshNow = useCallback(async () => {
     try {
       const enrichedJob: Job = await getJobStatus(jobId, getSupabaseToken);
-      setJobStatus(prevStatus => ({
-        ...prevStatus,
-        ...enrichedJob,
-        result: {
-          ...prevStatus?.result,
-          ...enrichedJob.result,
-          clips: enrichedJob.result?.clips || prevStatus?.result?.clips || []
-        }
-      } as JobStatus));
+      mergeJobStatus(enrichedJob);
 
-      if (enrichedJob.result?.clips && enrichedJob.result.clips.length > 0) {
-        setEnrichedDataFetched(true);
+      if (enrichedJob.status === 'completed' || enrichedJob.status === 'failed') {
+        setFinalSnapshotFetched(true);
         setStalled(false);
       }
     } catch (e) {
       console.error('[useJobStatus] refreshNow failed:', e);
     }
-  }, [jobId, getSupabaseToken]);
+  }, [jobId, getSupabaseToken, mergeJobStatus]);
 
   return {
     jobStatus,
