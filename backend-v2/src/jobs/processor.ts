@@ -215,10 +215,11 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
 
     logger.info({ jobId, videoPath, metadata }, 'Video downloaded successfully');
 
-    // Atualizar job com caminho do vídeo (necessário para reprocessamento)
+    // Atualizar job com caminho do vídeo e título (necessário para reprocessamento e exibição)
     await dbJobs.update(jobId, {
       video_path: videoPath,
       metadata: metadata,
+      title: metadata.title && !metadata.title.includes('/') ? metadata.title : undefined,
     });
 
     await updateProgress(job, 'ingest', 15, 'Vídeo baixado com sucesso');

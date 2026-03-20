@@ -500,10 +500,14 @@ export async function registerRoutes(app: FastifyInstance) {
       );
 
       const withClipData = jobs.map((job) => {
-        const metadataTitle = typeof job.metadata === 'object' ? job.metadata?.title : undefined;
+        let parsedMetadata = job.metadata;
+        if (typeof parsedMetadata === 'string') {
+          try { parsedMetadata = JSON.parse(parsedMetadata); } catch { parsedMetadata = null; }
+        }
+        const metadataTitle = parsedMetadata && typeof parsedMetadata === 'object' ? (parsedMetadata as any).title : undefined;
         const displayTitle =
-          (typeof job.title === 'string' && job.title.trim().length > 0 ? job.title : null) ||
-          (typeof metadataTitle === 'string' && metadataTitle.trim().length > 0 ? metadataTitle : null);
+          (typeof job.title === 'string' && job.title.trim().length > 0 && !job.title.includes('/') ? job.title : null) ||
+          (typeof metadataTitle === 'string' && metadataTitle.trim().length > 0 && !metadataTitle.includes('/') ? metadataTitle : null);
 
         return {
           ...job,
@@ -536,6 +540,22 @@ export async function registerRoutes(app: FastifyInstance) {
     const requestUserId = getRequestUserId(request);
 
     const dbJob = await dbJobs.findById(jobId);
+
+    // Resolve display title from DB job
+    const resolveDisplayTitle = (job: any): string | null => {
+      if (!job) return null;
+      let parsedMeta = job.metadata;
+      if (typeof parsedMeta === 'string') {
+        try { parsedMeta = JSON.parse(parsedMeta); } catch { parsedMeta = null; }
+      }
+      const metaTitle = parsedMeta && typeof parsedMeta === 'object' ? (parsedMeta as any).title : undefined;
+      return (
+        (typeof job.title === 'string' && job.title.trim().length > 0 && !job.title.includes('/') ? job.title : null) ||
+        (typeof metaTitle === 'string' && metaTitle.trim().length > 0 && !metaTitle.includes('/') ? metaTitle : null)
+      );
+    };
+    const displayTitle = resolveDisplayTitle(dbJob);
+
     if (requestUserId && dbJob && dbJob.user_id !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
@@ -574,6 +594,7 @@ export async function registerRoutes(app: FastifyInstance) {
         currentStep: dbJob.current_step || 'ingest',
         progress: { progress: progressValue, message: dbJob.current_step_message || '' },
         result: resultPayload,
+        display_title: displayTitle,
         error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
         finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
       };
@@ -607,6 +628,7 @@ export async function registerRoutes(app: FastifyInstance) {
         currentStep: dbJob.current_step || 'ingest',
         progress: { progress: progressValue, message: dbJob.current_step_message || '' },
         result: resultPayload,
+        display_title: displayTitle,
         error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
         finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
       };
@@ -709,6 +731,7 @@ export async function registerRoutes(app: FastifyInstance) {
       currentStep: effectiveState === 'failed' ? currentStep : currentStep,
       progress: status.progress,
       result,
+      display_title: displayTitle,
       error: effectiveError,
       finishedAt: status.finishedOn ? new Date(status.finishedOn).toISOString() : null,
     };

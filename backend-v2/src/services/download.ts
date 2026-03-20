@@ -539,6 +539,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
           fragmentRetries: 3,
           concurrentFragments: 1,
           output: outputTemplate,
+          writeInfoJson: true,
           print: 'after_move:filepath',
           ...(attempt.extractorArgs ? { extractorArgs: attempt.extractorArgs } : {}),
           ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
@@ -636,24 +637,53 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
 
         const metadata = await extractMetadata(outputPath);
 
-        try {
-          const info = await youtubedl(url, {
-            dumpSingleJson: true,
-            noPlaylist: true,
-            userAgent: YTDLP_USER_AGENT,
-            referer: 'https://www.youtube.com/',
-            forceIpv4: true,
-            geoBypass: true,
-            ...(attempt.extractorArgs ? { extractorArgs: attempt.extractorArgs } : {}),
-            ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
-            ...(cookiesPath ? { cookies: cookiesPath } : {}),
-          } as any) as any;
+        // Try to get video title and metadata from yt-dlp info JSON
+        // First check if a .info.json was written alongside the video
+        const infoJsonPaths = [
+          resolvedOutputPath.replace(/\.mp4$/, '.info.json'),
+          outputPath.replace(/\.mp4$/, '.info.json'),
+        ];
+        let infoLoaded = false;
 
-          metadata.id = info.id;
-          metadata.title = info.title || metadata.title;
-          metadata.thumbnail = info.thumbnail;
-        } catch (infoError) {
-          logger.warn({ error: infoError, attempt: attempt.label }, 'Could not fetch video info from yt-dlp');
+        for (const infoPath of infoJsonPaths) {
+          try {
+            const infoContent = await fs.readFile(infoPath, 'utf8');
+            const info = JSON.parse(infoContent);
+            if (info.title) {
+              metadata.id = info.id || metadata.id;
+              metadata.title = info.title;
+              metadata.thumbnail = info.thumbnail || metadata.thumbnail;
+              infoLoaded = true;
+              logger.info({ title: info.title, attempt: attempt.label }, 'Loaded video info from .info.json');
+              await fs.unlink(infoPath).catch(() => {});
+              break;
+            }
+          } catch {
+            // info.json not found, try next path
+          }
+        }
+
+        // Fallback: fetch info via separate yt-dlp call
+        if (!infoLoaded) {
+          try {
+            const info = await youtubedl(url, {
+              dumpSingleJson: true,
+              noPlaylist: true,
+              userAgent: YTDLP_USER_AGENT,
+              referer: 'https://www.youtube.com/',
+              forceIpv4: true,
+              geoBypass: true,
+              ...(attempt.extractorArgs ? { extractorArgs: attempt.extractorArgs } : {}),
+              ...(env.ytdlp.proxyUrl ? { proxy: env.ytdlp.proxyUrl } : {}),
+              ...(cookiesPath ? { cookies: cookiesPath } : {}),
+            } as any) as any;
+
+            metadata.id = info.id;
+            metadata.title = info.title || metadata.title;
+            metadata.thumbnail = info.thumbnail;
+          } catch (infoError) {
+            logger.warn({ error: infoError, attempt: attempt.label }, 'Could not fetch video info from yt-dlp');
+          }
         }
 
         logger.info({ metadata, outputPath, attempt: attempt.label }, 'Download with yt-dlp completed');

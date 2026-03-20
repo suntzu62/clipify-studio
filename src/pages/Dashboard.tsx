@@ -26,7 +26,7 @@ import { deleteUserJob, getUserJobs, updateJobStatus } from '@/lib/storage';
 import { getUsage, UsageDTO } from '@/lib/usage';
 import { getAuthHeader } from '@/lib/auth-token';
 import { Skeleton } from '@/components/ui/skeleton';
-import { createProjectTitle, extractVideoId, getYouTubeMetadata } from '@/lib/youtube-metadata';
+import { extractVideoId } from '@/lib/youtube-metadata';
 import { deleteProject } from '@/services/projects';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -124,6 +124,30 @@ const Dashboard = () => {
         if (activeJobs.length > 0) {
           pollJobStatuses(activeJobs);
         }
+
+        // Fetch display_title from backend for jobs missing titles
+        const jobsMissingTitle = userJobs
+          .filter(j => !j.result?.metadata?.title && j.youtubeUrl && !j.youtubeUrl.startsWith('upload://'))
+          .slice(0, 10); // limit to avoid too many requests
+
+        if (jobsMissingTitle.length > 0) {
+          Promise.all(
+            jobsMissingTitle.map(async (job) => {
+              try {
+                const status = await getJobStatus(job.id, getToken);
+                const backendTitle = (status as any)?.display_title;
+                if (backendTitle) {
+                  setProjectMetadata(prev => ({
+                    ...prev,
+                    [job.id]: { ...prev[job.id], title: backendTitle },
+                  }));
+                }
+              } catch {
+                // ignore - title fetch is best-effort
+              }
+            })
+          );
+        }
       } catch (error) {
         console.error('Failed to load dashboard data:', error);
       } finally {
@@ -152,6 +176,14 @@ const Dashboard = () => {
             setJobs(prev => prev.map(j =>
               j.id === job.id ? { ...j, ...status } : j
             ));
+          }
+          // Capture display_title from backend
+          const backendTitle = (status as any)?.display_title;
+          if (backendTitle) {
+            setProjectMetadata(prev => ({
+              ...prev,
+              [job.id]: { ...prev[job.id], title: backendTitle },
+            }));
           }
         } catch (error) {
           console.warn(`Failed to get status for job ${job.id}:`, error);
@@ -235,81 +267,58 @@ const Dashboard = () => {
   useEffect(() => {
     let cancelled = false;
 
-    const projectsWithoutMetadata = recentProjects.filter((job) => {
+    // Only fetch thumbnails from YouTube oembed — titles come from backend via display_title
+    const projectsWithoutThumbnail = recentProjects.filter((job) => {
       if (!job.youtubeUrl || job.youtubeUrl.startsWith('upload://')) {
         return false;
       }
 
-      if (projectMetadata[job.id]) {
-        return false;
-      }
-
-      const hasTitle = Boolean(job.result?.metadata?.title || projectMetadata[job.id]?.title);
       const hasThumbnail = Boolean(
         job.result?.thumbnailUrl ||
         job.result?.metadata?.thumbnail ||
         projectMetadata[job.id]?.thumbnailUrl
       );
 
-      return !hasTitle || !hasThumbnail;
+      return !hasThumbnail;
     });
 
-    if (projectsWithoutMetadata.length === 0) {
+    if (projectsWithoutThumbnail.length === 0) {
       return;
     }
 
-    const loadMissingMetadata = async () => {
-      const metadataEntries = await Promise.all(
-        projectsWithoutMetadata.map(async (job) => {
-          if (!job.youtubeUrl) {
-            return null;
-          }
-
-          try {
-            const metadata = await getYouTubeMetadata(job.youtubeUrl);
-            if (!metadata.title && !metadata.thumbnailUrl) {
-              return [job.id, {}] as const;
-            }
-
-            return [
-              job.id,
-              {
-                title: metadata.title,
-                thumbnailUrl: metadata.thumbnailUrl,
-              },
-            ] as const;
-          } catch {
-            return [job.id, {}] as const;
-          }
+    const loadMissingThumbnails = async () => {
+      const entries = await Promise.all(
+        projectsWithoutThumbnail.map(async (job) => {
+          if (!job.youtubeUrl) return null;
+          const videoId = extractVideoId(job.youtubeUrl);
+          if (!videoId) return null;
+          return [
+            job.id,
+            { thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` },
+          ] as const;
         })
       );
 
-      if (cancelled) {
-        return;
-      }
+      if (cancelled) return;
 
-      const validEntries = metadataEntries.filter(
-        (entry): entry is readonly [string, { title?: string; thumbnailUrl?: string }] =>
-          entry !== null
+      const validEntries = entries.filter(
+        (e): e is readonly [string, { thumbnailUrl: string }] => e !== null
       );
-
-      if (validEntries.length === 0) {
-        return;
-      }
+      if (validEntries.length === 0) return;
 
       setProjectMetadata((prev) => {
         const merged = { ...prev };
-        for (const [jobId, metadata] of validEntries) {
+        for (const [jobId, meta] of validEntries) {
           merged[jobId] = {
-            title: metadata.title || prev[jobId]?.title,
-            thumbnailUrl: metadata.thumbnailUrl || prev[jobId]?.thumbnailUrl,
+            title: prev[jobId]?.title,
+            thumbnailUrl: meta.thumbnailUrl || prev[jobId]?.thumbnailUrl,
           };
         }
         return merged;
       });
     };
 
-    loadMissingMetadata();
+    loadMissingThumbnails();
 
     return () => {
       cancelled = true;
@@ -339,34 +348,31 @@ const Dashboard = () => {
   };
 
   const getProjectName = (job: Job) => {
-    const metadataTitle = job.result?.metadata?.title?.trim();
-    if (metadataTitle) {
-      return metadataTitle;
-    }
-
+    // 1. Backend display_title (fetched from DB metadata/title column)
     const cachedTitle = projectMetadata[job.id]?.title?.trim();
-    if (cachedTitle) {
+    if (cachedTitle && cachedTitle !== 'Vídeo do YouTube') {
       return cachedTitle;
     }
 
+    // 2. Result metadata from completed job
+    const metadataTitle = job.result?.metadata?.title?.trim();
+    if (metadataTitle && metadataTitle !== 'Vídeo do YouTube') {
+      return metadataTitle;
+    }
+
+    // 3. First clip title
     const firstClipTitle = job.result?.clips?.[0]?.title?.trim();
     if (firstClipTitle) {
       return firstClipTitle;
     }
 
+    // 4. Upload filename
     if (job.fileName) {
       return job.fileName;
     }
 
     if (job.youtubeUrl?.startsWith('upload://')) {
       return job.youtubeUrl.replace('upload://', '') || `Projeto #${job.id.slice(0, 8)}`;
-    }
-
-    if (job.youtubeUrl) {
-      const fallbackTitle = createProjectTitle(job.youtubeUrl);
-      if (fallbackTitle !== 'Novo Projeto') {
-        return fallbackTitle;
-      }
     }
 
     return `Projeto #${job.id.slice(0, 8)}`;
