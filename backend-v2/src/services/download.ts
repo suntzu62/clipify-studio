@@ -585,12 +585,12 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
           } catch (error: any) {
             logger.warn({ outputPath, error: error.message, attempt: attempt.label }, 'File not found immediately - will retry with polling');
 
-            const maxRetries = 30;
+            const maxRetries = 40;
             let stableSize = 0;
             let stableCount = 0;
 
             for (let retry = 0; retry < maxRetries; retry++) {
-              await new Promise((resolve) => setTimeout(resolve, 1000));
+              await new Promise((resolve) => setTimeout(resolve, 500));
 
               try {
                 const generated = await findGeneratedFile();
@@ -607,7 +607,7 @@ async function downloadWithYtDlp(url: string, outputPath: string): Promise<Video
                 if (fileSize > 0) {
                   if (fileSize === stableSize) {
                     stableCount++;
-                    if (stableCount >= 2) {
+                    if (stableCount >= 1) {
                       logger.info({ outputPath, finalSize: fileSize, attempt: attempt.label }, 'File size stable');
                       break;
                     }

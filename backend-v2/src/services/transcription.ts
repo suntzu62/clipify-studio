@@ -100,7 +100,7 @@ export async function transcribeVideo(
     logger.info({ totalChunks: chunkFiles.length }, 'Transcribing audio chunks');
 
     const allSegments: TranscriptSegment[] = [];
-    const batchSize = 3; // Reduced to avoid rate limiting
+    const batchSize = 5; // Increased for faster transcription (Whisper supports high concurrency)
 
     for (let i = 0; i < chunkFiles.length; i += batchSize) {
       const batch = chunkFiles.slice(i, i + batchSize);

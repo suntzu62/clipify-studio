@@ -463,6 +463,14 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
           'Failed to render/upload clip, skipping to next'
         );
       });
+
+      // Update DB with partial progress so frontend can show clips as they become ready
+      await dbJobs.update(jobId, {
+        status: 'active',
+        progress: 65 + Math.floor((10 * Math.min(startIndex + batch.length, highlightAnalysis.segments.length)) / highlightAnalysis.segments.length),
+        current_step: 'render',
+        current_step_message: `${clips.length} clipes prontos de ${highlightAnalysis.segments.length}`,
+      });
     }
 
     if (clips.length < clipPlan.minimumAcceptedClipCount && failedClipIndexes.size > 0) {
@@ -568,24 +576,24 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
       60 * 60 * 24 * 30 // 30 days
     );
 
-    // Salvar dados de cada clip (start, end, transcript)
-    for (const clip of highlightAnalysis.segments.map((segment, idx) => ({
-      id: buildJobScopedClipId(jobId, idx),
-      segment,
-    }))) {
-      const clipReprocessKey = `reprocess:${jobId}:${clip.id}`;
-      await redis.set(
-        clipReprocessKey,
-        JSON.stringify({
-          id: clip.id,
-          start: clip.segment.start,
-          end: clip.segment.end,
-          title: clip.segment.title,
-        }),
-        'EX',
-        60 * 60 * 24 * 30 // 30 days
-      );
-    }
+    // Salvar dados de cada clip (start, end, transcript) em paralelo
+    await Promise.all(
+      highlightAnalysis.segments.map((segment, idx) => {
+        const clipId = buildJobScopedClipId(jobId, idx);
+        const clipReprocessKey = `reprocess:${jobId}:${clipId}`;
+        return redis.set(
+          clipReprocessKey,
+          JSON.stringify({
+            id: clipId,
+            start: segment.start,
+            end: segment.end,
+            title: segment.title,
+          }),
+          'EX',
+          60 * 60 * 24 * 30 // 30 days
+        );
+      })
+    );
 
     logger.info({ jobId }, 'Reprocess data saved to Redis');
 
@@ -593,8 +601,10 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
     // Use per-job idempotency keys so retries do not double-charge.
     const processedMinutes = Math.max(1, Math.ceil(transcriptForAnalysis.duration / 60));
     const generatedClips = Math.max(1, clips.length);
-    await incrementUsage(userId, 'minute', processedMinutes, `job:${jobId}:minute`, 'job_completed');
-    await incrementUsage(userId, 'clip', generatedClips, `job:${jobId}:clip`, 'job_completed');
+    await Promise.all([
+      incrementUsage(userId, 'minute', processedMinutes, `job:${jobId}:minute`, 'job_completed'),
+      incrementUsage(userId, 'clip', generatedClips, `job:${jobId}:clip`, 'job_completed'),
+    ]);
 
     await updateProgress(job, 'completed', 100, 'Processamento completo!');
 
