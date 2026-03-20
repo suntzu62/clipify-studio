@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import os from 'os';
 import { join } from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
@@ -29,6 +30,7 @@ interface RenderOptions {
 interface SingleClipRenderOptions extends RenderOptions {
   clipIndex?: number;
   totalClips?: number;
+  parallelismHint?: number;
 }
 
 interface RenderResult {
@@ -59,6 +61,7 @@ type RenderClipOptions = {
   preset: NonNullable<RenderOptions['preset']>;
   subtitlePreferences: SubtitlePreferences;
   onProgress?: RenderOptions['onProgress'];
+  parallelismHint?: number;
 };
 
 const PRESET_PROFILE = {
@@ -68,6 +71,67 @@ const PRESET_PROFILE = {
   fast: { crf: '20', videoBitrate: '7M', maxrate: '9M', bufsize: '14M' },
   medium: { crf: '18', videoBitrate: '10M', maxrate: '12M', bufsize: '20M' },
 } as const;
+
+function getAvailableParallelism(): number {
+  try {
+    return Math.max(1, os.availableParallelism?.() ?? os.cpus().length ?? 1);
+  } catch {
+    return 1;
+  }
+}
+
+function resolveBatchConcurrency(totalClips: number): number {
+  const configured = Math.max(1, env.render.batchConcurrency);
+  const availableParallelism = getAvailableParallelism();
+
+  if (env.render.qualityMode !== 'turbo') {
+    return Math.min(configured, Math.max(1, totalClips));
+  }
+
+  const turboConcurrency = Math.min(
+    Math.max(2, availableParallelism),
+    Math.max(configured, 6),
+    Math.max(1, totalClips)
+  );
+
+  return Math.max(1, turboConcurrency);
+}
+
+function resolveFfmpegThreads(parallelismHint?: number): number {
+  if (env.render.ffmpegThreads > 0) {
+    return env.render.ffmpegThreads;
+  }
+
+  if (env.render.qualityMode === 'turbo') {
+    return 1;
+  }
+
+  const availableParallelism = getAvailableParallelism();
+  const activeParallelism = Math.max(1, parallelismHint || env.render.batchConcurrency || 1);
+  return Math.max(1, Math.floor(availableParallelism / activeParallelism));
+}
+
+function formatFfmpegSeconds(seconds: number): string {
+  return seconds.toFixed(3);
+}
+
+function getTurboX264Params(): string {
+  return [
+    'scenecut=0',
+    'subme=0',
+    'ref=1',
+    'bframes=0',
+    'me=dia',
+    'analyse=none',
+    '8x8dct=0',
+    'aq-mode=0',
+    'weightp=0',
+    'cabac=0',
+    'rc-lookahead=0',
+    'deblock=0,0',
+    'mixed-refs=0',
+  ].join(':');
+}
 
 /**
  * Renderiza múltiplos clipes a partir dos highlights
@@ -106,7 +170,7 @@ export async function renderClips(
 
   try {
     // Keep concurrency conservative; shared instances can stall BullMQ lock renewal.
-    const concurrency = Math.max(1, env.render.batchConcurrency);
+    const concurrency = resolveBatchConcurrency(segments.length);
     logger.info({ totalClips: segments.length, concurrency }, 'Rendering clips with controlled concurrency');
 
     for (let i = 0; i < segments.length; i += concurrency) {
@@ -143,6 +207,7 @@ export async function renderClips(
               preset,
               subtitlePreferences,
               onProgress,
+              parallelismHint: concurrency,
             }
           )
         )
@@ -180,6 +245,7 @@ export async function renderClip(
     onProgress,
     clipIndex = 0,
     totalClips = 1,
+    parallelismHint = 1,
   } = options;
 
   const outputDir = join('/tmp', `render-${clipId}-${Date.now()}`);
@@ -202,6 +268,7 @@ export async function renderClip(
         preset,
         subtitlePreferences,
         onProgress,
+        parallelismHint,
       }
     );
 
@@ -229,8 +296,12 @@ async function renderSingleClip(
   const videoOutputPath = join(outputDir, `${clipId}.mp4`);
   const thumbnailOutputPath = join(outputDir, `${clipId}.jpg`);
   const encodeProfile = PRESET_PROFILE[options.preset] || PRESET_PROFILE.ultrafast;
+  const ffmpegThreads = resolveFfmpegThreads(options.parallelismHint);
 
-  logger.info({ clipId, start, end, duration }, 'Rendering clip');
+  logger.info(
+    { clipId, start, end, duration, ffmpegThreads, parallelismHint: options.parallelismHint },
+    'Rendering clip'
+  );
 
   try {
     // Build FFmpeg filters
@@ -320,31 +391,41 @@ async function renderSingleClip(
 
     // Render video
     await new Promise<void>((resolve, reject) => {
-      ffmpeg(videoPath)
-        .setStartTime(start)
-        .setDuration(duration)
+      const command = ffmpeg(videoPath);
+
+      command.inputOptions([
+        '-ss', formatFfmpegSeconds(start),
+        ...(isTurboMode ? ['-analyzeduration', '0', '-probesize', '32k'] : []),
+      ]);
+
+      command
         .outputOptions([
           '-map', '0:v:0',
           '-map', '0:a:0',
+          '-t', formatFfmpegSeconds(duration),
           '-vf', vf,
           '-af', af,
+          '-sn',
+          '-dn',
           '-c:v', 'libx264',
           '-preset', options.preset,
-          '-threads', String(Math.max(0, env.render.ffmpegThreads)),
+          '-threads', String(ffmpegThreads),
           '-profile:v', isTurboMode ? 'baseline' : 'high',
           '-level', isTurboMode ? '3.1' : '4.2',
           ...(isTurboMode ? ['-tune', 'zerolatency'] : []),
+          ...(isTurboMode ? ['-x264-params', getTurboX264Params()] : []),
           '-pix_fmt', 'yuv420p',
           '-crf', encodeProfile.crf,
           '-b:v', encodeProfile.videoBitrate,
           '-maxrate', encodeProfile.maxrate,
           '-bufsize', encodeProfile.bufsize,
-          '-g', '60',
-          '-keyint_min', '30',
+          '-g', isTurboMode ? '48' : '60',
+          '-keyint_min', isTurboMode ? '24' : '30',
+          ...(isTurboMode ? ['-bf', '0', '-refs', '1', '-sc_threshold', '0'] : []),
           '-c:a', 'aac',
-          '-b:a', isTurboMode ? '96k' : '160k',
-          '-ac', '2',
-          '-ar', isTurboMode ? '44100' : '48000',
+          '-b:a', isTurboMode ? '64k' : '160k',
+          '-ac', isTurboMode ? '1' : '2',
+          '-ar', isTurboMode ? '32000' : '48000',
           '-movflags', '+faststart',
         ])
         .output(videoOutputPath)

@@ -348,6 +348,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
             font: subtitlePreferences.font,
             preset: 'ultrafast',
             subtitlePreferences,
+            parallelismHint: renderConcurrency,
             onProgress: undefined,
           }
         );
