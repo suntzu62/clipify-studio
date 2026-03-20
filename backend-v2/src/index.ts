@@ -40,6 +40,11 @@ await app.register(rateLimit, {
     // Use user ID if authenticated, otherwise IP
     return (request as any).user?.userId || request.ip;
   },
+  errorResponseBuilder: (_request, context) => ({
+    error: 'RATE_LIMIT_EXCEEDED',
+    message: `Muitas requisições. Tente novamente em ${Math.ceil((context.ttl || 60000) / 1000)} segundos.`,
+    retryAfter: Math.ceil((context.ttl || 60000) / 1000),
+  }),
 });
 
 // CORS — whitelist allowed origins

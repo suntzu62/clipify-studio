@@ -304,7 +304,14 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   // CREATE JOB FROM UPLOAD (after file is uploaded to Supabase)
   // ============================================
-  app.post('/jobs/from-upload', async (request, reply) => {
+  app.post('/jobs/from-upload', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (request, reply) => {
     const schema = z.object({
       userId: z.string().uuid(),
       storagePath: z.string(),
@@ -369,7 +376,14 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   // CREATE JOB
   // ============================================
-  app.post('/jobs', async (request, reply) => {
+  app.post('/jobs', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (request, reply) => {
     // Validar input
     const parsed = CreateJobSchema.safeParse(request.body);
 
@@ -980,7 +994,14 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
 
   // POST /jobs/temp - Create temporary configuration
-  app.post('/jobs/temp', async (request, reply) => {
+  app.post('/jobs/temp', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (request, reply) => {
     const parsed = CreateTempConfigSchema.safeParse(request.body);
 
     if (!parsed.success) {
@@ -1063,7 +1084,14 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // POST /jobs/temp/:tempId/start - Start processing with configuration
-  app.post('/jobs/temp/:tempId/start', async (request, reply) => {
+  app.post('/jobs/temp/:tempId/start', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (request, reply) => {
     const { tempId } = request.params as { tempId: string };
     const requestUserId = getRequestUserId(request);
 

@@ -34,6 +34,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import NewProjectDialog from '@/components/projects/NewProjectDialog';
 import { ProjectCardPro } from '@/components/projects/ProjectCardPro';
 import { listProjects, deleteProject, updateProject, type Project } from '@/services/projects';
@@ -324,18 +325,31 @@ const Projects = () => {
             </motion.div>
 
             {loading ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.3 }}
-              >
-                <Card className="text-center py-12 glass-card border-white/10">
-                  <CardContent>
-                    <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
-                    <CardDescription>Carregando projetos...</CardDescription>
-                  </CardContent>
-                </Card>
-              </motion.div>
+              <div className="space-y-6">
+                {/* Skeleton header */}
+                <div className="flex items-center justify-between">
+                  <div className="space-y-2">
+                    <Skeleton className="h-6 w-32" />
+                    <Skeleton className="h-4 w-56" />
+                  </div>
+                </div>
+                {/* Skeleton project cards grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {[...Array(8)].map((_, i) => (
+                    <div key={i} className="rounded-xl border border-white/10 overflow-hidden">
+                      <Skeleton className="h-40 w-full" />
+                      <div className="p-4 space-y-3">
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-3 w-1/2" />
+                        <div className="flex gap-2">
+                          <Skeleton className="h-6 w-16 rounded-full" />
+                          <Skeleton className="h-6 w-20 rounded-full" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : items.length === 0 ? (
               <motion.div
                 className="max-w-3xl mx-auto"

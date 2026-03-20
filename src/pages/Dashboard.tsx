@@ -25,6 +25,7 @@ import { getJobStatus, Job } from '@/lib/jobs-api';
 import { deleteUserJob, getUserJobs, updateJobStatus } from '@/lib/storage';
 import { getUsage, UsageDTO } from '@/lib/usage';
 import { getAuthHeader } from '@/lib/auth-token';
+import { Skeleton } from '@/components/ui/skeleton';
 import { createProjectTitle, extractVideoId, getYouTubeMetadata } from '@/lib/youtube-metadata';
 import { deleteProject } from '@/services/projects';
 import { useToast } from '@/hooks/use-toast';
@@ -373,12 +374,67 @@ const Dashboard = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-          className="rounded-full h-16 w-16 border-b-2 border-primary"
-        />
+      <div className="min-h-screen bg-background">
+        {/* Skeleton Header */}
+        <header className="border-b border-border sticky top-0 z-50 bg-background/80 backdrop-blur-xl">
+          <div className="container mx-auto px-6">
+            <div className="flex items-center justify-between h-16">
+              <div className="flex items-center space-x-2">
+                <Skeleton className="w-8 h-8 rounded-lg" />
+                <Skeleton className="w-20 h-5" />
+              </div>
+              <div className="flex items-center space-x-4">
+                <Skeleton className="w-20 h-6 rounded-full hidden md:block" />
+                <Skeleton className="w-32 h-4 hidden md:block" />
+              </div>
+            </div>
+          </div>
+        </header>
+        <div className="container mx-auto px-6 py-8">
+          <div className="flex flex-col lg:flex-row gap-8">
+            {/* Skeleton Sidebar */}
+            <aside className="lg:w-64 flex-shrink-0">
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-full rounded-md" />
+                <Skeleton className="h-10 w-full rounded-md" />
+                <Skeleton className="h-10 w-full rounded-md" />
+              </div>
+            </aside>
+            {/* Skeleton Main Content */}
+            <main className="flex-1 space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="space-y-2">
+                  <Skeleton className="h-7 w-36" />
+                  <Skeleton className="h-4 w-64" />
+                </div>
+                <Skeleton className="h-6 w-20 rounded-full" />
+              </div>
+              {/* Skeleton Quick Create + Usage */}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <Skeleton className="h-48 rounded-xl" />
+                <Skeleton className="h-48 rounded-xl" />
+              </div>
+              {/* Skeleton Stats */}
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {[...Array(4)].map((_, i) => (
+                  <Skeleton key={i} className="h-28 rounded-xl" />
+                ))}
+              </div>
+              {/* Skeleton Projects */}
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <Skeleton className="h-6 w-40" />
+                  <Skeleton className="h-8 w-24 rounded-md" />
+                </div>
+                <div className="grid gap-4 2xl:grid-cols-2">
+                  {[...Array(3)].map((_, i) => (
+                    <Skeleton key={i} className="h-32 rounded-xl" />
+                  ))}
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
       </div>
     );
   }

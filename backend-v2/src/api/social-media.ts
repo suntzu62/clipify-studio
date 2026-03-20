@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { createLogger } from '../config/logger.js';
 import { env } from '../config/env.js';
 import { redis } from '../config/redis.js';
+import { authenticateJWT } from '../middleware/auth.middleware.js';
 import { InstagramPlatform } from '../services/social-platforms/instagram-platform.js';
 import type { SocialPlatformConfig, PublishMetadata } from '../services/social-platforms/base-platform.js';
 import { createClient } from '@supabase/supabase-js';
@@ -93,13 +94,15 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
       logger.info({ userId, accountId: credentials.accountId }, 'Instagram account connected');
 
       // Redirect to success page
+      const frontendUrl = env.frontendUrl || 'http://localhost:8080';
       return reply.redirect(
-        `http://localhost:8080/social-connected?platform=instagram&success=true`
+        `${frontendUrl}/social-connected?platform=instagram&success=true`
       );
     } catch (error: any) {
       logger.error({ error: error.message }, 'Instagram OAuth callback failed');
+      const frontendUrl = env.frontendUrl || 'http://localhost:8080';
       return reply.redirect(
-        `http://localhost:8080/social-connected?platform=instagram&success=false&error=${encodeURIComponent(error.message)}`
+        `${frontendUrl}/social-connected?platform=instagram&success=false&error=${encodeURIComponent(error.message)}`
       );
     }
   });
@@ -107,8 +110,18 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
   /**
    * Get connected social accounts
    */
-  app.get('/social/accounts/:userId', async (request, reply) => {
+  app.get('/social/accounts/:userId', {
+    preHandler: authenticateJWT,
+  }, async (request, reply) => {
     const { userId } = request.params as { userId: string };
+
+    // Verify ownership: user can only access their own accounts
+    if (request.user!.userId !== userId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only access your own social accounts',
+      });
+    }
 
     try {
       const platforms = ['instagram', 'youtube', 'tiktok'];
@@ -148,8 +161,18 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
   /**
    * Disconnect social account
    */
-  app.delete('/social/accounts/:userId/:platform', async (request, reply) => {
+  app.delete('/social/accounts/:userId/:platform', {
+    preHandler: authenticateJWT,
+  }, async (request, reply) => {
     const { userId, platform } = request.params as { userId: string; platform: string };
+
+    // Verify ownership: user can only disconnect their own accounts
+    if (request.user!.userId !== userId) {
+      return reply.status(403).send({
+        error: 'FORBIDDEN',
+        message: 'You can only disconnect your own social accounts',
+      });
+    }
 
     try {
       const credentialsKey = `social:credentials:${userId}:${platform}`;
@@ -177,13 +200,17 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
   /**
    * Publish clip to Instagram Reels
    */
-  app.post('/clips/:clipId/publish-instagram', async (request, reply) => {
+  app.post('/clips/:clipId/publish-instagram', {
+    preHandler: authenticateJWT,
+  }, async (request, reply) => {
     const { clipId } = request.params as { clipId: string };
-    const { jobId, userId, metadata } = request.body as {
+    const { jobId, metadata } = request.body as {
       jobId: string;
-      userId: string;
       metadata?: PublishMetadata;
     };
+
+    // Use authenticated user ID, never trust userId from request body
+    const userId = request.user!.userId;
 
     try {
       logger.info({ clipId, jobId, userId }, 'Publishing clip to Instagram');

@@ -205,9 +205,20 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     const { reason } = (request.body as { reason?: string }) || {};
 
     try {
+      const userId = request.user!.userId;
+
+      // Verify ownership: user can only cancel their own subscription
+      const userSubscription = await mp.getUserSubscription(userId);
+      if (!userSubscription || userSubscription.id !== subscriptionId) {
+        return reply.status(403).send({
+          error: 'FORBIDDEN',
+          message: 'You can only cancel your own subscription',
+        });
+      }
+
       const subscription = await mp.cancelSubscription(subscriptionId, reason);
 
-      logger.info({ subscriptionId, reason }, 'Assinatura cancelada');
+      logger.info({ subscriptionId, userId, reason }, 'Assinatura cancelada');
 
       return reply.send({
         message: 'Assinatura cancelada com sucesso',
@@ -318,6 +329,18 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     const { paymentId } = request.params as { paymentId: string };
 
     try {
+      const userId = request.user!.userId;
+
+      // Verify ownership: user can only check their own payments
+      const userPayments = await mp.getUserPayments(userId);
+      const ownsPayment = userPayments.some((p: any) => p.id === paymentId);
+      if (!ownsPayment) {
+        return reply.status(403).send({
+          error: 'FORBIDDEN',
+          message: 'You can only access your own payments',
+        });
+      }
+
       const status = await mp.getPaymentStatus(paymentId);
 
       return reply.send({
@@ -450,50 +473,51 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
 
       logger.info({ type: body.type, action: body.action }, 'Webhook recebido');
 
-      // Validate MercadoPago webhook signature
-      if (env.mercadoPago.webhookSecret) {
-        const xSignature = request.headers['x-signature'] as string | undefined;
-        const xRequestId = request.headers['x-request-id'] as string | undefined;
-
-        if (!xSignature || !xRequestId) {
-          logger.warn('Webhook rejected: missing x-signature or x-request-id headers');
-          return reply.status(401).send({ error: 'Missing signature headers' });
-        }
-
-        // Parse x-signature header: "ts=...,v1=..."
-        const parts = Object.fromEntries(
-          xSignature.split(',').map((part) => {
-            const [key, ...rest] = part.trim().split('=');
-            return [key, rest.join('=')];
-          })
-        );
-
-        const ts = parts['ts'];
-        const v1 = parts['v1'];
-
-        if (!ts || !v1) {
-          logger.warn('Webhook rejected: malformed x-signature header');
-          return reply.status(401).send({ error: 'Malformed signature' });
-        }
-
-        // Build the manifest string per MercadoPago docs
-        const dataId = (request.query as any)?.['data.id'] || body?.data?.id || '';
-        const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
-
-        const hmac = crypto
-          .createHmac('sha256', env.mercadoPago.webhookSecret)
-          .update(manifest)
-          .digest('hex');
-
-        if (hmac !== v1) {
-          logger.warn({ expected: hmac, received: v1 }, 'Webhook rejected: invalid signature');
-          return reply.status(401).send({ error: 'Invalid signature' });
-        }
-
-        logger.info('Webhook signature validated successfully');
-      } else {
-        logger.warn('MERCADOPAGO_WEBHOOK_SECRET not configured — skipping signature validation');
+      // Validate MercadoPago webhook signature (MANDATORY)
+      if (!env.mercadoPago.webhookSecret) {
+        logger.error('MERCADOPAGO_WEBHOOK_SECRET not configured — rejecting webhook for security');
+        return reply.status(500).send({ error: 'WEBHOOK_CONFIG_ERROR', message: 'Webhook secret not configured' });
       }
+
+      const xSignature = request.headers['x-signature'] as string | undefined;
+      const xRequestId = request.headers['x-request-id'] as string | undefined;
+
+      if (!xSignature || !xRequestId) {
+        logger.warn('Webhook rejected: missing x-signature or x-request-id headers');
+        return reply.status(401).send({ error: 'INVALID_SIGNATURE', message: 'Missing signature headers' });
+      }
+
+      // Parse x-signature header: "ts=...,v1=..."
+      const parts = Object.fromEntries(
+        xSignature.split(',').map((part) => {
+          const [key, ...rest] = part.trim().split('=');
+          return [key, rest.join('=')];
+        })
+      );
+
+      const ts = parts['ts'];
+      const v1 = parts['v1'];
+
+      if (!ts || !v1) {
+        logger.warn('Webhook rejected: malformed x-signature header');
+        return reply.status(401).send({ error: 'INVALID_SIGNATURE', message: 'Malformed signature' });
+      }
+
+      // Build the manifest string per MercadoPago docs
+      const dataId = (request.query as any)?.['data.id'] || body?.data?.id || '';
+      const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
+
+      const hmac = crypto
+        .createHmac('sha256', env.mercadoPago.webhookSecret)
+        .update(manifest)
+        .digest('hex');
+
+      if (hmac !== v1) {
+        logger.warn({ expected: hmac, received: v1 }, 'Webhook rejected: invalid signature');
+        return reply.status(401).send({ error: 'INVALID_SIGNATURE', message: 'Invalid signature' });
+      }
+
+      logger.info('Webhook signature validated successfully');
 
       const result = await mp.handleWebhook(body);
 
