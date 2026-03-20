@@ -499,22 +499,71 @@ export async function registerRoutes(app: FastifyInstance) {
         clipRows.map((row) => [row.jobId, row.count])
       );
 
-      const withClipData = jobs.map((job) => {
+      const isValidListTitle = (t: string): boolean => {
+        const trimmed = t.trim();
+        if (trimmed.length === 0) return false;
+        if (trimmed.includes('/')) return false;
+        if (/\.(mp4|webm|mkv|mov|avi|wav|mp3|flac|m4a|ts|json)$/i.test(trimmed)) return false;
+        return true;
+      };
+
+      // Resolve titles, fetching from YouTube oembed for jobs without titles
+      const resolveTitle = (job: any): string | null => {
         let parsedMetadata = job.metadata;
         if (typeof parsedMetadata === 'string') {
           try { parsedMetadata = JSON.parse(parsedMetadata); } catch { parsedMetadata = null; }
         }
         const metadataTitle = parsedMetadata && typeof parsedMetadata === 'object' ? (parsedMetadata as any).title : undefined;
-        const displayTitle =
-          (typeof job.title === 'string' && job.title.trim().length > 0 && !job.title.includes('/') ? job.title : null) ||
-          (typeof metadataTitle === 'string' && metadataTitle.trim().length > 0 && !metadataTitle.includes('/') ? metadataTitle : null);
+        return (
+          (typeof job.title === 'string' && isValidListTitle(job.title) ? job.title : null) ||
+          (typeof metadataTitle === 'string' && isValidListTitle(metadataTitle) ? metadataTitle : null)
+        );
+      };
 
-        return {
-          ...job,
-          display_title: displayTitle,
-          clips_ready_count: clipsByJob.get(job.id) || 0,
-        };
-      });
+      // Fetch YouTube oembed titles for jobs missing titles (best-effort, with timeout)
+      const fetchYouTubeTitle = async (youtubeUrl: string): Promise<string | null> => {
+        try {
+          const videoIdMatch = youtubeUrl.match(/(?:youtu\.be\/|v=)([A-Za-z0-9_-]{11})/);
+          if (!videoIdMatch) return null;
+          const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoIdMatch[1]}&format=json`;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3000);
+          const resp = await fetch(oembedUrl, { signal: controller.signal });
+          clearTimeout(timeout);
+          if (!resp.ok) return null;
+          const data = await resp.json() as { title?: string };
+          return data.title || null;
+        } catch {
+          return null;
+        }
+      };
+
+      const withClipData = jobs.map((job) => ({
+        ...job,
+        display_title: resolveTitle(job),
+        clips_ready_count: clipsByJob.get(job.id) || 0,
+      }));
+
+      // For jobs without titles that have YouTube URLs, fetch titles and save to DB
+      const jobsMissingTitles = withClipData.filter(
+        (j) => !j.display_title && j.youtube_url && !j.youtube_url.startsWith('upload://')
+      );
+      if (jobsMissingTitles.length > 0) {
+        await Promise.all(
+          jobsMissingTitles.slice(0, 10).map(async (job) => {
+            try {
+              const title = await fetchYouTubeTitle(job.youtube_url);
+              if (title) {
+                job.display_title = title;
+                // Save to DB for future requests (fire-and-forget)
+                dbJobs.update(job.id, { title }).catch(() => {});
+              }
+            } catch {
+              // ignore - title fetch is best-effort
+            }
+          })
+        );
+      }
 
       logger.info({
         userId: requestUserId,
@@ -542,6 +591,14 @@ export async function registerRoutes(app: FastifyInstance) {
     const dbJob = await dbJobs.findById(jobId);
 
     // Resolve display title from DB job
+    const isValidTitle = (t: string): boolean => {
+      const trimmed = t.trim();
+      if (trimmed.length === 0) return false;
+      if (trimmed.includes('/')) return false;
+      // Reject file-like names (e.g., video_abc123.mp4, audio.wav)
+      if (/\.(mp4|webm|mkv|mov|avi|wav|mp3|flac|m4a|ts|json)$/i.test(trimmed)) return false;
+      return true;
+    };
     const resolveDisplayTitle = (job: any): string | null => {
       if (!job) return null;
       let parsedMeta = job.metadata;
@@ -550,8 +607,8 @@ export async function registerRoutes(app: FastifyInstance) {
       }
       const metaTitle = parsedMeta && typeof parsedMeta === 'object' ? (parsedMeta as any).title : undefined;
       return (
-        (typeof job.title === 'string' && job.title.trim().length > 0 && !job.title.includes('/') ? job.title : null) ||
-        (typeof metaTitle === 'string' && metaTitle.trim().length > 0 && !metaTitle.includes('/') ? metaTitle : null)
+        (typeof job.title === 'string' && isValidTitle(job.title) ? job.title : null) ||
+        (typeof metaTitle === 'string' && isValidTitle(metaTitle) ? metaTitle : null)
       );
     };
     const displayTitle = resolveDisplayTitle(dbJob);

@@ -1,6 +1,6 @@
 import { getUserJobs } from "@/lib/storage";
 import { Job } from "@/lib/jobs-api";
-import { createProjectTitle } from "@/lib/youtube-metadata";
+import { extractVideoId } from "@/lib/youtube-metadata";
 
 export type Project = {
   id: string;
@@ -42,7 +42,7 @@ type BackendJob = {
 
 // Convert Job from localStorage to Project format
 function jobToProject(job: Job, userId: string): Project {
-  const fallbackTitle = job.youtubeUrl ? createProjectTitle(job.youtubeUrl) : null;
+  const fallbackTitle = job.youtubeUrl ? fallbackVideoNameFromUrl(job.youtubeUrl) : null;
   return {
     id: job.id,
     user_id: userId,
@@ -78,18 +78,18 @@ function fallbackVideoNameFromUrl(url: string | null | undefined): string | null
     const parsed = new URL(url);
     if (parsed.hostname.includes('youtu.be')) {
       const id = parsed.pathname.replace('/', '').trim();
-      return id ? `Vídeo ${id}` : 'Vídeo YouTube';
+      return id ? `YouTube ${id}` : null;
     }
 
     const v = parsed.searchParams.get('v');
-    if (v) return `Vídeo ${v}`;
+    if (v) return `YouTube ${v}`;
 
     const shorts = parsed.pathname.match(/\/shorts\/([^/?]+)/);
-    if (shorts?.[1]) return `Vídeo ${shorts[1]}`;
+    if (shorts?.[1]) return `YouTube Short ${shorts[1]}`;
 
-    return createProjectTitle(url);
+    return null;
   } catch {
-    return createProjectTitle(url || '');
+    return null;
   }
 }
 
@@ -127,7 +127,7 @@ export async function listProjects(currentUserId?: string) {
     // Mapear os dados do backend para o formato Project
     const mapped = data.map((job): Project => {
       const fallbackTitle = fallbackVideoNameFromUrl(job.youtube_url);
-      const resolvedTitle = job.title || job.display_title || fallbackTitle;
+      const resolvedTitle = job.display_title || job.title || fallbackTitle;
 
       return {
       id: job.id,

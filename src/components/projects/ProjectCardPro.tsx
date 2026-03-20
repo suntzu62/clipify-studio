@@ -13,7 +13,7 @@ import {
 import { Play, Clock, CheckCircle2, AlertCircle, Loader2, MoreVertical, Edit, Trash2 } from 'lucide-react';
 import type { Project } from '@/services/projects';
 import { cn } from '@/lib/utils';
-import { createProjectTitle } from '@/lib/youtube-metadata';
+import { extractVideoId } from '@/lib/youtube-metadata';
 import { TiltCard } from '@/components/landing';
 
 interface ProjectCardProProps {
@@ -102,11 +102,14 @@ export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProp
 
   // Extrair título limpo do YouTube URL ou usar file_name
   const getProjectTitle = () => {
-    if (project.title) return project.title;
     if (project.display_title) return project.display_title;
-    if (project.youtube_url) return createProjectTitle(project.youtube_url);
+    if (project.title) return project.title;
     if (project.file_name) return project.file_name.replace(/\.[^/.]+$/, '');
-    return 'Projeto sem título';
+    if (project.youtube_url) {
+      const videoId = extractVideoId(project.youtube_url);
+      return videoId ? `YouTube ${videoId}` : `Projeto #${project.id.slice(0, 8)}`;
+    }
+    return `Projeto #${project.id.slice(0, 8)}`;
   };
 
   return (
