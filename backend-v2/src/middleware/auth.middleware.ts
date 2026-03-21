@@ -22,6 +22,12 @@ export async function authenticateJWT(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
+  // If user was already decoded by the global onRequest hook (e.g. via API key + cookie),
+  // skip re-verification to avoid false 401s.
+  if (request.user?.userId) {
+    return;
+  }
+
   try {
     // Suporta token via Authorization header e via cookie httpOnly
     const authHeader = request.headers.authorization;

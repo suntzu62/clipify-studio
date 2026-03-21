@@ -2,6 +2,7 @@
 // Conecta o frontend aos endpoints de pagamento do backend
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 // ============================================
 // TYPES
@@ -96,6 +97,7 @@ async function apiFetch<T>(
     credentials: 'include', // Importante: envia cookies httpOnly
     headers: {
       'Content-Type': 'application/json',
+      ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
       ...options.headers,
     },
   });
