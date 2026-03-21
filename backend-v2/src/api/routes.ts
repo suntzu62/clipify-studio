@@ -492,11 +492,14 @@ export async function registerRoutes(app: FastifyInstance) {
       const clipRows = await Promise.all(
         jobs.map(async (job) => {
           const clips = await dbClips.findByJobId(job.id);
-          return { jobId: job.id, count: clips.length };
+          return { jobId: job.id, count: clips.length, firstClipTitle: clips[0]?.title || null };
         })
       );
       const clipsByJob = new Map<string, number>(
         clipRows.map((row) => [row.jobId, row.count])
+      );
+      const firstClipTitleByJob = new Map<string, string | null>(
+        clipRows.map((row) => [row.jobId, row.firstClipTitle])
       );
 
       const isValidListTitle = (t: string): boolean => {
@@ -507,17 +510,30 @@ export async function registerRoutes(app: FastifyInstance) {
         return true;
       };
 
-      // Resolve titles, fetching from YouTube oembed for jobs without titles
+      // Resolve titles from DB title, metadata, or first clip title
       const resolveTitle = (job: any): string | null => {
+        // 1. DB title column
+        if (typeof job.title === 'string' && isValidListTitle(job.title)) {
+          return job.title;
+        }
+
+        // 2. Metadata title
         let parsedMetadata = job.metadata;
         if (typeof parsedMetadata === 'string') {
           try { parsedMetadata = JSON.parse(parsedMetadata); } catch { parsedMetadata = null; }
         }
         const metadataTitle = parsedMetadata && typeof parsedMetadata === 'object' ? (parsedMetadata as any).title : undefined;
-        return (
-          (typeof job.title === 'string' && isValidListTitle(job.title) ? job.title : null) ||
-          (typeof metadataTitle === 'string' && isValidListTitle(metadataTitle) ? metadataTitle : null)
-        );
+        if (typeof metadataTitle === 'string' && isValidListTitle(metadataTitle)) {
+          return metadataTitle;
+        }
+
+        // 3. First clip title (GPT-4 generated)
+        const clipTitle = firstClipTitleByJob.get(job.id);
+        if (typeof clipTitle === 'string' && clipTitle.trim().length > 0) {
+          return clipTitle;
+        }
+
+        return null;
       };
 
       // Fetch YouTube oembed titles for jobs missing titles (best-effort, with timeout)
@@ -560,6 +576,7 @@ export async function registerRoutes(app: FastifyInstance) {
         logger.info({
           count: jobsMissingTitles.length,
           urls: jobsMissingTitles.slice(0, 3).map(j => j.youtube_url),
+          sampleJobTitles: jobsMissingTitles.slice(0, 3).map(j => ({ id: j.id, title: j.title, metaType: typeof j.metadata })),
         }, 'Fetching YouTube titles for jobs missing display_title');
 
         await Promise.all(
