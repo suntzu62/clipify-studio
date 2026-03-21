@@ -226,4 +226,51 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     return reply.send(checks);
   });
+
+  // ============================================
+  // RECOVER STALLED JOBS — Mark stuck jobs as failed
+  // ============================================
+  app.post('/admin/recover-stalled-jobs', { preHandler: requireAdmin }, async (_request, reply) => {
+    try {
+      // Find jobs stuck in active/queued for more than 30 minutes
+      const stalledJobs = await safeQuery(
+        `SELECT id, status, current_step, updated_at
+         FROM jobs
+         WHERE status IN ('active', 'processing', 'queued')
+           AND updated_at < NOW() - INTERVAL '30 minutes'
+         ORDER BY updated_at ASC
+         LIMIT 50`
+      );
+
+      if (stalledJobs.length === 0) {
+        return reply.send({ recovered: 0, message: 'No stalled jobs found' });
+      }
+
+      // Mark stalled jobs as failed
+      const ids = stalledJobs.map((j: any) => j.id);
+      await pool.query(
+        `UPDATE jobs
+         SET status = 'failed',
+             error = 'Job stalled and was automatically recovered',
+             updated_at = NOW()
+         WHERE id = ANY($1)`,
+        [ids]
+      );
+
+      logger.info({ count: stalledJobs.length, ids }, 'Recovered stalled jobs');
+
+      return reply.send({
+        recovered: stalledJobs.length,
+        jobs: stalledJobs.map((j: any) => ({
+          id: j.id,
+          previousStatus: j.status,
+          step: j.current_step,
+          lastUpdate: j.updated_at,
+        })),
+      });
+    } catch (error: any) {
+      logger.error({ error: error.message }, 'Error recovering stalled jobs');
+      return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
+    }
+  });
 }

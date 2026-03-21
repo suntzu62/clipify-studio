@@ -18,7 +18,7 @@ import {
 import { addVideoJob, getJobStatus, cancelJob, getQueueHealth, videoQueue } from '../jobs/queue.js';
 import { enqueueInlineVideoJob, getInlineQueueSnapshot, removeInlinePendingJob } from '../jobs/inline-queue.js';
 import { getJobExecutionDecision } from '../jobs/execution-mode.js';
-import { clips as dbClips } from '../services/database.service.js';
+import { clips as dbClips, pool } from '../services/database.service.js';
 import { createLogger } from '../config/logger.js';
 import { createClient } from '@supabase/supabase-js';
 import { env } from '../config/env.js';
@@ -489,18 +489,28 @@ export async function registerRoutes(app: FastifyInstance) {
       const jobs = Array.from(uniqueById.values())
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      const clipRows = await Promise.all(
-        jobs.map(async (job) => {
-          const clips = await dbClips.findByJobId(job.id);
-          return { jobId: job.id, count: clips.length, firstClipTitle: clips[0]?.title || null };
-        })
-      );
-      const clipsByJob = new Map<string, number>(
-        clipRows.map((row) => [row.jobId, row.count])
-      );
-      const firstClipTitleByJob = new Map<string, string | null>(
-        clipRows.map((row) => [row.jobId, row.firstClipTitle])
-      );
+      // Single efficient query for all clip counts + first titles
+      const jobIds = jobs.map((j) => j.id);
+      let clipsByJob = new Map<string, number>();
+      let firstClipTitleByJob = new Map<string, string | null>();
+
+      if (jobIds.length > 0) {
+        try {
+          const clipCountResult = await pool.query(
+            `SELECT job_id,
+                    COUNT(*)::int AS count,
+                    MIN(title) AS first_title
+             FROM clips
+             WHERE job_id = ANY($1)
+             GROUP BY job_id`,
+            [jobIds]
+          );
+          clipsByJob = new Map(clipCountResult.rows.map((r: any) => [r.job_id, r.count]));
+          firstClipTitleByJob = new Map(clipCountResult.rows.map((r: any) => [r.job_id, r.first_title]));
+        } catch (err: any) {
+          logger.warn({ error: err.message }, 'Failed to query clip counts');
+        }
+      }
 
       const isValidListTitle = (t: string): boolean => {
         const trimmed = t.trim();

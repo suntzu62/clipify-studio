@@ -118,43 +118,69 @@ const Projects = () => {
     fetchProjects();
   }, [fetchProjects]);
 
-  // Fetch real titles from individual job endpoints (same approach as Dashboard)
+  // Enrich projects with data from individual job endpoints (titles, clip counts, stalled status)
   useEffect(() => {
     if (items.length === 0 || loading) return;
 
-    const jobsMissingTitles = items.filter(
-      (p) => !p.display_title || p.display_title.startsWith('YouTube ')
-    );
+    // Find projects that need enrichment: missing titles, zero clips, or stuck processing
+    const needsEnrichment = items.filter((p) => {
+      const missingTitle = !p.display_title || p.display_title.startsWith('YouTube ');
+      const zeroClips = (p.clips_ready_count || 0) === 0;
+      const stuckProcessing = (p.status === 'active' || p.status === 'queued');
+      return missingTitle || zeroClips || stuckProcessing;
+    });
 
-    if (jobsMissingTitles.length === 0) return;
+    if (needsEnrichment.length === 0) return;
 
     let cancelled = false;
 
-    const fetchTitles = async () => {
-      console.log('[Projects] Fetching titles for', jobsMissingTitles.length, 'jobs via individual endpoints');
+    const enrichProjects = async () => {
+      console.log('[Projects] Enriching', needsEnrichment.length, 'projects from individual endpoints');
       await Promise.all(
-        jobsMissingTitles.slice(0, 20).map(async (project) => {
+        needsEnrichment.slice(0, 20).map(async (project) => {
           try {
             const status = await getJobStatus(project.id, getToken);
+            if (cancelled) return;
+
             const backendTitle = (status as any)?.display_title;
-            if (backendTitle && !cancelled) {
-              console.log('[Projects] Got title for', project.id, ':', backendTitle);
-              setItems((prev) =>
-                prev.map((p) =>
-                  p.id === project.id
-                    ? { ...p, title: backendTitle, display_title: backendTitle }
-                    : p
-                )
-              );
-            }
+            const clipCount = (status as any)?.result?.clips?.length || 0;
+            const realStatus = (status as any)?.status || (status as any)?.state;
+
+            setItems((prev) =>
+              prev.map((p) => {
+                if (p.id !== project.id) return p;
+                const updates: Partial<Project> = {};
+
+                // Update title if we got a real one
+                if (backendTitle && !backendTitle.startsWith('YouTube ')) {
+                  updates.title = backendTitle;
+                  updates.display_title = backendTitle;
+                }
+
+                // Update clip count from BullMQ result
+                if (clipCount > 0) {
+                  updates.clips_ready_count = clipCount;
+                }
+
+                // Fix stalled jobs: if project shows active/queued but backend says completed/failed
+                if (
+                  (p.status === 'active' || p.status === 'queued') &&
+                  (realStatus === 'completed' || realStatus === 'failed')
+                ) {
+                  updates.status = realStatus;
+                }
+
+                return Object.keys(updates).length > 0 ? { ...p, ...updates } : p;
+              })
+            );
           } catch {
-            // ignore - title fetch is best-effort
+            // ignore - enrichment is best-effort
           }
         })
       );
     };
 
-    fetchTitles();
+    enrichProjects();
 
     return () => {
       cancelled = true;
