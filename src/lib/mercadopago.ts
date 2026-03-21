@@ -1,7 +1,9 @@
 // Mercado Pago API Service
 // Conecta o frontend aos endpoints de pagamento do backend
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+import { getBackendUrl } from './backend-url';
+
+const API_BASE = getBackendUrl();
 const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 // ============================================
