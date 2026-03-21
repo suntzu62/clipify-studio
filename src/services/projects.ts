@@ -146,46 +146,6 @@ export async function listProjects(currentUserId?: string) {
     };
     });
 
-    // For jobs without real titles, fetch individually from backend (same approach as Dashboard)
-    const jobsMissingTitles = mapped.filter(
-      (p) => !p.display_title || p.display_title.startsWith('YouTube ')
-    );
-
-    if (jobsMissingTitles.length > 0) {
-      console.log('[listProjects] Fetching titles for', jobsMissingTitles.length, 'jobs');
-      const titleResults = await Promise.all(
-        jobsMissingTitles.slice(0, 15).map(async (project) => {
-          try {
-            const resp = await fetch(`${BACKEND_URL}/jobs/${project.id}`, {
-              headers: { 'x-api-key': API_KEY },
-            });
-            if (!resp.ok) return null;
-            const jobData = await resp.json();
-            const title = jobData.displayTitle || jobData.display_title;
-            if (title && !title.startsWith('YouTube ')) {
-              return { id: project.id, title };
-            }
-            return null;
-          } catch {
-            return null;
-          }
-        })
-      );
-
-      // Apply fetched titles
-      const titleMap = new Map<string, string>();
-      for (const r of titleResults) {
-        if (r) titleMap.set(r.id, r.title);
-      }
-      for (const project of mapped) {
-        const fetchedTitle = titleMap.get(project.id);
-        if (fetchedTitle) {
-          project.title = fetchedTitle;
-          project.display_title = fetchedTitle;
-        }
-      }
-    }
-
     return sortProjectsByDateDesc(mapped);
   } catch (error) {
     console.error('[listProjects] API error, falling back to localStorage:', error);

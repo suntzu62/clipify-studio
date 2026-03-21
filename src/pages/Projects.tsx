@@ -38,6 +38,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import NewProjectDialog from '@/components/projects/NewProjectDialog';
 import { ProjectCardPro } from '@/components/projects/ProjectCardPro';
 import { listProjects, deleteProject, updateProject, type Project } from '@/services/projects';
+import { getJobStatus } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
 import { MouseSpotlight } from '@/components/landing';
 
@@ -79,7 +80,7 @@ const stepItemVariants = {
 };
 
 const Projects = () => {
-  const { user } = useAuth();
+  const { user, getToken } = useAuth();
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -116,6 +117,49 @@ const Projects = () => {
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
+
+  // Fetch real titles from individual job endpoints (same approach as Dashboard)
+  useEffect(() => {
+    if (items.length === 0 || loading) return;
+
+    const jobsMissingTitles = items.filter(
+      (p) => !p.display_title || p.display_title.startsWith('YouTube ')
+    );
+
+    if (jobsMissingTitles.length === 0) return;
+
+    let cancelled = false;
+
+    const fetchTitles = async () => {
+      console.log('[Projects] Fetching titles for', jobsMissingTitles.length, 'jobs via individual endpoints');
+      await Promise.all(
+        jobsMissingTitles.slice(0, 20).map(async (project) => {
+          try {
+            const status = await getJobStatus(project.id, getToken);
+            const backendTitle = (status as any)?.display_title;
+            if (backendTitle && !cancelled) {
+              console.log('[Projects] Got title for', project.id, ':', backendTitle);
+              setItems((prev) =>
+                prev.map((p) =>
+                  p.id === project.id
+                    ? { ...p, title: backendTitle, display_title: backendTitle }
+                    : p
+                )
+              );
+            }
+          } catch {
+            // ignore - title fetch is best-effort
+          }
+        })
+      );
+    };
+
+    fetchTitles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items.length, loading, getToken]); // only re-run when items count changes
 
   // Handle edit project
   const handleEditProject = (project: Project) => {
