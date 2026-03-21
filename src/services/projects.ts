@@ -1,7 +1,6 @@
 import { getUserJobs } from "@/lib/storage";
-import { Job, getJobStatus } from "@/lib/jobs-api";
+import { Job } from "@/lib/jobs-api";
 import { extractVideoId } from "@/lib/youtube-metadata";
-import { getAuthHeader } from "@/lib/auth-token";
 
 export type Project = {
   id: string;
@@ -125,24 +124,10 @@ export async function listProjects(currentUserId?: string) {
     const data = (await response.json()) as BackendJob[];
     console.log('[listProjects] Found projects from API:', data.length);
 
-    // Build a title lookup from localStorage (same source Dashboard uses)
-    const localJobs = getUserJobs(userId);
-    const localTitleMap = new Map<string, string>();
-    for (const lj of localJobs) {
-      // Same priority as Dashboard's getProjectName
-      const metaTitle = lj.result?.metadata?.title?.trim();
-      const clipTitle = lj.result?.clips?.[0]?.title?.trim();
-      const title = metaTitle || clipTitle;
-      if (title && title !== 'Vídeo do YouTube') {
-        localTitleMap.set(lj.id, title);
-      }
-    }
-
     // Mapear os dados do backend para o formato Project
     const mapped = data.map((job): Project => {
       const fallbackTitle = fallbackVideoNameFromUrl(job.youtube_url);
-      const localTitle = localTitleMap.get(job.id);
-      const resolvedTitle = job.display_title || job.title || localTitle || fallbackTitle;
+      const resolvedTitle = job.display_title || job.title || fallbackTitle;
 
       return {
       id: job.id,
@@ -160,6 +145,46 @@ export async function listProjects(currentUserId?: string) {
       updated_at: job.updated_at,
     };
     });
+
+    // For jobs without real titles, fetch individually from backend (same approach as Dashboard)
+    const jobsMissingTitles = mapped.filter(
+      (p) => !p.display_title || p.display_title.startsWith('YouTube ')
+    );
+
+    if (jobsMissingTitles.length > 0) {
+      console.log('[listProjects] Fetching titles for', jobsMissingTitles.length, 'jobs');
+      const titleResults = await Promise.all(
+        jobsMissingTitles.slice(0, 15).map(async (project) => {
+          try {
+            const resp = await fetch(`${BACKEND_URL}/jobs/${project.id}`, {
+              headers: { 'x-api-key': API_KEY },
+            });
+            if (!resp.ok) return null;
+            const jobData = await resp.json();
+            const title = jobData.displayTitle || jobData.display_title;
+            if (title && !title.startsWith('YouTube ')) {
+              return { id: project.id, title };
+            }
+            return null;
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      // Apply fetched titles
+      const titleMap = new Map<string, string>();
+      for (const r of titleResults) {
+        if (r) titleMap.set(r.id, r.title);
+      }
+      for (const project of mapped) {
+        const fetchedTitle = titleMap.get(project.id);
+        if (fetchedTitle) {
+          project.title = fetchedTitle;
+          project.display_title = fetchedTitle;
+        }
+      }
+    }
 
     return sortProjectsByDateDesc(mapped);
   } catch (error) {
