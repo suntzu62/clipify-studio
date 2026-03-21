@@ -181,12 +181,26 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
         preferenceId,
       });
     } catch (error: any) {
-      logger.error({ error: error.message }, 'Erro ao criar assinatura');
+      logger.error({ error: error.message, stack: error.stack }, 'Erro ao criar assinatura');
 
       if (error.message.includes('já possui')) {
         return reply.status(409).send({
           error: 'CONFLICT',
           message: error.message,
+        });
+      }
+
+      if (error.message.includes('MERCADOPAGO') || error.message.includes('Pagamentos ainda não')) {
+        return reply.status(503).send({
+          error: 'PAYMENT_NOT_CONFIGURED',
+          message: 'Sistema de pagamentos não está configurado. Entre em contato com o suporte.',
+        });
+      }
+
+      if (error.message.includes('violates foreign key') || error.message.includes('profiles')) {
+        return reply.status(400).send({
+          error: 'PROFILE_NOT_FOUND',
+          message: 'Perfil de usuário não encontrado. Faça login novamente.',
         });
       }
 

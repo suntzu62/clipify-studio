@@ -198,8 +198,10 @@ export async function createSubscription(input: CreateSubscriptionInput): Promis
   }
 
   // Paid plan — create MercadoPago Preference
-  const config = getMpConfig();
-  const preference = new Preference(config);
+  if (!mpConfig) {
+    throw new Error('Pagamentos ainda não estão configurados. Configure MERCADOPAGO_ACCESS_TOKEN no servidor.');
+  }
+  const preference = new Preference(mpConfig);
   const externalRef = `sub_${randomUUID().replace(/-/g, '')}`;
   const price = getPrice(plan, input.billingCycle);
   const periodLabel = input.billingCycle === 'yearly' ? 'anual' : 'mensal';
