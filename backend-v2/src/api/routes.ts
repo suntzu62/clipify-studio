@@ -524,16 +524,24 @@ export async function registerRoutes(app: FastifyInstance) {
       const fetchYouTubeTitle = async (youtubeUrl: string): Promise<string | null> => {
         try {
           const videoIdMatch = youtubeUrl.match(/(?:youtu\.be\/|v=)([A-Za-z0-9_-]{11})/);
-          if (!videoIdMatch) return null;
+          if (!videoIdMatch) {
+            logger.debug({ youtubeUrl }, 'No video ID found in URL');
+            return null;
+          }
           const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoIdMatch[1]}&format=json`;
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 3000);
+          const tid = setTimeout(() => controller.abort(), 8000);
           const resp = await fetch(oembedUrl, { signal: controller.signal });
-          clearTimeout(timeout);
-          if (!resp.ok) return null;
+          clearTimeout(tid);
+          if (!resp.ok) {
+            logger.warn({ videoId: videoIdMatch[1], status: resp.status }, 'YouTube oembed failed');
+            return null;
+          }
           const data = await resp.json() as { title?: string };
+          logger.info({ videoId: videoIdMatch[1], title: data.title }, 'Fetched YouTube title');
           return data.title || null;
-        } catch {
+        } catch (err: any) {
+          logger.warn({ youtubeUrl, error: err.message }, 'YouTube oembed fetch error');
           return null;
         }
       };
@@ -549,6 +557,11 @@ export async function registerRoutes(app: FastifyInstance) {
         (j) => !j.display_title && j.youtube_url && !j.youtube_url.startsWith('upload://')
       );
       if (jobsMissingTitles.length > 0) {
+        logger.info({
+          count: jobsMissingTitles.length,
+          urls: jobsMissingTitles.slice(0, 3).map(j => j.youtube_url),
+        }, 'Fetching YouTube titles for jobs missing display_title');
+
         await Promise.all(
           jobsMissingTitles.slice(0, 10).map(async (job) => {
             try {
@@ -556,10 +569,12 @@ export async function registerRoutes(app: FastifyInstance) {
               if (title) {
                 job.display_title = title;
                 // Save to DB for future requests (fire-and-forget)
-                dbJobs.update(job.id, { title }).catch(() => {});
+                dbJobs.update(job.id, { title }).catch((e) => {
+                  logger.warn({ jobId: job.id, error: e.message }, 'Failed to save title to DB');
+                });
               }
-            } catch {
-              // ignore - title fetch is best-effort
+            } catch (err: any) {
+              logger.warn({ jobId: job.id, error: err.message }, 'Failed to fetch title');
             }
           })
         );
