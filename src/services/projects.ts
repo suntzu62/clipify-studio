@@ -1,6 +1,7 @@
 import { getUserJobs } from "@/lib/storage";
-import { Job } from "@/lib/jobs-api";
+import { Job, getJobStatus } from "@/lib/jobs-api";
 import { extractVideoId } from "@/lib/youtube-metadata";
+import { getAuthHeader } from "@/lib/auth-token";
 
 export type Project = {
   id: string;
@@ -124,17 +125,31 @@ export async function listProjects(currentUserId?: string) {
     const data = (await response.json()) as BackendJob[];
     console.log('[listProjects] Found projects from API:', data.length);
 
+    // Build a title lookup from localStorage (same source Dashboard uses)
+    const localJobs = getUserJobs(userId);
+    const localTitleMap = new Map<string, string>();
+    for (const lj of localJobs) {
+      // Same priority as Dashboard's getProjectName
+      const metaTitle = lj.result?.metadata?.title?.trim();
+      const clipTitle = lj.result?.clips?.[0]?.title?.trim();
+      const title = metaTitle || clipTitle;
+      if (title && title !== 'Vídeo do YouTube') {
+        localTitleMap.set(lj.id, title);
+      }
+    }
+
     // Mapear os dados do backend para o formato Project
     const mapped = data.map((job): Project => {
       const fallbackTitle = fallbackVideoNameFromUrl(job.youtube_url);
-      const resolvedTitle = job.display_title || job.title || fallbackTitle;
+      const localTitle = localTitleMap.get(job.id);
+      const resolvedTitle = job.display_title || job.title || localTitle || fallbackTitle;
 
       return {
       id: job.id,
       user_id: job.user_id,
       youtube_url: job.youtube_url,
       title: resolvedTitle,
-      display_title: job.display_title || fallbackTitle,
+      display_title: resolvedTitle,
       status: normalizeProjectStatus(job.status),
       progress: job.progress,
       source: job.source_type,
