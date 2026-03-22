@@ -1,34 +1,22 @@
-// Simple service worker for caching static assets
-const CACHE_NAME = 'cortai-v1';
-const STATIC_CACHE = [
-  '/',
-  '/src/critical.css',
-  '/src/index.css',
-];
-
+// Self-destroying service worker used only to flush stale caches from legacy deploys.
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(STATIC_CACHE))
-  );
+  event.waitUntil(self.skipWaiting());
 });
 
-self.addEventListener('fetch', (event) => {
-  // Only cache GET requests
-  if (event.request.method !== 'GET') return;
-  
-  // Cache static assets
-  if (event.request.url.includes('/src/') || 
-      event.request.url.includes('/assets/') ||
-      event.request.url.includes('.css') ||
-      event.request.url.includes('.js')) {
-    
-    event.respondWith(
-      caches.match(event.request)
-        .then((response) => {
-          // Return cached version or fetch from network
-          return response || fetch(event.request);
-        })
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    const cacheKeys = await caches.keys();
+    await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
+
+    await self.registration.unregister();
+
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    await Promise.all(
+      clients.map((client) => ('navigate' in client ? client.navigate(client.url) : Promise.resolve(undefined)))
     );
-  }
+  })());
+});
+
+self.addEventListener('fetch', () => {
+  // Intentionally empty. This worker exists only to remove stale cached assets.
 });
