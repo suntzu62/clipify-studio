@@ -1,0 +1,38 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="512"
+  height="512"
+  viewBox="0 0 512 512"
+  fill="none"
+>
+  <defs>
+    <linearGradient id="bgGradient" x1="64" y1="72" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#8B5CF6" />
+      <stop offset="55%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#22D3EE" />
+    </linearGradient>
+    <radialGradient id="glowGradient" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(380 128) rotate(128.092) scale(312.517 324.101)">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.28" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="playGradient" x1="256" y1="214" x2="344" y2="308" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#67E8F9" />
+      <stop offset="100%" stop-color="#22D3EE" />
+    </linearGradient>
+  </defs>
+
+  <rect x="32" y="32" width="448" height="448" rx="132" fill="url(#bgGradient)" />
+  <rect x="32" y="32" width="448" height="448" rx="132" fill="url(#glowGradient)" />
+  <rect x="76" y="76" width="360" height="360" rx="104" fill="#0A0F1F" fill-opacity="0.92" />
+  <path
+    d="M342 174C318 150 285 136 248 136C177 136 120 193 120 264C120 335 177 392 248 392C285 392 318 378 342 354"
+    stroke="#F8FAFC"
+    stroke-width="56"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M256 213.5C256 207.199 262.89 203.351 268.223 206.659L336.852 249.159C341.886 252.277 341.886 259.723 336.852 262.841L268.223 305.341C262.89 308.649 256 304.801 256 298.5V213.5Z"
+    fill="url(#playGradient)"
+  />
+</svg>
