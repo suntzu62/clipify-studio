@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription } from '@/components/ui/card';
-import { LogOut, Play, Settings, Video, Plus, CheckCircle2, Youtube, Sparkles, TrendingUp, User, ChevronDown, Loader2 } from 'lucide-react';
+import { LogOut, Play, Settings, Video, Plus, CheckCircle2, Youtube, Sparkles, TrendingUp, User, ChevronDown, Loader2, Crown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   DropdownMenu,
@@ -352,6 +352,17 @@ const Projects = () => {
                   <Badge variant="secondary" className="ml-auto">
                     {items.length}
                   </Badge>
+                </Link>
+              </motion.div>
+              <motion.div variants={sidebarItemVariants}>
+                <Link
+                  to="/billing"
+                  className="flex items-center justify-between px-3 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  <div className="flex items-center space-x-3">
+                    <Crown className="w-5 h-5" />
+                    <span>Plano</span>
+                  </div>
                 </Link>
               </motion.div>
               <motion.div variants={sidebarItemVariants}>

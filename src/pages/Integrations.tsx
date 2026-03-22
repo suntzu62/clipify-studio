@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { useYouTubeAccount } from '@/hooks/useYouTubeAccount';
 import { toast } from 'sonner';
-import { Play, Settings as SettingsIcon, Video, Cable, Youtube, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Play, Settings as SettingsIcon, Video, Cable, Youtube, CheckCircle2, AlertCircle, Crown } from 'lucide-react';
 
 const Integrations = () => {
   const { user, getToken } = useAuth();
@@ -99,6 +99,13 @@ const Integrations = () => {
               >
                 <Video className="w-5 h-5" />
                 <span>Meus Projetos</span>
+              </Link>
+              <Link
+                to="/billing"
+                className="flex items-center space-x-3 px-3 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <Crown className="w-5 h-5" />
+                <span>Plano</span>
               </Link>
               <Link
                 to="/settings"

@@ -16,7 +16,8 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
-  Shield
+  Shield,
+  Crown
 } from 'lucide-react';
 import { QuickCreate } from '@/components/QuickCreate';
 import { StatCard, WorkflowCard, EmptyState } from '@/components/dashboard';
@@ -448,6 +449,7 @@ const Dashboard = () => {
   const navItems = [
     { to: '/dashboard', icon: Play, label: 'Dashboard', active: true },
     { to: '/projects', icon: Video, label: 'Meus Projetos', active: false },
+    { to: '/billing', icon: Crown, label: 'Plano', active: false },
     { to: '/settings', icon: Settings, label: 'Configurações', active: false },
   ];
 
