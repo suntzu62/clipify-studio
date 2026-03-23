@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, Star } from "lucide-react";
 import { TiltCard, AnimatedText } from '@/components/landing';
+import { useAuth } from '@/contexts/AuthContext';
 
 const containerVariants = {
   hidden: {},
@@ -24,6 +25,7 @@ const cardVariants = {
 
 const Pricing = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const plans = [
     {
@@ -82,7 +84,10 @@ const Pricing = () => {
   ];
 
   const handleCta = (planId: string) => {
-    if (planId === "plan_free") {
+    if (user) {
+      // Logged in → go straight to billing
+      navigate("/billing");
+    } else if (planId === "plan_free") {
       navigate("/auth/register");
     } else {
       navigate(`/auth/register?plan=${planId}`);

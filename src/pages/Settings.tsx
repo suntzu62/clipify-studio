@@ -39,7 +39,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { useUserSettings } from '@/hooks/useUserSettings';
-import { getUsage, type UsageDTO } from '@/lib/usage';
+import { getUsageLimits, type UsageLimits } from '@/lib/mercadopago';
 import { api } from '@/lib/api-client';
 import { TiltCard, MouseSpotlight } from '@/components/landing';
 
@@ -93,7 +93,7 @@ const Settings = () => {
   const { user, signOut, refreshUser } = useAuth();
   const navigate = useNavigate();
   const { settings, updateSettings } = useUserSettings();
-  const [usage, setUsage] = useState<UsageDTO | null>(null);
+  const [usage, setUsage] = useState<UsageLimits | null>(null);
   const [usageLoading, setUsageLoading] = useState(true);
   const [profileName, setProfileName] = useState(user?.full_name || '');
   const [savingProfile, setSavingProfile] = useState(false);
@@ -113,7 +113,7 @@ const Settings = () => {
     const loadUsage = async () => {
       try {
         setUsageLoading(true);
-        const usageData = await getUsage();
+        const usageData = await getUsageLimits();
         if (active) {
           setUsage(usageData);
         }
@@ -140,9 +140,9 @@ const Settings = () => {
   }, [user?.id]);
 
   const planLabel = useMemo(() => {
-    if (!usage?.plan) return 'Free';
-    return usage.plan.toString();
-  }, [usage?.plan]);
+    if (!usage?.planName) return 'Free';
+    return usage.planName;
+  }, [usage?.planName]);
 
   const handleProfileSave = async () => {
     const trimmed = profileName.trim();

@@ -24,8 +24,7 @@ import { StatCard, WorkflowCard, EmptyState } from '@/components/dashboard';
 import { TiltCard, MouseSpotlight } from '@/components/landing';
 import { getJobStatus, Job } from '@/lib/jobs-api';
 import { deleteUserJob, getUserJobs, updateJobStatus } from '@/lib/storage';
-import { getUsage, UsageDTO } from '@/lib/usage';
-import { getAuthHeader } from '@/lib/auth-token';
+import { getUsageLimits, type UsageLimits } from '@/lib/mercadopago';
 import { Skeleton } from '@/components/ui/skeleton';
 import { extractVideoId } from '@/lib/youtube-metadata';
 import { deleteProject } from '@/services/projects';
@@ -77,7 +76,7 @@ const Dashboard = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [usage, setUsage] = useState<UsageDTO | null>(null);
+  const [usage, setUsage] = useState<UsageLimits | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [jobToDelete, setJobToDelete] = useState<Job | null>(null);
@@ -103,18 +102,10 @@ const Dashboard = () => {
 
         // Try to load usage data (pode falhar se API estiver offline)
         try {
-          const headers = await getAuthHeader(getToken);
-          const usageData = await getUsage(headers);
+          const usageData = await getUsageLimits();
           setUsage(usageData);
         } catch (usageError) {
           console.warn('Failed to load usage data:', usageError);
-          // Set default usage if API fails
-          setUsage({
-            minutesUsed: 0,
-            minutesQuota: 10,
-            remaining: 10,
-            plan: 'Free',
-          });
         }
 
         // Poll for job status updates for active jobs
@@ -633,16 +624,16 @@ const Dashboard = () => {
                             <div className="flex justify-between text-sm">
                               <span className="text-muted-foreground">Minutos Processados</span>
                               <span className="font-medium">
-                                {usage.minutesUsed} / {usage.minutesQuota} min
+                                {usage.minutes.used} / {usage.minutes.limit} min
                               </span>
                             </div>
                             <Progress
-                              value={(usage.minutesUsed / Math.max(usage.minutesQuota, 1)) * 100}
+                              value={(usage.minutes.used / Math.max(usage.minutes.limit, 1)) * 100}
                               className="h-2"
                             />
                             <div className="flex justify-between text-xs text-muted-foreground">
-                              <span>Plano {usage.plan}</span>
-                              <span>{usage.remaining} minutos restantes</span>
+                              <span>Plano {usage.planName}</span>
+                              <span>{usage.minutes.remaining} minutos restantes</span>
                             </div>
                           </>
                         ) : (
