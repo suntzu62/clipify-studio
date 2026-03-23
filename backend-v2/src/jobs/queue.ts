@@ -55,7 +55,14 @@ export async function getJobStatus(jobId: string) {
   }
 
   const state = await job.getState();
-  const progress = job.progress;
+  const rawProgress = job.progress;
+  // BullMQ stores whatever was passed to updateProgress().
+  // Our processor passes {jobId, step, progress, message}, so extract the number.
+  const progress = typeof rawProgress === 'object' && rawProgress !== null
+    ? (rawProgress as any).progress ?? 0
+    : typeof rawProgress === 'number'
+      ? rawProgress
+      : 0;
 
   return {
     id: job.id,

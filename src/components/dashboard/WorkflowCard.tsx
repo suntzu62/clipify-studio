@@ -35,6 +35,10 @@ export const WorkflowCard = ({
   onDelete,
   className,
 }: WorkflowCardProps) => {
+  // Guard: BullMQ may return progress as {progress, message} object
+  const safeProgress = typeof progress === 'object' && progress !== null
+    ? (progress as any).progress ?? 0
+    : typeof progress === 'number' ? progress : 0;
   const statusConfig: Record<string, {
     label: string;
     variant: 'default' | 'secondary' | 'destructive';
@@ -123,14 +127,14 @@ export const WorkflowCard = ({
                 {status === 'active' && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{progress}%</span>
+                      <span>{safeProgress}%</span>
                       <span>{clipsGenerated} de {totalClips} clipes</span>
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                       <motion.div
                         className="h-full bg-gradient-primary"
                         initial={{ width: 0 }}
-                        animate={{ width: `${progress}%` }}
+                        animate={{ width: `${safeProgress}%` }}
                         transition={{ duration: 0.8, ease: 'easeOut' }}
                       />
                     </div>

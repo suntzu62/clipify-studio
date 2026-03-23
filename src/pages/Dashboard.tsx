@@ -157,16 +157,21 @@ const Dashboard = () => {
       for (const job of activeJobs) {
         try {
           const status = await getJobStatus(job.id, getToken);
-          if (status && (status.status !== job.status || status.progress !== job.progress)) {
+          // BullMQ may return progress as {progress, message} object — normalize to number
+          const normalizedProgress = typeof status?.progress === 'object' && status.progress !== null
+            ? (status.progress as any).progress ?? 0
+            : typeof status?.progress === 'number' ? status.progress : 0;
+
+          if (status && (status.status !== job.status || normalizedProgress !== job.progress)) {
             updateJobStatus(user.id, job.id, {
               status: status.status,
-              progress: status.progress,
+              progress: normalizedProgress,
               error: status.error
             });
 
             // Update local state
             setJobs(prev => prev.map(j =>
-              j.id === job.id ? { ...j, ...status } : j
+              j.id === job.id ? { ...j, ...status, progress: normalizedProgress } : j
             ));
           }
           // Capture display_title from backend

@@ -23,6 +23,10 @@ interface ProjectCardProProps {
 }
 
 export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProps) => {
+  // Guard: BullMQ may store progress as {progress, message} object
+  const safeProgress = typeof safeProgress === 'object' && safeProgress !== null
+    ? (safeProgress as any).progress ?? 0
+    : typeof safeProgress === 'number' ? safeProgress : 0;
   // Extrair ID do vídeo do YouTube da URL
   const getYouTubeVideoId = (url: string | null): string | null => {
     if (!url) return null;
@@ -80,7 +84,7 @@ export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProp
   // Calcular score simulado (baseado no progresso e status)
   const getScore = () => {
     if (project.status === 'completed') return 85 + Math.floor(Math.random() * 15); // 85-100
-    if (project.status === 'active') return project.progress || 50;
+    if (project.status === 'active') return safeProgress || 50;
     return 0;
   };
 
@@ -229,12 +233,12 @@ export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProp
                 </motion.div>
 
                 {/* Progress Bar (se em processamento) */}
-                {project.status === 'active' && project.progress !== null && project.progress > 0 && (
+                {project.status === 'active' && safeProgress !== null && safeProgress > 0 && (
                   <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
                     <motion.div
                       className="h-full bg-gradient-primary"
                       initial={{ width: 0 }}
-                      animate={{ width: `${project.progress}%` }}
+                      animate={{ width: `${safeProgress}%` }}
                       transition={{ duration: 0.8, ease: 'easeOut' }}
                     />
                   </div>
@@ -265,9 +269,9 @@ export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProp
                   <Clock className="w-3 h-3" />
                   {getRelativeTime(project.created_at)}
                 </span>
-                {project.status === 'active' && project.progress !== null && (
+                {project.status === 'active' && safeProgress !== null && (
                   <span className="font-medium text-primary">
-                    {project.progress}%
+                    {safeProgress}%
                   </span>
                 )}
                 {project.status === 'completed' && (
