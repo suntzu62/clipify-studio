@@ -467,7 +467,7 @@ const Dashboard = () => {
 
             <div className="flex items-center space-x-4">
               <Badge variant="outline" className="hidden md:flex">
-                {usage?.plan || 'Free'} Plan
+                {usage?.planName || 'Free'} Plan
               </Badge>
               <span className="text-sm text-muted-foreground hidden md:block">
                 {user?.email}
