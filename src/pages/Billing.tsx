@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, useMotionValue, useTransform, animate } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { initPosthog } from "@/lib/posthog";
 import {
@@ -31,6 +32,7 @@ import {
   CreditCard,
   RotateCcw,
   CalendarCheck,
+  ArrowLeft,
   X,
 } from "lucide-react";
 import { FloatingOrbs, TiltCard, AnimatedText } from "@/components/landing";
@@ -221,6 +223,7 @@ const featureVariants = {
 // Main Component
 // ============================================
 const Billing = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
   const [usage, setUsage] = useState<UsageLimits | null>(null);
@@ -304,6 +307,15 @@ const Billing = () => {
     }
   };
 
+  const handleGoBack = () => {
+    if (window.history.state?.idx > 0) {
+      navigate(-1);
+      return;
+    }
+
+    navigate("/dashboard");
+  };
+
   const currentPlanId = subscription?.plan_id || "plan_free";
   const isFreeTier = !subscription || subscription.plan_id === "plan_free";
 
@@ -380,6 +392,21 @@ const Billing = () => {
 
       <div className="relative z-10 container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4 }}
+            className="mb-6"
+          >
+            <Button
+              variant="ghost"
+              onClick={handleGoBack}
+              className="gap-2 border border-white/10 bg-white/5 px-3 text-white/70 backdrop-blur-sm hover:bg-white/10 hover:text-white"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Voltar
+            </Button>
+          </motion.div>
 
           {/* Header */}
           <motion.div
