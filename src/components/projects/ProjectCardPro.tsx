@@ -24,9 +24,10 @@ interface ProjectCardProProps {
 
 export const ProjectCardPro = ({ project, onEdit, onDelete }: ProjectCardProProps) => {
   // Guard: BullMQ may store progress as {progress, message} object
-  const safeProgress = typeof safeProgress === 'object' && safeProgress !== null
-    ? (safeProgress as any).progress ?? 0
-    : typeof safeProgress === 'number' ? safeProgress : 0;
+  const rawProgress = project.progress;
+  const safeProgress = typeof rawProgress === 'object' && rawProgress !== null
+    ? (rawProgress as any).progress ?? 0
+    : typeof rawProgress === 'number' ? rawProgress : 0;
   // Extrair ID do vídeo do YouTube da URL
   const getYouTubeVideoId = (url: string | null): string | null => {
     if (!url) return null;
