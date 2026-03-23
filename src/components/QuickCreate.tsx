@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
+import { toastError } from '@/lib/error-messages';
 import { Zap, Loader2, CheckCircle2, XCircle, Sparkles, Captions, Scissors, Upload as UploadIcon, TrendingUp } from 'lucide-react';
 import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
 import { createTempConfig, startJobFromTempConfig, type Job } from '@/lib/jobs-api';
@@ -227,11 +228,7 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
           variant: "destructive"
         });
       } else {
-        toast({
-          title: "⚠️ Erro ao criar projeto",
-          description: errorMsg || "Tente novamente em alguns instantes.",
-          variant: "destructive"
-        });
+        toastError(toast, error, 'Erro ao criar projeto');
       }
     } finally {
       setIsSubmitting(false);

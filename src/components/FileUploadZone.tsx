@@ -7,6 +7,7 @@ import { Upload, FileVideo, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
+import { friendlyErrorMessage, toastError } from '@/lib/error-messages';
 import { cn } from '@/lib/utils';
 import { saveUserJob } from '@/lib/storage';
 import { Job, createJobFromUpload } from '@/lib/jobs-api';
@@ -122,12 +123,8 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
 
     } catch (err: any) {
       console.error('Upload error:', err);
-      setError(err.message || 'Falha no upload');
-      toast({
-        title: 'Erro no upload',
-        description: err.message || 'Não foi possível fazer upload do arquivo',
-        variant: 'destructive'
-      });
+      setError(friendlyErrorMessage(err));
+      toastError(toast, err, 'Erro no upload');
     } finally {
       setUploading(false);
     }

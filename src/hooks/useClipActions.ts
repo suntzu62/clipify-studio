@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useToast } from './use-toast';
+import { toastError } from '@/lib/error-messages';
 
 export type SocialPlatform = 'youtube' | 'tiktok' | 'instagram';
 export type ClipStatus = 'processing' | 'ready' | 'failed';
@@ -163,11 +164,7 @@ export const useClipActions = ({
         return { success: false, error: 'Coming soon' };
       }
 
-      toast({
-        title: 'Erro ao publicar',
-        description: error.message || 'Não foi possível publicar o vídeo',
-        variant: 'destructive',
-      });
+      toastError(toast, error, 'Erro ao publicar');
 
       return { success: false, error: error.message };
     } finally {

@@ -40,6 +40,7 @@ import { ProjectCardPro } from '@/components/projects/ProjectCardPro';
 import { listProjects, deleteProject, updateProject, type Project } from '@/services/projects';
 import { getJobStatus } from '@/lib/jobs-api';
 import { useToast } from '@/hooks/use-toast';
+import { toastError } from '@/lib/error-messages';
 import { MouseSpotlight } from '@/components/landing';
 
 /* ── Framer variants ── */
@@ -107,8 +108,7 @@ const Projects = () => {
       setItems(data);
     } catch (err: unknown) {
       console.error('[Projects] Error fetching projects:', err);
-      const message = err instanceof Error ? err.message : 'Tente novamente.';
-      toast({ title: 'Erro ao carregar projetos', description: message, variant: 'destructive' });
+      toastError(toast, err, 'Erro ao carregar projetos');
     } finally {
       setLoading(false);
     }
@@ -218,11 +218,7 @@ const Projects = () => {
       setNewTitle('');
     } catch (error) {
       console.error('[Projects] Error updating project:', error);
-      toast({
-        title: 'Erro ao atualizar projeto',
-        description: error instanceof Error ? error.message : 'Tente novamente',
-        variant: 'destructive',
-      });
+      toastError(toast, error, 'Erro ao atualizar projeto');
     } finally {
       setIsUpdating(false);
     }
@@ -253,11 +249,7 @@ const Projects = () => {
       setProjectToDelete(null);
     } catch (error) {
       console.error('[Projects] Error deleting project:', error);
-      toast({
-        title: 'Erro ao excluir projeto',
-        description: error instanceof Error ? error.message : 'Tente novamente',
-        variant: 'destructive',
-      });
+      toastError(toast, error, 'Erro ao excluir projeto');
     } finally {
       setIsDeleting(false);
     }

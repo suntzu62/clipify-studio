@@ -17,6 +17,7 @@ import { ClipCardSkeletonCompact } from './ClipCardSkeleton';
 import { ClipShortsModal } from './ClipCardShortsModal';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
+import { toastError } from '@/lib/error-messages';
 
 interface ClipCardEnhancedProps {
   clip: Clip;
@@ -252,11 +253,7 @@ export const ClipCardEnhanced = ({ clip, index, jobId = '', apiKey = import.meta
 
     } catch (error: any) {
       console.error('[SubtitleCustomizer] Exceção ao reprocessar:', error);
-      toast({
-        title: 'Erro ao reprocessar',
-        description: error.message || 'Não foi possível reprocessar o clip. Tente novamente.',
-        variant: 'destructive',
-      });
+      toastError(toast, error, 'Erro ao reprocessar');
     } finally {
       setReprocessing(false);
     }

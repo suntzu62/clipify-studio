@@ -8,6 +8,7 @@ import { useState, useEffect, useRef, FormEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
+import { toastError } from "@/lib/error-messages";
 import { createTempConfig } from "@/lib/jobs-api";
 import posthog from "posthog-js";
 import { Loader2, Youtube, Cloud, Video, Upload } from "lucide-react";
@@ -82,7 +83,7 @@ export default function Hero() {
       // Navigate to configuration page instead of direct processing
       navigate(`/projects/configure/${tempId}`);
     } catch (e: any) {
-      toast({ title: 'Falha ao criar configuração', description: e?.message || String(e), variant: 'destructive' });
+      toastError(toast, e, 'Falha ao criar configuração');
     } finally {
       setLoading(false);
     }

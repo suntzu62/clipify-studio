@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Separator } from '@/components/ui/separator';
 import { Chrome } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { friendlyErrorMessage } from '@/lib/error-messages';
 import { getBackendUrl } from '@/lib/backend-url';
 
 const Login = () => {
@@ -47,7 +48,7 @@ const Login = () => {
         title: 'Erro ao fazer login',
         description: error.message === 'Invalid login credentials'
           ? 'Email ou senha incorretos'
-          : error.message,
+          : friendlyErrorMessage(error),
         variant: 'destructive',
       });
     } else {

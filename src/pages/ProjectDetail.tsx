@@ -35,6 +35,7 @@ import { getUserJobs, updateJobStatus, saveUserJob } from '@/lib/storage';
 import { Job, createTempConfig } from '@/lib/jobs-api';
 import { getBackendUrl } from '@/lib/backend-url';
 import { useToast } from '@/hooks/use-toast';
+import { toastError } from '@/lib/error-messages';
 import { createProjectTitle } from '@/lib/youtube-metadata';
 import posthog from 'posthog-js';
 import { isValidYouTubeUrl } from '@/lib/youtube';
@@ -352,11 +353,7 @@ export default function ProjectDetail() {
       toast({ title: "Novo processamento criado!", description: "Revise as configurações e tente novamente." });
       navigate(`/projects/configure/${tempId}`);
     } catch (error: any) {
-      toast({
-        title: "Erro ao reprocessar",
-        description: error.message || "Não foi possível criar um novo processamento. Tente criar um novo projeto.",
-        variant: "destructive",
-      });
+      toastError(toast, error, "Erro ao reprocessar");
     } finally {
       setIsRetrying(false);
     }

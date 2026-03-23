@@ -51,22 +51,39 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[ErrorBoundary]', error, info);
+  }
   render() {
     if (this.state.error) {
       return (
         <div className="min-h-screen bg-background flex items-center justify-center p-8">
-          <div className="max-w-lg text-center space-y-4">
-            <h1 className="text-2xl font-bold text-foreground">Algo deu errado</h1>
-            <p className="text-muted-foreground">{this.state.error.message}</p>
-            <pre className="text-xs text-left bg-muted p-4 rounded overflow-auto max-h-40">
-              {this.state.error.stack}
-            </pre>
-            <button
-              onClick={() => { this.setState({ error: null }); window.location.hash = '#/dashboard'; window.location.reload(); }}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
-            >
-              Recarregar
-            </button>
+          <div className="max-w-md text-center space-y-6">
+            <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <svg className="w-8 h-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">Ops! Algo deu errado</h1>
+              <p className="mt-2 text-muted-foreground">
+                Não se preocupe, isso é temporário. Tente recarregar a página.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => { this.setState({ error: null }); window.location.reload(); }}
+                className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 font-medium transition-colors"
+              >
+                Recarregar página
+              </button>
+              <button
+                onClick={() => { this.setState({ error: null }); window.location.hash = '#/dashboard'; window.location.reload(); }}
+                className="px-6 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Ir para o Dashboard
+              </button>
+            </div>
           </div>
         </div>
       );
