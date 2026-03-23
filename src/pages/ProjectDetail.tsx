@@ -414,7 +414,7 @@ export default function ProjectDetail() {
   const prioritizedReadyClips = highlightedReadyClip
     ? [highlightedReadyClip, ...readyClips.filter((clip) => clip.id !== highlightedReadyClip.id)]
     : readyClips;
-  const liveDeckClips = [...prioritizedReadyClips.slice(0, 3), ...queuedClips].slice(0, 3);
+  const liveDeckClips = [...prioritizedReadyClips, ...queuedClips];
   const remixReadyClips = sortedClips.filter((clip) => clip.remixPackage?.variants?.length);
   const selectedRemixClip =
     remixReadyClips.find((clip) => clip.id === selectedRemixClipId) || remixReadyClips[0] || null;
@@ -1206,7 +1206,8 @@ export default function ProjectDetail() {
                       </Badge>
                     </div>
 
-                    <div className="relative mt-8 h-[430px] md:h-[470px]" style={{ perspective: '1400px' }}>
+                    <div className="relative mt-8 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-4 -mx-2 px-2" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.15) transparent' }}>
+                      <div className="flex gap-4" style={{ width: `${liveDeckClips.length * 340}px` }}>
                       {liveDeckClips.map((clip, index) => {
                         const isReadyCard = clip.status === 'ready';
                         const isFreshReadyCard = isReadyCard && clip.id === highlightedReadyClipId;
@@ -1216,14 +1217,7 @@ export default function ProjectDetail() {
                         return (
                           <div
                             key={`${clip.id}-${index}`}
-                            className="absolute inset-x-0 transition-all duration-700 ease-out"
-                            style={{
-                              top: `${index * 56}px`,
-                              zIndex: 40 - index,
-                              opacity: 1 - index * 0.12,
-                              transform: `translateY(${index * 8}px) scale(${1 - index * 0.05}) rotateX(${index === 0 ? 0 : 10}deg) translateZ(-${index * 60}px)`,
-                              transformOrigin: 'top center',
-                            }}
+                            className="snap-start flex-shrink-0 w-[320px] transition-all duration-500 ease-out"
                           >
                             <div className={cn(
                               'relative overflow-hidden rounded-[30px] border shadow-[0_30px_80px_rgba(0,0,0,0.35)]',
@@ -1340,6 +1334,7 @@ export default function ProjectDetail() {
                           </div>
                         );
                       })}
+                      </div>
                     </div>
 
                     <div className="mt-6 grid gap-3 md:grid-cols-3">
