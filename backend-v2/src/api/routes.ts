@@ -677,8 +677,27 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     if (!status && dbJob) {
-      const dbState = dbJob.status || 'queued';
+      let dbState = dbJob.status || 'queued';
       const progressValue = Number(dbJob.progress || 0);
+
+      // Auto-detect stalled jobs: active/processing for more than 30 minutes without updates
+      const STALL_THRESHOLD_MS = 30 * 60 * 1000;
+      if (['active', 'processing', 'queued'].includes(dbState) && dbJob.updated_at) {
+        const lastUpdate = new Date(dbJob.updated_at).getTime();
+        const elapsed = Date.now() - lastUpdate;
+        if (elapsed > STALL_THRESHOLD_MS) {
+          logger.warn(
+            { jobId, dbState, lastUpdate: dbJob.updated_at, elapsedMs: elapsed },
+            'Auto-recovering stalled job detected via status endpoint'
+          );
+          await dbJobs.update(jobId, {
+            status: 'failed',
+            error: 'O processamento travou e foi encerrado automaticamente. Tente criar um novo projeto.',
+          });
+          dbState = 'failed';
+        }
+      }
+
       const remixLookup = getRemixLookup(dbJob.metadata);
       const dbClipRows = await fetchJobClipSummaries(jobId);
 
@@ -694,7 +713,7 @@ export async function registerRoutes(app: FastifyInstance) {
         progress: { progress: progressValue, message: dbJob.current_step_message || '' },
         result: resultPayload,
         display_title: displayTitle,
-        error: dbState === 'failed' ? (dbJob.error || 'Unknown error') : null,
+        error: dbState === 'failed' ? (dbJob.error || 'O processamento travou. Tente novamente.') : null,
         finishedAt: dbJob.completed_at ? new Date(dbJob.completed_at).toISOString() : null,
       };
     }
@@ -706,9 +725,43 @@ export async function registerRoutes(app: FastifyInstance) {
       (queueFailedReason.includes('stalled') || queueFailedReason.includes('lock'));
 
     if (queueStalled && dbJob && dbJob.status && dbJob.status !== 'failed') {
+      // Queue says stalled but DB says still active — check if truly stuck
+      const STALL_THRESHOLD_MS = 30 * 60 * 1000;
+      const lastUpdate = dbJob.updated_at ? new Date(dbJob.updated_at).getTime() : 0;
+      const elapsed = Date.now() - lastUpdate;
+
+      if (elapsed > STALL_THRESHOLD_MS) {
+        logger.warn(
+          { jobId, queueState: status.state, dbState: dbJob.status, elapsedMs: elapsed },
+          'Queue stalled AND DB stale — marking job as failed'
+        );
+        await dbJobs.update(jobId, {
+          status: 'failed',
+          error: 'O processamento travou e foi encerrado automaticamente. Tente criar um novo projeto.',
+        });
+
+        const remixLookup = getRemixLookup(dbJob.metadata);
+        const dbClipRows = await fetchJobClipSummaries(jobId);
+        const resultPayload = dbClipRows.length > 0
+          ? { clips: dbClipRows.map((clip) => transformClipForResponse(clip, jobId, remixLookup)) }
+          : null;
+
+        return {
+          jobId: dbJob.id,
+          state: 'failed',
+          status: 'failed',
+          currentStep: dbJob.current_step || 'ingest',
+          progress: { progress: Number(dbJob.progress || 0), message: dbJob.current_step_message || '' },
+          result: resultPayload,
+          display_title: displayTitle,
+          error: 'O processamento travou e foi encerrado automaticamente. Tente criar um novo projeto.',
+          finishedAt: null,
+        };
+      }
+
       logger.warn(
         { jobId, queueState: status.state, queueFailedReason: status.failedReason, dbState: dbJob.status },
-        'Queue reported stalled job; preferring database state'
+        'Queue reported stalled job; preferring database state (still within threshold)'
       );
 
       const dbState = dbJob.status || 'queued';

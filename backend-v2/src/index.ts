@@ -9,6 +9,7 @@ import { registerRoutes } from './api/routes.js';
 import { verifyToken } from './services/auth.service.js';
 import { getJobExecutionDecision } from './jobs/execution-mode.js';
 import { recoverStaleInlineJobs } from './jobs/inline-queue.js';
+import { pool } from './services/database.service.js';
 
 // ============================================
 // CRIAR SERVIDOR FASTIFY
@@ -174,6 +175,39 @@ try {
     const recoveredJobs = await recoverStaleInlineJobs();
     logger.info({ recoveredJobs }, 'Inline queue recovery completed');
   }
+  // ============================================
+  // PERIODIC STALL RECOVERY (every 5 min)
+  // ============================================
+  const STALL_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  const STALL_THRESHOLD_MINUTES = 30;
+
+  const recoverStalledJobs = async () => {
+    try {
+      const result = await pool.query(
+        `UPDATE jobs
+         SET status = 'failed',
+             error = 'O processamento travou e foi encerrado automaticamente. Tente criar um novo projeto.',
+             updated_at = NOW()
+         WHERE status IN ('active', 'processing', 'queued')
+           AND updated_at < NOW() - INTERVAL '${STALL_THRESHOLD_MINUTES} minutes'
+         RETURNING id, current_step`
+      );
+      if (result.rowCount && result.rowCount > 0) {
+        logger.warn(
+          { count: result.rowCount, jobs: result.rows },
+          'Auto-recovered stalled jobs'
+        );
+      }
+    } catch (err: any) {
+      logger.error({ error: err.message }, 'Stall recovery sweep failed');
+    }
+  };
+
+  // Run once at startup, then periodically
+  await recoverStalledJobs();
+  setInterval(recoverStalledJobs, STALL_CHECK_INTERVAL_MS);
+  logger.info(`🔄 Stall recovery sweep running every ${STALL_CHECK_INTERVAL_MS / 60000} min`);
+
 } catch (error) {
   logger.error(error, 'Failed to start server');
   process.exit(1);
