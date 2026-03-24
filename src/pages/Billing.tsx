@@ -6,12 +6,14 @@ import { initPosthog } from "@/lib/posthog";
 import {
   getUsageLimits,
   createCardPayment,
+  createPixPayment,
   getCurrentSubscription,
   cancelSubscription,
   translateStatus,
   getStatusBadgeVariant,
   type UsageLimits,
   type Subscription,
+  type PixPaymentResult,
 } from "@/lib/mercadopago";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,10 @@ import {
   CalendarCheck,
   ArrowLeft,
   X,
+  QrCode,
+  Copy,
+  CheckCircle2,
+  Timer,
 } from "lucide-react";
 import { FloatingOrbs, TiltCard, AnimatedText } from "@/components/landing";
 import { cn } from "@/lib/utils";
@@ -233,6 +239,9 @@ const Billing = () => {
   const [creating, setCreating] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [paymentMethodDialog, setPaymentMethodDialog] = useState<string | null>(null);
+  const [pixData, setPixData] = useState<PixPaymentResult | null>(null);
+  const [pixCopied, setPixCopied] = useState(false);
 
   const loadUsage = async () => {
     if (!user) return;
@@ -265,8 +274,14 @@ const Billing = () => {
     loadUsage();
   }, [user]);
 
-  const handleCheckout = async (planId: string) => {
+  const handleSelectPlan = (planId: string) => {
     if (!user) return;
+    setPaymentMethodDialog(planId);
+  };
+
+  const handleCardCheckout = async (planId: string) => {
+    if (!user) return;
+    setPaymentMethodDialog(null);
 
     try {
       setCreating(planId);
@@ -281,6 +296,42 @@ const Billing = () => {
       });
     } finally {
       setCreating(null);
+    }
+  };
+
+  const handlePixCheckout = async (planId: string) => {
+    if (!user) return;
+    setPaymentMethodDialog(null);
+
+    try {
+      setCreating(planId);
+      const result = await createPixPayment(planId, "monthly");
+      setPixData(result);
+    } catch (error) {
+      console.error("PIX checkout error:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível gerar o PIX. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setCreating(null);
+    }
+  };
+
+  const handleCopyPix = async () => {
+    if (!pixData?.pix.copyPaste) return;
+    try {
+      await navigator.clipboard.writeText(pixData.pix.copyPaste);
+      setPixCopied(true);
+      setTimeout(() => setPixCopied(false), 3000);
+      toast({ title: "Código PIX copiado!" });
+    } catch {
+      toast({
+        title: "Erro ao copiar",
+        description: "Copie o código manualmente.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -662,7 +713,7 @@ const Billing = () => {
                           ) : (
                             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                               <Button
-                                onClick={() => handleCheckout(plan.id)}
+                                onClick={() => handleSelectPlan(plan.id)}
                                 disabled={creating === plan.id}
                                 className={cn(
                                   "w-full h-12 text-base font-semibold gap-2 transition-all",
@@ -722,6 +773,140 @@ const Billing = () => {
           </motion.div>
         </div>
       </div>
+
+      {/* Payment Method Selection Dialog */}
+      {paymentMethodDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="relative w-full max-w-md mx-4"
+          >
+            <Card className="glass-card border border-white/10">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold">Método de pagamento</h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPaymentMethodDialog(null)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                <div className="grid gap-3">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => handleCardCheckout(paymentMethodDialog)}
+                    className="flex items-center gap-4 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors text-left"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                      <CreditCard className="w-6 h-6 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-semibold">Cartão de Crédito</p>
+                      <p className="text-sm text-muted-foreground">Até 18x sem cartão</p>
+                    </div>
+                    <ArrowRight className="w-4 h-4 ml-auto text-muted-foreground" />
+                  </motion.button>
+
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => handlePixCheckout(paymentMethodDialog)}
+                    className="flex items-center gap-4 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors text-left"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-green-500/10 flex items-center justify-center">
+                      <QrCode className="w-6 h-6 text-green-400" />
+                    </div>
+                    <div>
+                      <p className="font-semibold">PIX</p>
+                      <p className="text-sm text-muted-foreground">Aprovação instantânea</p>
+                    </div>
+                    <ArrowRight className="w-4 h-4 ml-auto text-muted-foreground" />
+                  </motion.button>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      )}
+
+      {/* PIX QR Code Modal */}
+      {pixData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="relative w-full max-w-md mx-4"
+          >
+            <Card className="glass-card border border-white/10">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold">Pague com PIX</h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setPixData(null); loadUsage(); }}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                <div className="text-center">
+                  {/* QR Code */}
+                  {pixData.pix.qrCodeBase64 && (
+                    <div className="inline-block p-4 bg-white rounded-2xl mb-4">
+                      <img
+                        src={`data:image/png;base64,${pixData.pix.qrCodeBase64}`}
+                        alt="QR Code PIX"
+                        className="w-48 h-48"
+                      />
+                    </div>
+                  )}
+
+                  {/* Copy Paste Code */}
+                  {pixData.pix.copyPaste && (
+                    <div className="mb-4">
+                      <p className="text-sm text-muted-foreground mb-2">Ou copie o código PIX:</p>
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-white/5 border border-white/10">
+                        <code className="text-xs flex-1 truncate text-left">
+                          {pixData.pix.copyPaste}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleCopyPix}
+                          className="shrink-0"
+                        >
+                          {pixCopied ? (
+                            <CheckCircle2 className="w-4 h-4 text-green-400" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Timer */}
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Timer className="w-4 h-4" />
+                    <span>Expira em 30 minutos</span>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground mt-4">
+                    Após o pagamento, sua assinatura será ativada automaticamente.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
