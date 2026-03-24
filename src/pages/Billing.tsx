@@ -367,8 +367,9 @@ const Billing = () => {
     navigate("/dashboard");
   };
 
-  const currentPlanId = subscription?.plan_id || "plan_free";
-  const isFreeTier = !subscription || subscription.plan_id === "plan_free";
+  const isPaidAndActive = subscription && subscription.status === "active" && subscription.plan_id !== "plan_free";
+  const currentPlanId = isPaidAndActive ? subscription.plan_id : "plan_free";
+  const isFreeTier = !isPaidAndActive;
 
   // ============================================
   // Loading State

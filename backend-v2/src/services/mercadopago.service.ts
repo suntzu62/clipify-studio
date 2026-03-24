@@ -156,7 +156,7 @@ export async function getUserSubscription(userId: string): Promise<Subscription 
     `SELECT s.*, p.name as plan_name
      FROM subscriptions s
      JOIN plans p ON p.id = s.plan_id
-     WHERE s.user_id = $1 AND s.status IN ('active', 'authorized', 'pending')
+     WHERE s.user_id = $1 AND s.status IN ('active', 'authorized')
      ORDER BY s.created_at DESC LIMIT 1`,
     [userId]
   );
