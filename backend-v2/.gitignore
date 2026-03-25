@@ -36,3 +36,5 @@ Thumbs.db
 # Temp
 /tmp
 *.tmp
+*-player-script.js
+debug-download.mjs

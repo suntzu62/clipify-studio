@@ -61,7 +61,7 @@ function jobToProject(job: Job, userId: string): Project {
 }
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-const API_KEY = import.meta.env.VITE_API_KEY || '';
+const DEV_API_KEY = import.meta.env.DEV ? (import.meta.env.VITE_API_KEY || '') : '';
 
 function normalizeProjectStatus(status: string | null | undefined): string {
   const value = (status || '').toLowerCase();
@@ -111,9 +111,10 @@ export async function listProjects(currentUserId?: string) {
     const response = await fetch(
       `${BACKEND_URL}/jobs?userId=${encodeURIComponent(userId)}&includeLegacy=true`,
       {
-      headers: {
-        'x-api-key': API_KEY,
-      },
+        headers: {
+          ...(DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : {}),
+        },
+        credentials: 'include',
       }
     );
 
@@ -168,8 +169,9 @@ export async function createProject(input: CreateProjectInput, currentUserId?: s
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
+      ...(DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : {}),
     },
+    credentials: 'include',
     body: JSON.stringify({
       userId: userId,
       sourceType: 'youtube',
@@ -232,8 +234,9 @@ export async function updateProject(id: string, updates: { title?: string }) {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
+      ...(DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : {}),
     },
+    credentials: 'include',
     body: JSON.stringify(updates),
   });
 
@@ -249,8 +252,9 @@ export async function deleteProject(id: string) {
   const response = await fetch(`${BACKEND_URL}/jobs/${id}`, {
     method: 'DELETE',
     headers: {
-      'x-api-key': API_KEY,
+      ...(DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : {}),
     },
+    credentials: 'include',
   });
 
   if (!response.ok) {

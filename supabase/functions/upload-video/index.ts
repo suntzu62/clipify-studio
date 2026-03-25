@@ -1,19 +1,21 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { requireUser } from "../_shared/auth.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { buildCorsHeaders, handleCorsPreflight, rejectDisallowedOrigin } from "../_shared/cors.ts";
+import { sanitizeStorageFilename } from "../_shared/security.ts";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
 const ALLOWED_TYPES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska'];
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req, "POST, OPTIONS");
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return handleCorsPreflight(req, "POST, OPTIONS");
+  }
+
+  const originRejection = rejectDisallowedOrigin(req);
+  if (originRejection) {
+    return originRejection;
   }
 
   const auth = await requireUser(req);
@@ -75,9 +77,10 @@ serve(async (req) => {
     }
 
     // Generate unique job ID and storage path
+    const safeFileName = sanitizeStorageFilename(file.name);
     const jobId = `upload-${Date.now()}-${crypto.randomUUID().split('-')[0]}`;
     const timestamp = Date.now();
-    const storagePath = `uploads/${userId}/${timestamp}/${file.name}`;
+    const storagePath = `uploads/${userId}/${timestamp}/${safeFileName}`;
     
     // Upload to storage bucket 'raw'
     const fileBuffer = await file.arrayBuffer();
@@ -123,12 +126,12 @@ serve(async (req) => {
     console.log(`[upload-video] Created job ${jobId} for user ${userId}, file: ${file.name}`);
 
     return new Response(
-      JSON.stringify({ 
-        jobId,
-        storagePath,
-        fileName: file.name,
-        fileSize: file.size,
-      }),
+        JSON.stringify({ 
+          jobId,
+          storagePath,
+          fileName: safeFileName,
+          fileSize: file.size,
+        }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     );
 

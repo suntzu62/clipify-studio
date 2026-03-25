@@ -383,15 +383,7 @@ export default function ProjectConfigure() {
     const loadTempConfig = async () => {
       try {
         const baseUrl = getBackendUrl();
-        const apiKey = import.meta.env.VITE_API_KEY || '';
-        const headers: Record<string, string> = {};
-
-        if (apiKey) {
-          headers['X-API-Key'] = apiKey;
-        }
-
         const response = await fetchWithTimeout(`${baseUrl}/jobs/temp/${tempId}`, {
-          headers,
           credentials: 'include',
         }, 20000);
         if (!response.ok) {
@@ -442,14 +434,9 @@ export default function ProjectConfigure() {
     setProcessing(true);
     try {
       const baseUrl = getBackendUrl();
-      const apiKey = import.meta.env.VITE_API_KEY || '';
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-
-      if (apiKey) {
-        headers['X-API-Key'] = apiKey;
-      }
 
       const requestBody = {
         clipSettings: config.clipSettings,

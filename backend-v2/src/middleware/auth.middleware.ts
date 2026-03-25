@@ -61,7 +61,10 @@ export async function authenticateJWT(
 
     logger.debug({ userId: decoded.userId }, 'User authenticated');
   } catch (error) {
-    logger.error({ error }, 'Authentication error');
+    logger.error(
+      { error: error instanceof Error ? error.message : 'authentication_failed' },
+      'Authentication error'
+    );
     return reply.code(401).send({
       error: 'Unauthorized',
       message: 'Authentication failed',

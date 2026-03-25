@@ -7,6 +7,10 @@ import { env } from '../config/env.js';
 import { createLogger } from '../config/logger.js';
 
 const logger = createLogger('admin-routes');
+const INTERNAL_ERROR_RESPONSE = {
+  error: 'INTERNAL_ERROR',
+  message: 'Internal server error',
+} as const;
 
 /**
  * Safe query — returns 0 / empty rows if table doesn't exist
@@ -92,7 +96,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       logger.error({ error: error.message }, 'Error fetching admin stats');
-      return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
+      return reply.status(500).send(INTERNAL_ERROR_RESPONSE);
     }
   });
 
@@ -122,7 +126,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       return reply.send(rows);
     } catch (error: any) {
       logger.error({ error: error.message }, 'Error fetching admin users');
-      return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
+      return reply.status(500).send(INTERNAL_ERROR_RESPONSE);
     }
   });
 
@@ -153,7 +157,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       return reply.send(rows);
     } catch (error: any) {
       logger.error({ error: error.message }, 'Error fetching admin jobs');
-      return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
+      return reply.status(500).send(INTERNAL_ERROR_RESPONSE);
     }
   });
 
@@ -176,7 +180,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       return reply.send(rows);
     } catch (error: any) {
       logger.error({ error: error.message }, 'Error fetching admin payments');
-      return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
+      return reply.status(500).send(INTERNAL_ERROR_RESPONSE);
     }
   });
 
@@ -192,7 +196,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       await pool.query('SELECT 1');
       checks.database = { status: 'ok', latencyMs: Date.now() - start };
     } catch (error: any) {
-      checks.database = { status: 'error', message: error.message };
+      logger.warn({ error: error.message }, 'Admin system check: database failed');
+      checks.database = { status: 'error' };
     }
 
     // Redis
@@ -201,14 +206,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       await redis.ping();
       checks.redis = { status: 'ok', latencyMs: Date.now() - start };
     } catch (error: any) {
-      checks.redis = { status: 'error', message: error.message };
+      logger.warn({ error: error.message }, 'Admin system check: redis failed');
+      checks.redis = { status: 'error' };
     }
 
     // Queue
     try {
       checks.queue = await getQueueHealth();
     } catch (error: any) {
-      checks.queue = { status: 'error', message: error.message };
+      logger.warn({ error: error.message }, 'Admin system check: queue failed');
+      checks.queue = { status: 'error' };
     }
 
     // Process
@@ -270,7 +277,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       logger.error({ error: error.message }, 'Error recovering stalled jobs');
-      return reply.status(500).send({ error: 'INTERNAL_ERROR', message: error.message });
+      return reply.status(500).send(INTERNAL_ERROR_RESPONSE);
     }
   });
 }

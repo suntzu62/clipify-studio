@@ -2,6 +2,7 @@ import { getAuthHeader } from './auth-token';
 import { getBackendUrl } from './backend-url';
 
 const BACKEND_URL = getBackendUrl();
+const DEV_API_KEY = import.meta.env.DEV ? (import.meta.env.VITE_API_KEY || '') : '';
 
 interface RemixVariant {
   platform: 'tiktok' | 'instagram_reels' | 'youtube_shorts' | 'linkedin';
@@ -124,13 +125,12 @@ export async function enqueueFromUrl(
   getToken?: () => Promise<string | null>
 ) {
   // Use backend-v2 API in development
-  const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_API_KEY);
+  const useLocalAPI = Boolean(DEV_API_KEY);
 
   if (useLocalAPI) {
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_API_KEY,
+      'x-api-key': DEV_API_KEY,
     } as Record<string, string>;
 
     // Get user ID from token if available
@@ -157,6 +157,7 @@ export async function enqueueFromUrl(
       method: 'POST',
       headers,
       body: JSON.stringify(jobData),
+      credentials: 'include',
     });
 
     const data = await resp.json().catch(() => ({}));
@@ -171,7 +172,6 @@ export async function enqueueFromUrl(
     // Production: use backend API
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_API_KEY,
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
@@ -206,13 +206,12 @@ export async function enqueuePipeline(
   getToken?: () => Promise<string | null>
 ) {
   // Use backend-v2 API in development
-  const useLocalAPI = import.meta.env.DEV &&
-    Boolean(import.meta.env.VITE_API_KEY);
+  const useLocalAPI = Boolean(DEV_API_KEY);
 
   if (useLocalAPI) {
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_API_KEY,
+      'x-api-key': DEV_API_KEY,
     } as Record<string, string>;
 
     // Get user ID from token if available
@@ -244,6 +243,7 @@ export async function enqueuePipeline(
           method: 'POST',
           headers,
           body: JSON.stringify(jobData),
+          credentials: 'include',
         });
 
         const data = await resp.json().catch(() => ({}));
@@ -281,7 +281,6 @@ export async function enqueuePipeline(
     // Production: use backend API
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_API_KEY,
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
@@ -351,13 +350,13 @@ export async function createTempConfig(
   getToken?: () => Promise<string | null>,
   userIdFallback?: string
 ): Promise<{ tempId: string }> {
-  const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(DEV_API_KEY);
 
   if (useBackendAPI) {
     const token = getToken ? await getToken() : null;
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_API_KEY,
+      'x-api-key': DEV_API_KEY,
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     } as Record<string, string>;
 
@@ -394,7 +393,6 @@ export async function createTempConfig(
     // Production: use backend API
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_API_KEY,
       ...(await getAuthHeader(getToken)),
     } as Record<string, string>;
 
@@ -471,42 +469,31 @@ export async function startJobFromTempConfig(
   },
   getToken?: () => Promise<string | null>
 ): Promise<{ jobId: string; status: string; message?: string }> {
-  const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
+  const token = getToken ? await getToken() : null;
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : {}),
+  } as Record<string, string>;
 
-  if (useBackendAPI) {
-    const token = getToken ? await getToken() : null;
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    } as Record<string, string>;
+  const resp = await fetch(`${BACKEND_URL}/jobs/temp/${tempId}/start`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(config),
+    credentials: 'include',
+  });
 
-    if (import.meta.env.VITE_API_KEY) {
-      headers['x-api-key'] = import.meta.env.VITE_API_KEY;
-    }
-
-    const resp = await fetch(`${BACKEND_URL}/jobs/temp/${tempId}/start`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(config),
-      credentials: 'include',
-    });
-
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to start job from temporary configuration';
-      throw new Error(`start-job-from-temp failed: ${resp.status} ${resp.statusText} - ${msg}`);
-    }
-
-    return {
-      jobId: (data as any).jobId,
-      status: (data as any).status || 'queued',
-      message: (data as any).message,
-    };
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const msg = (data && ((data as any).error || (data as any).message)) || JSON.stringify(data) || 'Failed to start job from temporary configuration';
+    throw new Error(`start-job-from-temp failed: ${resp.status} ${resp.statusText} - ${msg}`);
   }
 
-  // In production deployments without backend-v2 temp start endpoint,
-  // the UI should fallback to the full configuration screen.
-  throw new Error('ONE_CLICK_NOT_AVAILABLE');
+  return {
+    jobId: (data as any).jobId,
+    status: (data as any).status || 'queued',
+    message: (data as any).message,
+  };
 }
 
 /**
@@ -519,13 +506,13 @@ export async function createJobFromUpload(
   fileName: string,
   getToken?: () => Promise<string | null>
 ): Promise<{ jobId: string }> {
-  const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(DEV_API_KEY);
 
   if (useBackendAPI) {
     const token = getToken ? await getToken() : null;
     const headers = {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_API_KEY,
+      'x-api-key': DEV_API_KEY,
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     } as Record<string, string>;
 
@@ -541,6 +528,7 @@ export async function createJobFromUpload(
       method: 'POST',
       headers,
       body: JSON.stringify(jobData),
+      credentials: 'include',
     });
 
     const data = await resp.json().catch(() => ({}));
@@ -575,6 +563,7 @@ export async function createJobFromUpload(
       method: 'POST',
       headers,
       body: JSON.stringify(jobData),
+      credentials: 'include',
     });
 
     const data = await resp.json().catch(() => ({}));
@@ -591,7 +580,7 @@ export async function getJobStatus(
   jobId: string,
   getToken?: () => Promise<string | null>
 ): Promise<Job> {
-  const useBackendAPI = Boolean(import.meta.env.VITE_API_KEY);
+  const useBackendAPI = Boolean(DEV_API_KEY);
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 12000);
 
@@ -599,13 +588,13 @@ export async function getJobStatus(
     if (useBackendAPI) {
       const token = getToken ? await getToken() : null;
       const headers = {
-        'x-api-key': import.meta.env.VITE_API_KEY,
+        ...(DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : {}),
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       } as Record<string, string>;
 
       const response = await fetch(
         `${BACKEND_URL}/jobs/${jobId}`,
-        { headers, signal: controller.signal }
+        { headers, credentials: 'include', signal: controller.signal }
       );
 
       if (!response.ok) {
@@ -618,7 +607,6 @@ export async function getJobStatus(
       // Production: use backend API
       const headers = {
         ...(await getAuthHeader(getToken)),
-        'x-api-key': import.meta.env.VITE_API_KEY,
       } as Record<string, string>;
       
       const response = await fetch(

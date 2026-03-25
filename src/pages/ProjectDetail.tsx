@@ -258,10 +258,9 @@ export default function ProjectDetail() {
 
       try {
         const baseUrl = getBackendUrl();
-        const apiKey = import.meta.env.VITE_API_KEY || '';
 
         const response = await fetch(`${baseUrl}/jobs/${id}`, {
-          headers: { 'X-API-Key': apiKey },
+          credentials: 'include',
         });
 
         if (response.ok) {

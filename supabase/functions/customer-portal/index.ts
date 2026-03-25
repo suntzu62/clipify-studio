@@ -1,60 +1,37 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "https://clipify-studio.lovable.app",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { requireUser } from "../_shared/auth.ts";
+import { buildCorsHeaders, handleCorsPreflight, rejectDisallowedOrigin } from "../_shared/cors.ts";
 
 const logStep = (step: string, details?: any) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
   console.log(`[CUSTOMER-PORTAL] ${step}${detailsStr}`);
 };
 
-// Verify Clerk JWT token and extract user ID
-async function verifyClerkToken(authHeader: string | null): Promise<string> {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw new Error('Missing or invalid authorization header');
-  }
-
-  const token = authHeader.substring(7);
-  
-  try {
-    // Decode JWT payload (in production, you should verify the signature against Clerk's JWKS)
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      throw new Error('Invalid JWT format');
-    }
-    
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-    
-    if (!payload.sub) {
-      throw new Error('Invalid token: missing subject');
-    }
-    
-    // Check if token is expired
-    if (payload.exp && Date.now() >= payload.exp * 1000) {
-      throw new Error('Token expired');
-    }
-    
-    return payload.sub;
-  } catch (error) {
-    throw new Error(`Token verification failed: ${error.message}`);
-  }
-}
-
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req, "POST, OPTIONS");
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return handleCorsPreflight(req, "POST, OPTIONS");
+  }
+
+  const originRejection = rejectDisallowedOrigin(req);
+  if (originRejection) {
+    return originRejection;
   }
 
   try {
     logStep("Function started");
 
     // Verify authentication
-    const clerkUserId = await verifyClerkToken(req.headers.get("authorization"));
+    const auth = await requireUser(req);
+    if ("error" in auth) {
+      return new Response(JSON.stringify({ error: auth.error }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: auth.status,
+      });
+    }
+    const clerkUserId = auth.userId;
     logStep("User authenticated", { clerkUserId });
 
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
@@ -82,11 +59,11 @@ serve(async (req) => {
     logStep("User subscription data retrieved", { customerId: subscription.stripe_customer_id });
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" });
-    const origin = req.headers.get("origin") || "https://clipify-studio.lovable.app";
+    const appUrl = Deno.env.get("APP_URL") || "https://clipify-studio.lovable.app";
     
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: subscription.stripe_customer_id,
-      return_url: `${origin}/billing`,
+      return_url: `${appUrl}/billing`,
     });
 
     logStep("Customer portal session created", { sessionId: portalSession.id, url: portalSession.url });
@@ -100,7 +77,7 @@ serve(async (req) => {
     logStep("ERROR in customer-portal", { message: errorMessage });
     return new Response(JSON.stringify({ error: errorMessage }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 401,
+      status: 400,
     });
   }
 });

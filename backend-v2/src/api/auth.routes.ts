@@ -1,4 +1,5 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyReply } from 'fastify';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { z } from 'zod';
 import { registerUser, loginUser, getUserById, registerOrLoginGoogle, updateUserProfile } from '../services/auth.service.js';
 import { getUserSettings, upsertUserSettings } from '../services/user-settings.service.js';
@@ -9,13 +10,86 @@ import { buildFrontendAppUrl } from '../utils/frontend-url.js';
 
 const logger = createLogger('auth-routes');
 
+function readObjectStringField(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === 'string' ? field : undefined;
+}
+
 export async function registerAuthRoutes(app: FastifyInstance) {
   const cookieSameSite = env.isProduction ? 'none' : 'lax';
+  const sessionCookieOptions = {
+    httpOnly: true,
+    secure: env.isProduction,
+    sameSite: cookieSameSite as 'lax' | 'none',
+    path: '/',
+    domain: env.security.cookieDomain,
+  };
+  const oauthStateCookieName = 'google_oauth_state';
+  const oauthStateCookieOptions = {
+    httpOnly: true,
+    secure: env.isProduction,
+    sameSite: 'lax' as const,
+    path: '/auth',
+    maxAge: 10 * 60,
+    domain: env.security.cookieDomain,
+  };
+
+  const clearSessionCookies = (reply: FastifyReply) => {
+    reply.clearCookie('access_token', {
+      path: '/',
+      domain: env.security.cookieDomain,
+    });
+    reply.clearCookie('refresh_token', {
+      path: '/',
+      domain: env.security.cookieDomain,
+    });
+  };
+
+  const setSessionCookies = (
+    reply: FastifyReply,
+    accessToken: string,
+    refreshToken: string
+  ) => {
+    reply.setCookie('access_token', accessToken, {
+      ...sessionCookieOptions,
+      maxAge: 7 * 24 * 60 * 60,
+    });
+
+    reply.setCookie('refresh_token', refreshToken, {
+      ...sessionCookieOptions,
+      maxAge: 30 * 24 * 60 * 60,
+    });
+  };
+
+  const statesMatch = (expected: string | undefined, received: string | undefined): boolean => {
+    if (!expected || !received) {
+      return false;
+    }
+
+    const expectedBuffer = Buffer.from(expected);
+    const receivedBuffer = Buffer.from(received);
+    if (expectedBuffer.length !== receivedBuffer.length) {
+      return false;
+    }
+
+    return timingSafeEqual(expectedBuffer, receivedBuffer);
+  };
 
   // ============================================
   // REGISTER - Criar nova conta
   // ============================================
-  app.post('/auth/register', async (request, reply) => {
+  app.post('/auth/register', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '10 minutes',
+      },
+    },
+  }, async (request, reply) => {
     const schema = z.object({
       email: z.string().email(),
       password: z.string().min(6),
@@ -33,22 +107,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
       logger.info({ userId: result.user.id, email: body.email }, 'User registered');
 
-      // Set httpOnly cookies for security
-      reply.setCookie('access_token', result.accessToken, {
-        httpOnly: true,
-        secure: env.isProduction,
-        sameSite: cookieSameSite,
-        maxAge: 7 * 24 * 60 * 60, // 7 days
-        path: '/',
-      });
-
-      reply.setCookie('refresh_token', result.refreshToken, {
-        httpOnly: true,
-        secure: env.isProduction,
-        sameSite: cookieSameSite,
-        maxAge: 30 * 24 * 60 * 60, // 30 days
-        path: '/',
-      });
+      setSessionCookies(reply, result.accessToken, result.refreshToken);
 
       return reply.code(201).send({
         user: result.user,
@@ -74,7 +133,14 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // ============================================
   // LOGIN - Autenticar usuário
   // ============================================
-  app.post('/auth/login', async (request, reply) => {
+  app.post('/auth/login', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '10 minutes',
+      },
+    },
+  }, async (request, reply) => {
     const schema = z.object({
       email: z.string().email(),
       password: z.string(),
@@ -87,22 +153,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
       logger.info({ userId: result.user.id, email: body.email }, 'User logged in');
 
-      // Set httpOnly cookies for security
-      reply.setCookie('access_token', result.accessToken, {
-        httpOnly: true,
-        secure: env.isProduction,
-        sameSite: cookieSameSite,
-        maxAge: 7 * 24 * 60 * 60, // 7 days
-        path: '/',
-      });
-
-      reply.setCookie('refresh_token', result.refreshToken, {
-        httpOnly: true,
-        secure: env.isProduction,
-        sameSite: cookieSameSite,
-        maxAge: 30 * 24 * 60 * 60, // 30 days
-        path: '/',
-      });
+      setSessionCookies(reply, result.accessToken, result.refreshToken);
 
       return reply.code(200).send({
         user: result.user,
@@ -259,9 +310,11 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // LOGOUT - Clear httpOnly cookies
   // ============================================
   app.post('/auth/logout', async (_request, reply) => {
-    // Clear httpOnly cookies
-    reply.clearCookie('access_token', { path: '/' });
-    reply.clearCookie('refresh_token', { path: '/' });
+    clearSessionCookies(reply);
+    reply.clearCookie(oauthStateCookieName, {
+      path: '/auth',
+      domain: env.security.cookieDomain,
+    });
 
     return reply.code(200).send({
       message: 'Logged out successfully',
@@ -272,13 +325,23 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // ============================================
   // GOOGLE OAUTH - Redirect to Google
   // ============================================
-  app.get('/auth/google', async (_request, reply) => {
+  app.get('/auth/google', {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '10 minutes',
+      },
+    },
+  }, async (_request, reply) => {
     if (!env.google.clientId || !env.google.callbackUrl) {
       return reply.code(500).send({
         error: 'Server Error',
         message: 'Google OAuth not configured',
       });
     }
+
+    const state = randomBytes(32).toString('hex');
+    reply.setCookie(oauthStateCookieName, state, oauthStateCookieOptions);
 
     const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     googleAuthUrl.searchParams.set('client_id', env.google.clientId);
@@ -287,6 +350,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     googleAuthUrl.searchParams.set('scope', 'openid email profile');
     googleAuthUrl.searchParams.set('access_type', 'offline');
     googleAuthUrl.searchParams.set('prompt', 'consent');
+    googleAuthUrl.searchParams.set('state', state);
 
     return reply.redirect(googleAuthUrl.toString());
   });
@@ -294,13 +358,31 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // ============================================
   // GOOGLE OAUTH - Callback
   // ============================================
-  app.get('/auth/google/callback', async (request, reply) => {
+  app.get('/auth/google/callback', {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '10 minutes',
+      },
+    },
+  }, async (request, reply) => {
     const schema = z.object({
       code: z.string(),
+      state: z.string(),
     });
 
     try {
-      const { code } = schema.parse(request.query);
+      const { code, state } = schema.parse(request.query);
+      const expectedState = (request.cookies as Record<string, string> | undefined)?.[oauthStateCookieName];
+
+      if (!statesMatch(expectedState, state)) {
+        throw new Error('Invalid OAuth state');
+      }
+
+      reply.clearCookie(oauthStateCookieName, {
+        path: '/auth',
+        domain: env.security.cookieDomain,
+      });
 
       if (!env.google.clientId || !env.google.clientSecret || !env.google.callbackUrl) {
         throw new Error('Google OAuth not configured');
@@ -324,7 +406,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const tokenDataRaw = await tokenResponse.json();
 
       if (!tokenResponse.ok) {
-        logger.error({ error: tokenDataRaw }, 'Google OAuth token exchange failed');
+        logger.error({
+          status: tokenResponse.status,
+          error: readObjectStringField(tokenDataRaw, 'error') || 'token_exchange_failed',
+        }, 'Google OAuth token exchange failed');
         throw new Error('Failed to exchange code for token');
       }
 
@@ -342,7 +427,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const userInfoRaw = await userInfoResponse.json();
 
       if (!userInfoResponse.ok) {
-        logger.error({ error: userInfoRaw }, 'Google OAuth userinfo failed');
+        logger.error({
+          status: userInfoResponse.status,
+          error: readObjectStringField(userInfoRaw, 'error') || 'userinfo_failed',
+        }, 'Google OAuth userinfo failed');
         throw new Error('Failed to fetch user info');
       }
 
@@ -361,26 +449,15 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
       logger.info({ userId: result.user.id, email: userInfo.email }, 'Google OAuth successful');
 
-      // Set httpOnly cookies for security
-      reply.setCookie('access_token', result.accessToken, {
-        httpOnly: true,
-        secure: env.isProduction,
-        sameSite: cookieSameSite,
-        maxAge: 7 * 24 * 60 * 60, // 7 days
-        path: '/',
-      });
-
-      reply.setCookie('refresh_token', result.refreshToken, {
-        httpOnly: true,
-        secure: env.isProduction,
-        sameSite: cookieSameSite,
-        maxAge: 30 * 24 * 60 * 60, // 30 days
-        path: '/',
-      });
+      setSessionCookies(reply, result.accessToken, result.refreshToken);
 
       // Redirecionar para frontend sem tokens na URL (mais seguro)
       return reply.redirect(buildFrontendAppUrl(env.frontendUrl, '/dashboard'));
     } catch (error: any) {
+      reply.clearCookie(oauthStateCookieName, {
+        path: '/auth',
+        domain: env.security.cookieDomain,
+      });
       logger.error({ error }, 'Google OAuth callback failed');
 
       // Redirecionar para login com erro

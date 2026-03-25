@@ -10,9 +10,14 @@ const envSchema = z.object({
   PORT: z.string().default('3001'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_KEY: z.string().min(1),
+  INTERNAL_API_KEY: z.string().min(1).optional(),
   JWT_SECRET: z.string().min(32),
   BASE_URL: z.string().url().optional(),
   FRONTEND_URL: z.string().url().optional(),
+  CORS_ALLOWED_ORIGINS: z.string().optional(),
+  COOKIE_DOMAIN: z.string().optional(),
+  TRUST_PROXY: z.string().default('true'),
+  STRICT_ORIGIN_CHECKS: z.string().default('true'),
 
   // Database
   DATABASE_URL: z.string().url().optional(),
@@ -88,6 +93,22 @@ const defaultLocalStoragePath =
   parsed.data.NODE_ENV === 'production' ? '/tmp/clipify-storage' : './uploads';
 const configuredLocalStoragePath = parsed.data.LOCAL_STORAGE_PATH?.trim();
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+}
+
 function resolveLocalStoragePath(): string {
   if (!configuredLocalStoragePath || configuredLocalStoragePath === './uploads') {
     return defaultLocalStoragePath;
@@ -113,17 +134,32 @@ function resolveLocalStoragePath(): string {
 }
 
 const effectiveLocalStoragePath = resolveLocalStoragePath();
+const configuredCorsOrigins = (parsed.data.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const cookieDomain = parsed.data.COOKIE_DOMAIN?.trim() || undefined;
 
 export const env = {
   // Server
   port: parseInt(parsed.data.PORT, 10),
   nodeEnv: parsed.data.NODE_ENV,
   apiKey: parsed.data.API_KEY,
+  internalApiKey: parsed.data.INTERNAL_API_KEY || (parsed.data.NODE_ENV === 'development' ? parsed.data.API_KEY : undefined),
   jwtSecret: parsed.data.JWT_SECRET,
   baseUrl: parsed.data.BASE_URL || `http://localhost:${parsed.data.PORT}`,
   frontendUrl: parsed.data.FRONTEND_URL || (parsed.data.NODE_ENV === 'development' ? 'http://localhost:8080' : parsed.data.BASE_URL || `http://localhost:${parsed.data.PORT}`),
   isDevelopment: parsed.data.NODE_ENV === 'development',
   isProduction: parsed.data.NODE_ENV === 'production',
+  security: {
+    corsAllowedOrigins: Array.from(new Set([
+      parsed.data.FRONTEND_URL || '',
+      ...configuredCorsOrigins,
+    ].filter(Boolean))),
+    cookieDomain,
+    trustProxy: parseBoolean(parsed.data.TRUST_PROXY, parsed.data.NODE_ENV === 'production'),
+    strictOriginChecks: parseBoolean(parsed.data.STRICT_ORIGIN_CHECKS, parsed.data.NODE_ENV === 'production'),
+  },
 
   // Database
   databaseUrl: parsed.data.DATABASE_URL,

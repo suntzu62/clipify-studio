@@ -1,16 +1,18 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { requireUser } from "../_shared/auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { buildCorsHeaders, handleCorsPreflight, rejectDisallowedOrigin } from "../_shared/cors.ts";
+import { isSafeIdentifier, userOwnsJob } from "../_shared/security.ts";
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req, "POST, OPTIONS");
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return handleCorsPreflight(req, "POST, OPTIONS");
+  }
+
+  const originRejection = rejectDisallowedOrigin(req);
+  if (originRejection) {
+    return originRejection;
   }
 
   try {
@@ -20,8 +22,17 @@ serve(async (req) => {
     }
 
     const { rootId, clipId } = await req.json().catch(() => ({}));
-    if (!rootId || !clipId) {
+    if (
+      !rootId ||
+      !clipId ||
+      !isSafeIdentifier(rootId) ||
+      !isSafeIdentifier(clipId)
+    ) {
       return new Response(JSON.stringify({ error: 'rootId_and_clipId_required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
+    }
+
+    if (!(await userOwnsJob(auth.userId, rootId))) {
+      return new Response(JSON.stringify({ error: 'job_not_found' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 });
     }
 
     // Optionally create a queued record if not exists (best-effort)
@@ -70,7 +81,7 @@ serve(async (req) => {
     console.log('[enqueue-export] upstream status:', resp.status);
     return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: resp.status });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return new Response(JSON.stringify({ error: message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    console.error('[enqueue-export] Error:', err);
+    return new Response(JSON.stringify({ error: 'internal_error' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });

@@ -70,7 +70,7 @@ export function verifyToken(token: string): { userId: string; email: string } | 
     const decoded = jwt.verify(token, env.jwtSecret) as { userId: string; email: string };
     return decoded;
   } catch (error) {
-    logger.warn({ error }, 'Invalid token');
+    logger.warn({ error: error instanceof Error ? error.message : 'invalid_token' }, 'Invalid token');
     return null;
   }
 }

@@ -88,8 +88,9 @@ export const ClipCardEnhanced = ({ clip, index, jobId = '', apiKey = import.meta
 
       const response = await fetch(url, {
         headers: {
-          'X-API-Key': apiKey,
+          ...(import.meta.env.DEV && apiKey ? { 'X-API-Key': apiKey } : {}),
         },
+        credentials: 'include',
       });
 
       console.log('[SubtitleCustomizer] Fetch response:', {
@@ -143,8 +144,9 @@ export const ClipCardEnhanced = ({ clip, index, jobId = '', apiKey = import.meta
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
+          ...(import.meta.env.DEV && apiKey ? { 'X-API-Key': apiKey } : {}),
         },
+        credentials: 'include',
         body: JSON.stringify(preferences),
       });
 
@@ -200,8 +202,9 @@ export const ClipCardEnhanced = ({ clip, index, jobId = '', apiKey = import.meta
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
+          ...(import.meta.env.DEV && apiKey ? { 'X-API-Key': apiKey } : {}),
         },
+        credentials: 'include',
         body: JSON.stringify(preferences),
       });
 
@@ -219,8 +222,9 @@ export const ClipCardEnhanced = ({ clip, index, jobId = '', apiKey = import.meta
       const reprocessResponse = await fetch(reprocessUrl, {
         method: 'POST',
         headers: {
-          'X-API-Key': apiKey,
+          ...(import.meta.env.DEV && apiKey ? { 'X-API-Key': apiKey } : {}),
         },
+        credentials: 'include',
       });
 
       if (!reprocessResponse.ok) {

@@ -122,8 +122,9 @@ export const useClipActions = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
+          ...(import.meta.env.DEV && apiKey ? { 'X-API-Key': apiKey } : {}),
         },
+        credentials: 'include',
         body: JSON.stringify({
           jobId,
           metadata,

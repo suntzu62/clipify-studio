@@ -1,17 +1,41 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { requireUser } from "../_shared/auth.ts";
+import { buildCorsHeaders, handleCorsPreflight, rejectDisallowedOrigin } from "../_shared/cors.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-};
+const adminEmails = new Set(
+  (Deno.env.get("EDGE_ADMIN_EMAILS") || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean),
+);
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req, "GET, OPTIONS");
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return handleCorsPreflight(req, "GET, OPTIONS");
+  }
+
+  const originRejection = rejectDisallowedOrigin(req);
+  if (originRejection) {
+    return originRejection;
   }
 
   try {
+    const auth = await requireUser(req);
+    if ('error' in auth) {
+      return new Response(JSON.stringify({ error: auth.error }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: auth.status,
+      });
+    }
+
+    if (adminEmails.size > 0 && (!auth.email || !adminEmails.has(auth.email.toLowerCase()))) {
+      return new Response(JSON.stringify({ error: 'forbidden' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 403,
+      });
+    }
+
     const workerApiUrl = Deno.env.get('WORKERS_API_URL') as string;
     const apiKey = Deno.env.get('WORKERS_API_KEY') as string;
     

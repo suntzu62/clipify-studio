@@ -1,24 +1,19 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { requireUser } from "../_shared/auth.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-};
-
-function requireAuth(req: Request) {
-  const auth = req.headers.get('authorization');
-  if (!auth || !auth.startsWith('Bearer ')) {
-    return { ok: false, res: new Response(JSON.stringify({ error: 'unauthorized' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }) };
-  }
-  return { ok: true };
-}
+import { buildCorsHeaders, handleCorsPreflight, rejectDisallowedOrigin } from "../_shared/cors.ts";
+import { isSafeIdentifier, userOwnsJob } from "../_shared/security.ts";
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req, "GET, OPTIONS");
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return handleCorsPreflight(req, "GET, OPTIONS");
+  }
+
+  const originRejection = rejectDisallowedOrigin(req);
+  if (originRejection) {
+    return originRejection;
   }
 
   const auth = await requireUser(req);
@@ -32,9 +27,16 @@ serve(async (req) => {
     const id = url.searchParams.get('id');
     console.log('[job-status] Processing request for job:', id);
     
-    if (!id) {
+    if (!id || !isSafeIdentifier(id)) {
       console.error('[job-status] Missing job ID');
       return new Response(JSON.stringify({ error: 'id required' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
+    }
+
+    if (!(await userOwnsJob(auth.userId, id))) {
+      return new Response(JSON.stringify({ error: 'job_not_found' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 404,
+      });
     }
 
     const raw = Deno.env.get('WORKERS_API_URL') as string;
@@ -81,13 +83,8 @@ serve(async (req) => {
     
     return new Response(JSON.stringify(finalData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: resp.status });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('[job-status] Unhandled error:', message, err);
-    return new Response(JSON.stringify({ 
-      error: message,
-      timestamp: new Date().toISOString(),
-      debug: true
-    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+    console.error('[job-status] Unhandled error:', err);
+    return new Response(JSON.stringify({ error: 'internal_error' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });
 
@@ -288,15 +285,6 @@ async function enrichWithClipData(jobId: string, originalData: any) {
           hashtags: hashtags.length > 0 ? hashtags : undefined
         },
         clips: clips.length > 0 ? clips : undefined
-      },
-      // Debug info for troubleshooting
-      debug: {
-        enriched: true,
-        jobId,
-        clipFilesFound: clipFiles?.length || 0,
-        textFoldersFound: textFolders?.length || 0,
-        clipGroupsProcessed: fileGroups.size,
-        timestamp: new Date().toISOString()
       }
     };
 
@@ -304,14 +292,7 @@ async function enrichWithClipData(jobId: string, originalData: any) {
     return result;
   } catch (err) {
     console.error('[enrichWithClipData] Error enriching data:', err);
-    return {
-      ...normalizeJobData(originalData),
-      debug: {
-        enriched: false,
-        error: err instanceof Error ? err.message : String(err),
-        timestamp: new Date().toISOString()
-      }
-    };
+    return normalizeJobData(originalData);
   }
 }
 

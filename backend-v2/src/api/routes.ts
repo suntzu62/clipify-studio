@@ -31,10 +31,22 @@ import { reprocessClip } from '../services/clip-reprocessor.js';
 import * as db from '../services/database.service.js';
 import * as mp from '../services/mercadopago.service.js';
 import { downloadVideo, cleanupVideo } from '../services/download.js';
+import {
+  getRequestOrigin,
+  isAllowedOrigin,
+  isSafeIdentifier,
+  isSafeMediaFilename,
+  isUserOwnedUploadPath,
+  isValidYouTubeUrl,
+  normalizeStoragePath,
+} from '../utils/security.js';
 
 const logger = createLogger('routes');
 const dbJobs = db.jobs;
 const tempConfigFallbackStore = new Map<string, ProjectConfig>();
+const corsOrigins = Array.from(
+  new Set([env.frontendUrl, env.baseUrl, ...env.security.corsAllowedOrigins].filter(Boolean))
+);
 
 function isTimeoutError(error: unknown): boolean {
   return error instanceof Error && error.message === 'OPERATION_TIMEOUT';
@@ -104,6 +116,70 @@ async function submitVideoJob(jobData: JobData): Promise<{ mode: 'queue' | 'inli
 
 function getRequestUserId(request: any): string | undefined {
   return request?.user?.userId;
+}
+
+function ensureOwnedUploadPath(
+  reply: FastifyReply,
+  userId: string,
+  storagePath: string
+): string | null {
+  const normalizedStoragePath = normalizeStoragePath(storagePath);
+  if (!normalizedStoragePath || !isUserOwnedUploadPath(normalizedStoragePath, userId)) {
+    reply.status(403).send({
+      error: 'FORBIDDEN',
+      message: 'You can only use uploads from your own storage path',
+    });
+    return null;
+  }
+
+  return normalizedStoragePath;
+}
+
+function requireAuthenticatedUserId(request: any, reply: FastifyReply): string | null {
+  const userId = getRequestUserId(request);
+  if (!userId) {
+    reply.status(401).send({
+      error: 'UNAUTHORIZED',
+      message: 'Authentication required',
+    });
+    return null;
+  }
+
+  return userId;
+}
+
+async function requireOwnedJob(request: any, reply: FastifyReply, jobId: string) {
+  if (!isSafeIdentifier(jobId, 64)) {
+    reply.status(400).send({
+      error: 'INVALID_JOB_ID',
+      message: 'Invalid job identifier',
+    });
+    return null;
+  }
+
+  const requestUserId = requireAuthenticatedUserId(request, reply);
+  if (!requestUserId) {
+    return null;
+  }
+
+  const job = await dbJobs.findById(jobId);
+  if (!job) {
+    reply.status(404).send({
+      error: 'JOB_NOT_FOUND',
+      message: `Job ${jobId} not found`,
+    });
+    return null;
+  }
+
+  if (job.user_id !== requestUserId) {
+    reply.status(403).send({
+      error: 'FORBIDDEN',
+      message: 'You can only access your own jobs',
+    });
+    return null;
+  }
+
+  return { job, requestUserId };
 }
 
 function getProgressValue(progress: unknown): number {
@@ -244,6 +320,25 @@ export async function registerRoutes(app: FastifyInstance) {
   // HEALTH CHECK
   // ============================================
   app.get('/health', async () => {
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      service: 'clipify-backend-v2',
+    };
+  });
+
+  app.get('/health/details', async (request, reply) => {
+    const hasValidInternalApiKey =
+      request.headers['x-api-key'] === env.apiKey ||
+      request.headers.authorization === `Bearer ${env.apiKey}`;
+
+    if (!hasValidInternalApiKey) {
+      return reply.status(401).send({
+        error: 'UNAUTHORIZED',
+        message: 'Invalid or missing internal API key',
+      });
+    }
+
     let queueHealth: any = null;
     let queueAvailable = true;
     try {
@@ -267,7 +362,14 @@ export async function registerRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/internal/ingest/youtube', async (request, reply) => {
+  app.post('/internal/ingest/youtube', {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (request, reply) => {
     const schema = z.object({
       url: z.string().url(),
     });
@@ -282,6 +384,13 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     const { url } = parsed.data;
+    if (!isValidYouTubeUrl(url)) {
+      return reply.status(400).send({
+        error: 'INVALID_INPUT',
+        message: 'Only canonical YouTube URLs are supported',
+      });
+    }
+
     logger.info({ url }, 'Internal ingest request received');
 
     const { videoPath, metadata } = await downloadVideo('youtube', url);
@@ -331,16 +440,24 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     const input = parsed.data;
-    const requestUserId = getRequestUserId(request);
+    const requestUserId = requireAuthenticatedUserId(request, reply);
+    if (!requestUserId) {
+      return;
+    }
 
-    if (requestUserId && input.userId !== requestUserId) {
+    if (input.userId !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only create jobs for your own user',
       });
     }
 
-    const effectiveUserId = requestUserId || input.userId;
+    const effectiveUserId = requestUserId;
+
+    const ownedStoragePath = ensureOwnedUploadPath(reply, effectiveUserId, input.storagePath);
+    if (!ownedStoragePath) {
+      return;
+    }
 
     if (!(await enforceUsageLimits(reply, effectiveUserId, input.clipCount, input.targetDuration))) {
       return;
@@ -352,7 +469,7 @@ export async function registerRoutes(app: FastifyInstance) {
       jobId,
       userId: effectiveUserId,
       sourceType: 'upload',
-      uploadPath: input.storagePath,
+      uploadPath: ownedStoragePath,
       fileName: input.fileName,
       targetDuration: input.targetDuration,
       clipCount: input.clipCount,
@@ -362,7 +479,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const submission = await submitVideoJob(jobData);
 
     logger.info(
-      { jobId, userId: effectiveUserId, storagePath: input.storagePath, submission },
+      { jobId, userId: effectiveUserId, storagePath: ownedStoragePath, submission },
       'Job created from upload'
     );
 
@@ -396,16 +513,19 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     const input = parsed.data;
-    const requestUserId = getRequestUserId(request);
+    const requestUserId = requireAuthenticatedUserId(request, reply);
+    if (!requestUserId) {
+      return;
+    }
 
-    if (requestUserId && input.userId !== requestUserId) {
+    if (input.userId !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only create jobs for your own user',
       });
     }
 
-    const effectiveUserId = requestUserId || input.userId;
+    const effectiveUserId = requestUserId;
 
     if (!(await enforceUsageLimits(reply, effectiveUserId, input.clipCount, input.targetDuration))) {
       return;
@@ -419,11 +539,26 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
+    if (input.sourceType === 'youtube' && input.youtubeUrl && !isValidYouTubeUrl(input.youtubeUrl)) {
+      return reply.status(400).send({
+        error: 'INVALID_INPUT',
+        message: 'Only canonical YouTube URLs are supported',
+      });
+    }
+
     if (input.sourceType === 'upload' && !input.uploadPath) {
       return reply.status(400).send({
         error: 'INVALID_INPUT',
         message: 'uploadPath is required for upload source',
       });
+    }
+
+    const normalizedUploadPath = input.uploadPath
+      ? ensureOwnedUploadPath(reply, effectiveUserId, input.uploadPath)
+      : null;
+
+    if (input.sourceType === 'upload' && !normalizedUploadPath) {
+      return;
     }
 
     // Criar job
@@ -434,7 +569,7 @@ export async function registerRoutes(app: FastifyInstance) {
       userId: effectiveUserId,
       sourceType: input.sourceType,
       youtubeUrl: input.youtubeUrl,
-      uploadPath: input.uploadPath,
+      uploadPath: normalizedUploadPath || undefined,
       targetDuration: input.targetDuration,
       clipCount: input.clipCount,
       createdAt: new Date(),
@@ -628,7 +763,10 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.get('/jobs/:jobId', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
-    const requestUserId = getRequestUserId(request);
+    const requestUserId = requireAuthenticatedUserId(request, reply);
+    if (!requestUserId) {
+      return;
+    }
 
     const dbJob = await dbJobs.findById(jobId);
 
@@ -655,7 +793,7 @@ export async function registerRoutes(app: FastifyInstance) {
     };
     const displayTitle = resolveDisplayTitle(dbJob);
 
-    if (requestUserId && dbJob && dbJob.user_id !== requestUserId) {
+    if (dbJob && dbJob.user_id !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only access your own jobs',
@@ -787,7 +925,7 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     const queueUserId = (status.data as { userId?: string } | undefined)?.userId;
-    if (requestUserId && queueUserId && queueUserId !== requestUserId) {
+    if (queueUserId && queueUserId !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only access your own jobs',
@@ -894,10 +1032,13 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.get('/api/jobs/:jobId/stream', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
-    const requestUserId = getRequestUserId(request);
+    const requestUserId = requireAuthenticatedUserId(request, reply);
+    if (!requestUserId) {
+      return;
+    }
 
     const dbJob = await dbJobs.findById(jobId);
-    if (requestUserId && dbJob && dbJob.user_id !== requestUserId) {
+    if (dbJob && dbJob.user_id !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only access your own jobs',
@@ -914,7 +1055,7 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     const queueUserId = (status.data as { userId?: string } | undefined)?.userId;
-    if (requestUserId && queueUserId && queueUserId !== requestUserId) {
+    if (queueUserId && queueUserId !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only access your own jobs',
@@ -925,7 +1066,12 @@ export async function registerRoutes(app: FastifyInstance) {
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');
-    reply.raw.setHeader('Access-Control-Allow-Origin', '*');
+    const requestOrigin = getRequestOrigin(request.headers.origin, request.headers.referer);
+    if (requestOrigin && isAllowedOrigin(requestOrigin, corsOrigins)) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', requestOrigin);
+      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+      reply.raw.setHeader('Vary', 'Origin');
+    }
 
     // Enviar status inicial imediatamente
     const sendSSE = (event: string, data: any) => {
@@ -1070,31 +1216,28 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.patch('/jobs/:jobId', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
-    const updates = request.body as { title?: string };
-    const requestUserId = getRequestUserId(request);
+    const parsedBody = z.object({
+      title: z.string().trim().min(1).max(160),
+    }).safeParse(request.body);
 
     try {
-      // Verificar se job existe
-      const job = await dbJobs.findById(jobId);
-
-      if (!job) {
-        return reply.status(404).send({
-          error: 'JOB_NOT_FOUND',
-          message: `Job ${jobId} not found`,
+      if (!parsedBody.success) {
+        return reply.status(400).send({
+          error: 'INVALID_INPUT',
+          message: 'Invalid update payload',
+          details: parsedBody.error.format(),
         });
       }
 
-      if (requestUserId && job.user_id !== requestUserId) {
-        return reply.status(403).send({
-          error: 'FORBIDDEN',
-          message: 'You can only update your own jobs',
-        });
+      const ownership = await requireOwnedJob(request, reply, jobId);
+      if (!ownership) {
+        return;
       }
 
       // Atualizar no banco de dados
-      const updatedJob = await dbJobs.update(jobId, updates);
+      const updatedJob = await dbJobs.update(jobId, { title: parsedBody.data.title });
 
-      logger.info({ jobId, updates }, 'Job updated successfully');
+      logger.info({ jobId }, 'Job updated successfully');
 
       return reply.send(updatedJob);
     } catch (error: any) {
@@ -1111,24 +1254,11 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   app.delete('/jobs/:jobId', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
-    const requestUserId = getRequestUserId(request);
 
     try {
-      // 1. Verificar se job existe e pertence ao usuário autenticado (quando houver)
-      const job = await dbJobs.findById(jobId);
-
-      if (!job) {
-        return reply.status(404).send({
-          error: 'JOB_NOT_FOUND',
-          message: `Job ${jobId} not found`,
-        });
-      }
-
-      if (requestUserId && job.user_id !== requestUserId) {
-        return reply.status(403).send({
-          error: 'FORBIDDEN',
-          message: 'You can only delete your own jobs',
-        });
+      const ownership = await requireOwnedJob(request, reply, jobId);
+      if (!ownership) {
+        return;
       }
 
       // 2. Cancelar job na fila se ainda estiver ativo
@@ -1160,7 +1290,18 @@ export async function registerRoutes(app: FastifyInstance) {
   // ============================================
   // QUEUE STATS
   // ============================================
-  app.get('/queue/stats', async () => {
+  app.get('/queue/stats', async (request, reply) => {
+    const hasValidInternalApiKey =
+      request.headers['x-api-key'] === env.apiKey ||
+      request.headers.authorization === `Bearer ${env.apiKey}`;
+
+    if (!hasValidInternalApiKey) {
+      return reply.status(401).send({
+        error: 'UNAUTHORIZED',
+        message: 'Invalid or missing internal API key',
+      });
+    }
+
     return await getQueueHealth();
   });
 
@@ -1177,6 +1318,11 @@ export async function registerRoutes(app: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
+    const requestUserId = requireAuthenticatedUserId(request, reply);
+    if (!requestUserId) {
+      return;
+    }
+
     const parsed = CreateTempConfigSchema.safeParse(request.body);
 
     if (!parsed.success) {
@@ -1187,17 +1333,31 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
-    const requestUserId = getRequestUserId(request);
     const sourceInput = parsed.data;
 
-    if (requestUserId && sourceInput.userId !== requestUserId) {
+    if (sourceInput.userId !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only create temp configs for your own user',
       });
     }
 
-    const effectiveUserId = requestUserId || sourceInput.userId;
+    const effectiveUserId = requestUserId;
+
+    if (sourceInput.sourceType === 'youtube' && !isValidYouTubeUrl(sourceInput.youtubeUrl)) {
+      return reply.status(400).send({
+        error: 'INVALID_INPUT',
+        message: 'Only canonical YouTube URLs are supported',
+      });
+    }
+
+    const ownedUploadPath = sourceInput.sourceType === 'upload'
+      ? ensureOwnedUploadPath(reply, effectiveUserId, sourceInput.uploadPath)
+      : null;
+
+    if (sourceInput.sourceType === 'upload' && !ownedUploadPath) {
+      return;
+    }
 
     // Generate unique tempId
     const tempId = `temp_${randomUUID().replace(/-/g, '')}`;
@@ -1222,7 +1382,7 @@ export async function registerRoutes(app: FastifyInstance) {
       : {
           ...configBase,
           sourceType: 'upload',
-          uploadPath: sourceInput.uploadPath,
+          uploadPath: ownedUploadPath,
           fileName: sourceInput.fileName,
         };
 
@@ -1237,7 +1397,17 @@ export async function registerRoutes(app: FastifyInstance) {
   // GET /jobs/temp/:tempId - Get temporary configuration
   app.get('/jobs/temp/:tempId', async (request, reply) => {
     const { tempId } = request.params as { tempId: string };
-    const requestUserId = getRequestUserId(request);
+    if (!isSafeIdentifier(tempId, 64)) {
+      return reply.status(400).send({
+        error: 'INVALID_TEMP_ID',
+        message: 'Invalid temporary configuration identifier',
+      });
+    }
+
+    const requestUserId = requireAuthenticatedUserId(request, reply);
+    if (!requestUserId) {
+      return;
+    }
 
     const config = await getTempConfigSafely(tempId);
 
@@ -1248,7 +1418,7 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
-    if (requestUserId && config.userId !== requestUserId) {
+    if (config.userId !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only access your own temp configs',
@@ -1268,7 +1438,17 @@ export async function registerRoutes(app: FastifyInstance) {
     },
   }, async (request, reply) => {
     const { tempId } = request.params as { tempId: string };
-    const requestUserId = getRequestUserId(request);
+    if (!isSafeIdentifier(tempId, 64)) {
+      return reply.status(400).send({
+        error: 'INVALID_TEMP_ID',
+        message: 'Invalid temporary configuration identifier',
+      });
+    }
+
+    const requestUserId = requireAuthenticatedUserId(request, reply);
+    if (!requestUserId) {
+      return;
+    }
 
     // 1. Get temporary configuration
     let tempConfig: ProjectConfig | null = null;
@@ -1289,7 +1469,7 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
 
-    if (requestUserId && tempConfig.userId !== requestUserId) {
+    if (tempConfig.userId !== requestUserId) {
       return reply.status(403).send({
         error: 'FORBIDDEN',
         message: 'You can only start jobs from your own temp configs',
@@ -1388,6 +1568,17 @@ export async function registerRoutes(app: FastifyInstance) {
   // Save subtitle preferences for a specific clip
   app.patch('/jobs/:jobId/clips/:clipId/subtitle-settings', async (request, reply) => {
     const { jobId, clipId } = request.params as { jobId: string; clipId: string };
+    if (!isSafeIdentifier(clipId, 128)) {
+      return reply.status(400).send({
+        error: 'INVALID_CLIP_ID',
+        message: 'Invalid clip identifier',
+      });
+    }
+
+    const ownership = await requireOwnedJob(request, reply, jobId);
+    if (!ownership) {
+      return;
+    }
 
     const parsed = SubtitlePreferencesSchema.safeParse(request.body);
 
@@ -1425,6 +1616,17 @@ export async function registerRoutes(app: FastifyInstance) {
   // Get subtitle preferences for a specific clip
   app.get('/jobs/:jobId/clips/:clipId/subtitle-settings', async (request, reply) => {
     const { jobId, clipId } = request.params as { jobId: string; clipId: string };
+    if (!isSafeIdentifier(clipId, 128)) {
+      return reply.status(400).send({
+        error: 'INVALID_CLIP_ID',
+        message: 'Invalid clip identifier',
+      });
+    }
+
+    const ownership = await requireOwnedJob(request, reply, jobId);
+    if (!ownership) {
+      return;
+    }
     const key = `subtitle:${jobId}:${clipId}`;
 
     try {
@@ -1461,6 +1663,10 @@ export async function registerRoutes(app: FastifyInstance) {
   // These will be used as defaults for all clips in this job
   app.patch('/jobs/:jobId/subtitle-settings', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
+    const ownership = await requireOwnedJob(request, reply, jobId);
+    if (!ownership) {
+      return;
+    }
 
     const parsed = SubtitlePreferencesSchema.safeParse(request.body);
 
@@ -1502,6 +1708,17 @@ export async function registerRoutes(app: FastifyInstance) {
   // Reprocess a single clip with updated subtitle preferences (ultra-fast)
   app.post('/jobs/:jobId/clips/:clipId/reprocess', async (request, reply) => {
     const { jobId, clipId } = request.params as { jobId: string; clipId: string };
+    if (!isSafeIdentifier(clipId, 128)) {
+      return reply.status(400).send({
+        error: 'INVALID_CLIP_ID',
+        message: 'Invalid clip identifier',
+      });
+    }
+
+    const ownership = await requireOwnedJob(request, reply, jobId);
+    if (!ownership) {
+      return;
+    }
 
     logger.info({ jobId, clipId }, 'Starting fast clip reprocessing');
 
@@ -1803,6 +2020,10 @@ export async function registerRoutes(app: FastifyInstance) {
   // Get global subtitle preferences for the entire job
   app.get('/jobs/:jobId/subtitle-settings', async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
+    const ownership = await requireOwnedJob(request, reply, jobId);
+    if (!ownership) {
+      return;
+    }
     const key = `subtitle:${jobId}:global`;
 
     try {
@@ -1838,16 +2059,29 @@ export async function registerRoutes(app: FastifyInstance) {
     const { download } = request.query as { download?: string };
 
     try {
+      if (!isSafeIdentifier(jobId, 64) || !isSafeMediaFilename(filename)) {
+        return reply.status(400).send({
+          error: 'INVALID_MEDIA_PATH',
+          message: 'Invalid media identifier',
+        });
+      }
+
       const filePath = `clips/${jobId}/${filename}`;
-      const isImage = filename.endsWith('.jpg');
+      const isImage = /\.(jpg|jpeg)$/i.test(filename);
       const contentType = isImage ? 'image/jpeg' : 'video/mp4';
+      const requestOrigin = getRequestOrigin(request.headers.origin, request.headers.referer);
 
       const applyMediaHeaders = () => {
         reply.header('Content-Type', contentType);
         reply.header('Accept-Ranges', 'bytes');
         reply.header('Cache-Control', 'public, max-age=31536000');
-        reply.header('Access-Control-Allow-Origin', '*');
         reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+
+        if (requestOrigin && isAllowedOrigin(requestOrigin, corsOrigins)) {
+          reply.header('Access-Control-Allow-Origin', requestOrigin);
+          reply.header('Access-Control-Allow-Credentials', 'true');
+          reply.header('Vary', 'Origin');
+        }
       };
 
       // Se Supabase não está configurado, servir do armazenamento local

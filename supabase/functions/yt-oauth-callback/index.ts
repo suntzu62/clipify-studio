@@ -1,12 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { encryptToken } from "../_shared/crypto.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-};
+import { buildCorsHeaders, handleCorsPreflight, rejectDisallowedOrigin } from "../_shared/cors.ts";
 
 async function exchangeCodeForTokens(code: string, redirectUri: string, clientId: string, clientSecret: string) {
   const body = new URLSearchParams({
@@ -43,8 +38,14 @@ async function fetchChannelInfo(accessToken: string) {
 }
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req, "GET, OPTIONS");
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return handleCorsPreflight(req, "GET, OPTIONS");
+  }
+
+  const originRejection = rejectDisallowedOrigin(req);
+  if (originRejection) {
+    return originRejection;
   }
 
   try {
@@ -133,4 +134,3 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: message }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
   }
 });
-

@@ -10,6 +10,11 @@ import { verifyToken } from './services/auth.service.js';
 import { getJobExecutionDecision } from './jobs/execution-mode.js';
 import { recoverStaleInlineJobs } from './jobs/inline-queue.js';
 import { pool } from './services/database.service.js';
+import {
+  getRequestOrigin,
+  isAllowedOrigin as isAllowedSecurityOrigin,
+  isMutationMethod,
+} from './utils/security.js';
 
 // ============================================
 // CRIAR SERVIDOR FASTIFY
@@ -19,7 +24,61 @@ const app = Fastify({
   requestIdLogLabel: 'reqId',
   disableRequestLogging: false,
   bodyLimit: 100 * 1024 * 1024, // 100MB para uploads
+  trustProxy: env.security.trustProxy,
 });
+
+const allowedOrigins = Array.from(
+  new Set([
+    env.frontendUrl,
+    env.baseUrl,
+    ...env.security.corsAllowedOrigins,
+    ...(env.isDevelopment
+      ? [
+          'http://localhost:3000',
+          'http://127.0.0.1:3000',
+          'http://localhost:3001',
+          'http://127.0.0.1:3001',
+          'http://localhost:8080',
+          'http://127.0.0.1:8080',
+          'http://localhost:5173',
+          'http://127.0.0.1:5173',
+        ]
+      : []),
+  ].filter(Boolean))
+);
+const internalApiPrefixes = ['/internal/', '/queue/stats', '/health/details'];
+const publicPrefixes = [
+  '/clips/',
+  '/auth/',
+  '/plans',
+  '/payments/config',
+  '/webhooks/mercadopago',
+  '/payments/webhooks/mercadopago',
+  '/payments/success',
+  '/payments/failure',
+  '/payments/pending',
+];
+const originCheckExemptPrefixes = [
+  '/internal/',
+  '/webhooks/mercadopago',
+  '/payments/webhooks/mercadopago',
+];
+
+function isAllowedRequestOrigin(origin: string | undefined | null): boolean {
+  if (!origin) {
+    return false;
+  }
+
+  return isAllowedSecurityOrigin(origin, allowedOrigins);
+}
+
+function isAllowedReferer(referer: string | undefined): boolean {
+  if (!referer) {
+    return false;
+  }
+
+  return isAllowedRequestOrigin(getRequestOrigin(undefined, referer));
+}
 
 // ============================================
 // PLUGINS
@@ -49,70 +108,102 @@ await app.register(rateLimit, {
 });
 
 // CORS — whitelist allowed origins
-const allowedOrigins = env.isDevelopment
-  ? [/localhost:\d+$/, /127\.0\.0\.1:\d+$/]
-  : [
-      env.frontendUrl,
-      // Add any other production domains here
-    ].filter(Boolean) as string[];
-
 await app.register(cors, {
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    if (!origin || isAllowedRequestOrigin(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error('Origin not allowed'), false);
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Requested-With'],
+  maxAge: 600,
+  strictPreflight: true,
 });
 
 // Cookie parser (necessario para auth via httpOnly cookies)
 await app.register(cookie);
 
+app.addHook('onRequest', async (request, reply) => {
+  if (!env.security.strictOriginChecks) {
+    return;
+  }
+
+  if (!isMutationMethod(request.method)) {
+    return;
+  }
+
+  const requestPath = request.url.split('?')[0] || request.url;
+  if (originCheckExemptPrefixes.some((prefix) => requestPath.startsWith(prefix))) {
+    return;
+  }
+
+  const origin = request.headers.origin;
+  const referer = request.headers.referer;
+
+  if (
+    (origin && !isAllowedRequestOrigin(origin)) ||
+    (!origin && referer && !isAllowedReferer(referer))
+  ) {
+    return reply.status(403).send({
+      error: 'INVALID_ORIGIN',
+      message: 'Origin not allowed',
+    });
+  }
+});
+
 // ============================================
 // MIDDLEWARE DE AUTENTICAÇÃO
 // ============================================
 app.addHook('onRequest', async (request, reply) => {
-  // Skip API key para rotas publicas e fluxo de autenticacao
-  const publicPrefixes = [
-    '/clips/',
-    '/auth/',
-    '/plans',
-    '/payments/config',
-    '/webhooks/mercadopago',
-    '/payments/webhooks/mercadopago',
-    '/payments/success',
-    '/payments/failure',
-    '/payments/pending',
-  ];
+  const requestPath = request.url.split('?')[0] || request.url;
 
-  if (request.url === '/health' || publicPrefixes.some((prefix) => request.url.startsWith(prefix))) {
+  if (requestPath === '/health' || publicPrefixes.some((prefix) => requestPath.startsWith(prefix))) {
     return;
   }
 
   const xApiKey = request.headers['x-api-key'];
   const bearerToken = request.headers['authorization']?.replace('Bearer ', '');
   const cookieToken = (request.cookies as { access_token?: string } | undefined)?.access_token;
+  const internalRequest = internalApiPrefixes.some((prefix) => requestPath.startsWith(prefix));
+  const hasValidInternalApiKey =
+    Boolean(env.internalApiKey) &&
+    (xApiKey === env.internalApiKey || bearerToken === env.internalApiKey);
 
-  // 1) API key explicita (recomendado para integrações internas)
-  //    Still try to decode JWT cookie so request.user is available for
-  //    admin and other user-scoped endpoints.
-  if (xApiKey && xApiKey === env.apiKey) {
+  if (internalRequest) {
+    if (!env.internalApiKey) {
+      return reply.status(503).send({
+        error: 'INTERNAL_API_NOT_CONFIGURED',
+        message: 'Internal API key not configured',
+      });
+    }
+
+    if (!hasValidInternalApiKey) {
+      return reply.status(401).send({
+        error: 'UNAUTHORIZED',
+        message: 'Invalid or missing internal API key',
+      });
+    }
+
     for (const token of [cookieToken, bearerToken]) {
       if (!token || token === env.apiKey) continue;
       const decoded = verifyToken(token);
-      if (decoded) { (request as any).user = decoded; break; }
+      if (decoded) {
+        (request as any).user = decoded;
+        break;
+      }
     }
+
     return;
   }
 
-  // 2) Compatibilidade: Bearer <api-key>
-  if (bearerToken && bearerToken === env.apiKey) {
-    if (cookieToken) {
-      const decoded = verifyToken(cookieToken);
-      if (decoded) (request as any).user = decoded;
-    }
-    return;
-  }
-
-  // 3) JWT válido (fluxo autenticado por usuário), via header ou cookie
+  // JWT válido (fluxo autenticado por usuário), via header ou cookie.
+  // A API_KEY pública do frontend não pode mais autenticar rotas de usuário.
   for (const token of [bearerToken, cookieToken]) {
-    if (!token) continue;
+    if (!token || token === env.apiKey) continue;
     const decoded = verifyToken(token);
     if (decoded) {
       (request as any).user = decoded;
@@ -155,7 +246,10 @@ try {
   await app.listen({ port: env.port, host: '0.0.0.0' });
   logger.info(`🚀 Server running on http://localhost:${env.port}`);
   logger.info(`📝 Environment: ${env.nodeEnv}`);
-  logger.info(`🔧 API Key authentication enabled`);
+  logger.info({
+    userAuth: 'jwt_or_cookie',
+    internalApiKeyConfigured: Boolean(env.internalApiKey),
+  }, 'Security gates configured');
 
   const jobExecution = await getJobExecutionDecision();
   logger.info(jobExecution, 'Job execution mode resolved');

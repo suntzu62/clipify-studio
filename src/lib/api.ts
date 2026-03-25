@@ -6,10 +6,11 @@ export async function invokeFn<T = any>(
 ): Promise<T> {
   const { method = 'POST', body, headers = {} } = opts;
   const backendUrl = getBackendUrl();
-  const apiKey = import.meta.env.VITE_API_KEY;
   const requestHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(apiKey ? { 'x-api-key': apiKey } : {}),
+    ...(import.meta.env.DEV && import.meta.env.VITE_API_KEY
+      ? { 'x-api-key': import.meta.env.VITE_API_KEY }
+      : {}),
     ...headers,
   };
 

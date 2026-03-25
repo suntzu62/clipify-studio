@@ -8,6 +8,10 @@ import { buildFrontendAppUrl } from '../utils/frontend-url.js';
 import * as mp from '../services/mercadopago.service.js';
 
 const logger = createLogger('payments-routes');
+const INTERNAL_ERROR_RESPONSE = {
+  error: 'INTERNAL_ERROR',
+  message: 'Internal server error',
+} as const;
 
 const DEFAULT_USAGE = {
   plan: 'free',
@@ -205,8 +209,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
       }
 
       return reply.status(500).send({
-        error: 'INTERNAL_ERROR',
-        message: error.message || 'Erro ao criar assinatura',
+        ...INTERNAL_ERROR_RESPONSE,
       });
     }
   });
@@ -241,8 +244,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     } catch (error: any) {
       logger.error({ error: error.message, subscriptionId }, 'Erro ao cancelar');
       return reply.status(500).send({
-        error: 'INTERNAL_ERROR',
-        message: error.message || 'Erro ao cancelar assinatura',
+        ...INTERNAL_ERROR_RESPONSE,
       });
     }
   });
@@ -287,8 +289,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     } catch (error: any) {
       logger.error({ error: error.message }, 'Erro ao criar pagamento');
       return reply.status(500).send({
-        error: 'INTERNAL_ERROR',
-        message: error.message || 'Erro ao criar pagamento',
+        ...INTERNAL_ERROR_RESPONSE,
       });
     }
   });
@@ -332,8 +333,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     } catch (error: any) {
       logger.error({ error: error.message }, 'Erro ao criar pagamento PIX');
       return reply.status(500).send({
-        error: 'INTERNAL_ERROR',
-        message: error.message || 'Erro ao criar pagamento PIX',
+        ...INTERNAL_ERROR_RESPONSE,
       });
     }
   });
@@ -472,8 +472,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
       const message = error instanceof Error ? error.message : 'unknown';
       logger.error({ error: message }, 'Erro ao incrementar uso');
       return reply.status(500).send({
-        error: 'INTERNAL_ERROR',
-        message: error instanceof Error ? error.message : 'Erro ao incrementar uso',
+        ...INTERNAL_ERROR_RESPONSE,
       });
     }
   });

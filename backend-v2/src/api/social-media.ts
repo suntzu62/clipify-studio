@@ -7,6 +7,7 @@ import { authenticateJWT } from '../middleware/auth.middleware.js';
 import { InstagramPlatform } from '../services/social-platforms/instagram-platform.js';
 import type { SocialPlatformConfig, PublishMetadata } from '../services/social-platforms/base-platform.js';
 import { createClient } from '@supabase/supabase-js';
+import { pool } from '../services/database.service.js';
 
 const logger = createLogger('social-media');
 
@@ -24,6 +25,20 @@ const instagramPlatform = new InstagramPlatform({
 });
 
 export async function registerSocialMediaRoutes(app: FastifyInstance) {
+  async function userOwnsClip(userId: string, clipId: string, jobId?: string): Promise<boolean> {
+    const params = jobId ? [clipId, userId, jobId] : [clipId, userId];
+    const jobFilter = jobId ? ' AND job_id = $3' : '';
+    const result = await pool.query(
+      `SELECT 1
+       FROM clips
+       WHERE id = $1
+         AND user_id = $2${jobFilter}
+       LIMIT 1`,
+      params
+    );
+    return result.rowCount > 0;
+  }
+
   // ============================================
   // INSTAGRAM AUTHENTICATION
   // ============================================
@@ -31,15 +46,10 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
   /**
    * Start Instagram OAuth flow
    */
-  app.get('/auth/instagram/authorize', async (request, reply) => {
-    const { userId } = request.query as { userId?: string };
-
-    if (!userId) {
-      return reply.status(400).send({
-        error: 'INVALID_INPUT',
-        message: 'userId is required',
-      });
-    }
+  app.get('/auth/instagram/authorize', {
+    preHandler: authenticateJWT,
+  }, async (request, reply) => {
+    const userId = request.user!.userId;
 
     // Generate state for CSRF protection
     const state = randomUUID();
@@ -215,6 +225,14 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
     try {
       logger.info({ clipId, jobId, userId }, 'Publishing clip to Instagram');
 
+      const ownsClip = await userOwnsClip(userId, clipId, jobId);
+      if (!ownsClip) {
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Clip not found',
+        });
+      }
+
       // Get credentials
       const credentialsKey = `social:credentials:${userId}:instagram`;
       const credentialsData = await redis.get(credentialsKey);
@@ -313,7 +331,7 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
       logger.error({ error: error.message, clipId }, 'Failed to publish to Instagram');
       return reply.status(500).send({
         error: 'INTERNAL_ERROR',
-        message: error.message,
+        message: 'Failed to publish to Instagram',
       });
     }
   });
@@ -321,10 +339,21 @@ export async function registerSocialMediaRoutes(app: FastifyInstance) {
   /**
    * Get publication history for a clip
    */
-  app.get('/clips/:clipId/publications', async (request, reply) => {
+  app.get('/clips/:clipId/publications', {
+    preHandler: authenticateJWT,
+  }, async (request, reply) => {
     const { clipId } = request.params as { clipId: string };
+    const userId = request.user!.userId;
 
     try {
+      const ownsClip = await userOwnsClip(userId, clipId);
+      if (!ownsClip) {
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Clip not found',
+        });
+      }
+
       const platforms = ['instagram', 'youtube', 'tiktok'];
       const publications = [];
 
