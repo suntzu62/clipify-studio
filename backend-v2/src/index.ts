@@ -20,7 +20,7 @@ import {
 // CRIAR SERVIDOR FASTIFY
 // ============================================
 const app = Fastify({
-  logger: logger as any,
+  loggerInstance: logger as any,
   requestIdLogLabel: 'reqId',
   disableRequestLogging: false,
   bodyLimit: 100 * 1024 * 1024, // 100MB para uploads
