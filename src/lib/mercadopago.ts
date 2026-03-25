@@ -4,7 +4,7 @@
 import { getBackendUrl } from './backend-url';
 
 const API_BASE = getBackendUrl();
-const API_KEY = import.meta.env.VITE_API_KEY || '';
+const DEV_API_KEY = import.meta.env.DEV ? (import.meta.env.VITE_API_KEY || '') : '';
 
 // ============================================
 // TYPES
@@ -99,7 +99,7 @@ async function apiFetch<T>(
     credentials: 'include', // Importante: envia cookies httpOnly
     headers: {
       'Content-Type': 'application/json',
-      ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
+      ...(DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : {}),
       ...options.headers,
     },
   });
@@ -153,11 +153,12 @@ export async function cancelSubscription(subscriptionId: string, reason?: string
 
 export async function createPixPayment(
   planId: string,
-  billingCycle: 'monthly' | 'yearly' = 'monthly'
+  billingCycle: 'monthly' | 'yearly' = 'monthly',
+  cpf: string = ''
 ): Promise<PixPaymentResult> {
   return apiFetch('/payments/pix', {
     method: 'POST',
-    body: JSON.stringify({ planId, billingCycle }),
+    body: JSON.stringify({ planId, billingCycle, cpf }),
   });
 }
 

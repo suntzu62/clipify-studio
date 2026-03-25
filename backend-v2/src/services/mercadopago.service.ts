@@ -78,6 +78,7 @@ interface CreateSubscriptionInput {
 
 interface CreatePaymentInput extends CreateSubscriptionInput {
   paymentMethod?: 'pix' | 'credit_card' | 'boleto';
+  payerCpf?: string;
 }
 
 // ============================================
@@ -331,6 +332,12 @@ export async function createPixPayment(input: CreatePaymentInput): Promise<{
       payer: {
         email: input.userEmail,
         first_name: input.userName,
+        ...(input.payerCpf ? {
+          identification: {
+            type: 'CPF',
+            number: input.payerCpf.replace(/\D/g, ''),
+          },
+        } : {}),
       },
       external_reference: externalRef,
       notification_url: `${env.baseUrl}/webhooks/mercadopago`,

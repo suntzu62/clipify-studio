@@ -240,6 +240,8 @@ const Billing = () => {
   const [cancelling, setCancelling] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [paymentMethodDialog, setPaymentMethodDialog] = useState<string | null>(null);
+  const [pixCpfStep, setPixCpfStep] = useState<string | null>(null);
+  const [cpfInput, setCpfInput] = useState("");
   const [pixData, setPixData] = useState<PixPaymentResult | null>(null);
   const [pixCopied, setPixCopied] = useState(false);
 
@@ -299,13 +301,28 @@ const Billing = () => {
     }
   };
 
-  const handlePixCheckout = async (planId: string) => {
-    if (!user) return;
+  const handlePixCheckout = (planId: string) => {
     setPaymentMethodDialog(null);
+    setCpfInput("");
+    setPixCpfStep(planId);
+  };
+
+  const handlePixSubmit = async () => {
+    if (!user || !pixCpfStep) return;
+    const cleanCpf = cpfInput.replace(/\D/g, "");
+    if (cleanCpf.length !== 11) {
+      toast({
+        title: "CPF inválido",
+        description: "Digite um CPF válido com 11 dígitos.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
-      setCreating(planId);
-      const result = await createPixPayment(planId, "monthly");
+      setCreating(pixCpfStep);
+      const result = await createPixPayment(pixCpfStep, "monthly", cleanCpf);
+      setPixCpfStep(null);
       setPixData(result);
     } catch (error) {
       console.error("PIX checkout error:", error);
@@ -830,6 +847,70 @@ const Billing = () => {
                     <ArrowRight className="w-4 h-4 ml-auto text-muted-foreground" />
                   </motion.button>
                 </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      )}
+
+      {/* PIX CPF Step */}
+      {pixCpfStep && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="relative w-full max-w-md mx-4"
+          >
+            <Card className="glass-card border border-white/10">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold">Pagamento via PIX</h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPixCpfStep(null)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                <p className="text-sm text-muted-foreground mb-4">
+                  Informe seu CPF para gerar o código PIX:
+                </p>
+
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="000.000.000-00"
+                  value={cpfInput}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "").slice(0, 11);
+                    const formatted = digits
+                      .replace(/(\d{3})(\d)/, "$1.$2")
+                      .replace(/(\d{3})(\d)/, "$1.$2")
+                      .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+                    setCpfInput(formatted);
+                  }}
+                  className="w-full px-4 py-3 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 text-center text-lg tracking-wider mb-4"
+                />
+
+                <Button
+                  onClick={handlePixSubmit}
+                  disabled={creating === pixCpfStep || cpfInput.replace(/\D/g, "").length !== 11}
+                  className="w-full h-12 text-base font-semibold gap-2 bg-green-600 hover:bg-green-700"
+                >
+                  {creating === pixCpfStep ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Gerando PIX...
+                    </>
+                  ) : (
+                    <>
+                      <QrCode className="w-4 h-4" />
+                      Gerar código PIX
+                    </>
+                  )}
+                </Button>
               </CardContent>
             </Card>
           </motion.div>

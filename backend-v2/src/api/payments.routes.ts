@@ -300,6 +300,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
     const schema = z.object({
       planId: z.string(),
       billingCycle: z.enum(['monthly', 'yearly']).default('monthly'),
+      cpf: z.string().min(11).max(14),
     });
 
     try {
@@ -314,6 +315,7 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
         userName,
         planId: body.planId,
         billingCycle: body.billingCycle,
+        payerCpf: body.cpf,
       });
 
       return reply.status(201).send({
@@ -526,20 +528,27 @@ export async function registerPaymentsRoutes(app: FastifyInstance) {
         .update(manifest)
         .digest('hex');
 
-      if (hmac !== v1) {
-        logger.warn({ expected: hmac, received: v1 }, 'Webhook rejected: invalid signature');
+      const expectedSignature = Buffer.from(hmac, 'hex');
+      const receivedSignature = Buffer.from(v1, 'hex');
+      const validSignature =
+        expectedSignature.length > 0 &&
+        expectedSignature.length === receivedSignature.length &&
+        crypto.timingSafeEqual(expectedSignature, receivedSignature);
+
+      if (!validSignature) {
+        logger.warn({ requestId: xRequestId }, 'Webhook rejected: invalid signature');
         return reply.status(401).send({ error: 'INVALID_SIGNATURE', message: 'Invalid signature' });
       }
 
       logger.info('Webhook signature validated successfully');
 
-      const result = await mp.handleWebhook(body);
+      await mp.handleWebhook(body);
 
-      return reply.send({ received: true, ...result });
+      return reply.send({ received: true });
     } catch (error: any) {
       logger.error({ error: error.message }, 'Erro no webhook');
       // Retornar 200 mesmo com erro para não reprocessar
-      return reply.send({ received: true, error: error.message });
+      return reply.send({ received: true });
     }
   });
 
