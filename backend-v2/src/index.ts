@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
@@ -80,6 +80,13 @@ function isAllowedReferer(referer: string | undefined): boolean {
   return isAllowedRequestOrigin(getRequestOrigin(undefined, referer));
 }
 
+function isCorsPreflightRequest(request: FastifyRequest): boolean {
+  return (
+    request.method.toUpperCase() === 'OPTIONS' &&
+    typeof request.headers['access-control-request-method'] === 'string'
+  );
+}
+
 // ============================================
 // PLUGINS
 // ============================================
@@ -101,6 +108,7 @@ await app.register(rateLimit, {
     return (request as any).user?.userId || request.ip;
   },
   errorResponseBuilder: (_request, context) => ({
+    statusCode: 429,
     error: 'RATE_LIMIT_EXCEEDED',
     message: `Muitas requisições. Tente novamente em ${Math.ceil((context.ttl || 60000) / 1000)} segundos.`,
     retryAfter: Math.ceil((context.ttl || 60000) / 1000),
@@ -115,7 +123,7 @@ await app.register(cors, {
       return;
     }
 
-    callback(new Error('Origin not allowed'), false);
+    callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -132,7 +140,8 @@ app.addHook('onRequest', async (request, reply) => {
     return;
   }
 
-  if (!isMutationMethod(request.method)) {
+  const isProtectedPreflight = isCorsPreflightRequest(request);
+  if (!isMutationMethod(request.method) && !isProtectedPreflight) {
     return;
   }
 
@@ -226,16 +235,53 @@ await registerRoutes(app);
 // ERROR HANDLER
 // ============================================
 app.setErrorHandler((error, request, reply) => {
-  logger.error({
-    error: error.message,
-    stack: error.stack,
+  const statusCode =
+    typeof (error as { statusCode?: unknown }).statusCode === 'number'
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+  const message =
+    typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : 'An unexpected error occurred';
+
+  const logPayload = {
+    error: message,
+    statusCode,
+    stack: error instanceof Error ? error.stack : undefined,
     url: request.url,
     method: request.method,
-  }, 'Request error');
+  };
 
-  reply.status(500).send({
+  if (statusCode >= 500) {
+    logger.error(logPayload, 'Request error');
+  } else {
+    logger.warn(logPayload, 'Request rejected');
+  }
+
+  if (statusCode === 429) {
+    const retryAfter = reply.getHeader('retry-after');
+    return reply.status(429).send({
+      error: 'RATE_LIMIT_EXCEEDED',
+      message,
+      retryAfter: typeof retryAfter === 'string' ? Number(retryAfter) || retryAfter : retryAfter,
+    });
+  }
+
+  if (statusCode >= 400 && statusCode < 500) {
+    const code =
+      typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : 'REQUEST_REJECTED';
+
+    return reply.status(statusCode).send({
+      error: code,
+      message,
+    });
+  }
+
+  return reply.status(500).send({
     error: 'INTERNAL_SERVER_ERROR',
-    message: env.isDevelopment ? error.message : 'An unexpected error occurred',
+    message: env.isDevelopment ? message : 'An unexpected error occurred',
   });
 });
 
