@@ -40,12 +40,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   const clearSessionCookies = (reply: FastifyReply) => {
     reply.clearCookie('access_token', {
-      path: '/',
-      domain: env.security.cookieDomain,
+      ...sessionCookieOptions,
     });
     reply.clearCookie('refresh_token', {
-      path: '/',
-      domain: env.security.cookieDomain,
+      ...sessionCookieOptions,
     });
   };
 
@@ -312,8 +310,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.post('/auth/logout', async (_request, reply) => {
     clearSessionCookies(reply);
     reply.clearCookie(oauthStateCookieName, {
-      path: '/auth',
-      domain: env.security.cookieDomain,
+      ...oauthStateCookieOptions,
     });
 
     return reply.code(200).send({
@@ -380,8 +377,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       }
 
       reply.clearCookie(oauthStateCookieName, {
-        path: '/auth',
-        domain: env.security.cookieDomain,
+        ...oauthStateCookieOptions,
       });
 
       if (!env.google.clientId || !env.google.clientSecret || !env.google.callbackUrl) {
@@ -455,8 +451,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.redirect(buildFrontendAppUrl(env.frontendUrl, '/dashboard'));
     } catch (error: any) {
       reply.clearCookie(oauthStateCookieName, {
-        path: '/auth',
-        domain: env.security.cookieDomain,
+        ...oauthStateCookieOptions,
       });
       logger.error({ error }, 'Google OAuth callback failed');
 
