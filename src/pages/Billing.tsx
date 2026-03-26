@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, useMotionValue, useTransform, animate } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { initPosthog } from "@/lib/posthog";
 import {
@@ -230,8 +230,10 @@ const featureVariants = {
 // ============================================
 const Billing = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { toast } = useToast();
+  const fromLimitExceeded = location.state?.fromLimitExceeded === true;
   const [usage, setUsage] = useState<UsageLimits | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [planName, setPlanName] = useState("Grátis");
@@ -476,6 +478,24 @@ const Billing = () => {
               Voltar
             </Button>
           </motion.div>
+
+          {/* Limit Exceeded Banner */}
+          {fromLimitExceeded && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="mb-8 rounded-xl border border-amber-500/30 bg-amber-500/10 backdrop-blur-sm p-4 text-center"
+            >
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <Zap className="w-5 h-5 text-amber-400" />
+                <span className="font-semibold text-amber-200">Você atingiu o limite do seu plano</span>
+              </div>
+              <p className="text-sm text-amber-300/80">
+                Faça upgrade para continuar gerando clipes incríveis!
+              </p>
+            </motion.div>
+          )}
 
           {/* Header */}
           <motion.div

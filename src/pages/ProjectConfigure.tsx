@@ -455,6 +455,10 @@ export default function ProjectConfigure() {
       }, 30000);
       const responseData = await response.json();
       if (!response.ok) {
+        if (responseData.error === 'LIMIT_EXCEEDED') {
+          navigate('/billing', { state: { fromLimitExceeded: true, limits: responseData.limits } });
+          return;
+        }
         throw new Error(responseData.error || responseData.message || 'Falha ao iniciar processamento');
       }
       const { jobId } = responseData;
