@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, forwardRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,8 @@ import { toastError } from '@/lib/error-messages';
 import { Zap, Loader2, CheckCircle2, XCircle, Sparkles, Captions, Scissors, Upload as UploadIcon, TrendingUp } from 'lucide-react';
 import { isValidYouTubeUrl, normalizeYoutubeUrl } from '@/lib/youtube';
 import { createTempConfig, startJobFromTempConfig, type Job } from '@/lib/jobs-api';
-import { saveUserJob } from '@/lib/storage';
+import { saveUserJob, getUserJobs } from '@/lib/storage';
+import posthog from 'posthog-js';
 import { FileUploadZone } from '@/components/FileUploadZone';
 import {
   DEFAULT_CLIP_SETTINGS,
@@ -25,11 +26,14 @@ interface QuickCreateProps {
   getToken: () => Promise<string | null>;
   onProjectCreated?: (tempId: string) => void;
   variant?: 'full' | 'compact';
+  autoFocus?: boolean;
 }
 
-export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'full' }: QuickCreateProps) => {
+export const QuickCreate = forwardRef<HTMLInputElement, QuickCreateProps>(({ userId, getToken, onProjectCreated, variant = 'full', autoFocus = false }, ref) => {
   const isCompact = variant === 'compact';
-  const isOneClickAvailable = Boolean(import.meta.env.VITE_BACKEND_URL && import.meta.env.VITE_API_KEY);
+  // Cookie-based auth no longer requires a frontend-readable API key to start
+  // jobs. Keeping one-click behind that flag only adds friction in production.
+  const isOneClickAvailable = true;
 
   const [url, setUrl] = useState('');
   const [objective, setObjective] = useState('');
@@ -42,7 +46,20 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const internalRef = useRef<HTMLInputElement>(null);
+  const inputRef = (ref as React.RefObject<HTMLInputElement>) || internalRef;
   const effectiveOneClickMode = isCompact ? isOneClickAvailable : oneClickMode;
+
+  useEffect(() => {
+    if (autoFocus && inputRef.current) {
+      // Small delay to let animations finish before focusing
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+  }, [autoFocus]);
 
   const getClipSettingsByDuration = (duration: 30 | 60 | 90): ClipSettings => {
     if (duration === 30) {
@@ -173,6 +190,19 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
 
         saveUserJob(userId, queuedJob);
 
+        // TTV tracking: detect first-ever job creation
+        try {
+          const existingJobs = getUserJobs(userId);
+          if (existingJobs.length <= 1) {
+            posthog.capture('first_job_created', {
+              source: 'quick_create',
+              target_duration: targetDuration,
+              subtitle_style: subtitleStyle,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch {}
+
         toast({
           title: "🚀 Processamento iniciado",
           description: "Seu vídeo entrou na fila com score de viralidade e configuração rápida.",
@@ -250,9 +280,10 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
           <div className="flex flex-col gap-3 xl:flex-row">
             <div className="relative flex-1">
               <Input
+                ref={inputRef}
                 id="youtube-url-compact"
                 type="url"
-                placeholder="Cole o link do YouTube"
+                placeholder="Cole aqui o link do seu v\u00eddeo do YouTube"
                 value={url}
                 onChange={(e) => handleUrlChange(e.target.value)}
                 disabled={isSubmitting}
@@ -565,4 +596,6 @@ export const QuickCreate = ({ userId, getToken, onProjectCreated, variant = 'ful
       </CardContent>
     </Card>
   );
-};
+});
+
+QuickCreate.displayName = 'QuickCreate';

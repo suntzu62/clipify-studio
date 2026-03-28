@@ -10,6 +10,8 @@ import { Chrome } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { friendlyErrorMessage } from '@/lib/error-messages';
 import { getBackendUrl } from '@/lib/backend-url';
+import { getPostAuthRedirectPath } from '@/lib/pending-hero';
+import posthog from 'posthog-js';
 
 const Register = () => {
   const [email, setEmail] = useState('');
@@ -21,7 +23,7 @@ const Register = () => {
 
   useEffect(() => {
     if (user) {
-      navigate('/dashboard', { replace: true });
+      navigate(getPostAuthRedirectPath('/dashboard'), { replace: true });
     }
   }, [user, navigate]);
 
@@ -72,12 +74,26 @@ const Register = () => {
         title: 'Conta criada com sucesso!',
         description: 'Bem-vindo ao Cortaí',
       });
+      // TTV tracking: mark the exact moment the user signed up
+      try {
+        posthog.capture('user_signed_up', {
+          signup_method: 'email',
+          signup_timestamp: new Date().toISOString(),
+        });
+      } catch {}
       // Redirecionar imediatamente após registro bem-sucedido
-      navigate('/dashboard', { replace: true });
+      navigate(getPostAuthRedirectPath('/dashboard'), { replace: true });
     }
   };
 
   const handleGoogleSignIn = () => {
+    // Track signup intent without polluting the real signup-completed metric
+    try {
+      posthog.capture('signup_started', {
+        signup_method: 'google',
+        signup_started_at: new Date().toISOString(),
+      });
+    } catch {}
     // Redireciona para o backend, que inicia OAuth do Google
     const backendUrl = getBackendUrl();
     window.location.href = `${backendUrl}/auth/google`;

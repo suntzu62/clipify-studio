@@ -11,6 +11,7 @@ import { friendlyErrorMessage, toastError } from '@/lib/error-messages';
 import { cn } from '@/lib/utils';
 import { saveUserJob } from '@/lib/storage';
 import { Job, createJobFromUpload } from '@/lib/jobs-api';
+import { getBackendUrl } from '@/lib/backend-url';
 
 interface FileUploadZoneProps {
   className?: string;
@@ -40,17 +41,13 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
     setUploadProgress(0);
 
     try {
-      const token = await getToken();
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-
       // Create FormData with video file
       const formData = new FormData();
       formData.append('video', file);
 
-      // Upload to edge function with progress tracking
+      // Upload to backend-v2 using the same cookie-based auth as the rest of the app
       const xhr = new XMLHttpRequest();
+      const backendUrl = getBackendUrl();
       
       // Track upload progress
       xhr.upload.addEventListener('progress', (e) => {
@@ -61,13 +58,18 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
       });
 
       // Handle completion
-      const uploadPromise = new Promise<{ jobId: string; storagePath: string }>((resolve, reject) => {
+      const uploadPromise = new Promise<{ storagePath: string; fileName?: string }>((resolve, reject) => {
         xhr.addEventListener('load', () => {
-          if (xhr.status === 200) {
-            resolve(JSON.parse(xhr.responseText));
-          } else {
-            const error = JSON.parse(xhr.responseText);
-            reject(new Error(error.message || 'Upload failed'));
+          try {
+            const payload = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(payload);
+              return;
+            }
+
+            reject(new Error(payload.message || 'Upload failed'));
+          } catch {
+            reject(new Error('Upload failed'));
           }
         });
         
@@ -77,11 +79,11 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
       });
 
       // Start upload
-      xhr.open('POST', 'https://qibjqqucmbrtuirysexl.supabase.co/functions/v1/upload-video');
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.open('POST', `${backendUrl}/uploads`);
+      xhr.withCredentials = true;
       xhr.send(formData);
 
-      const { storagePath } = await uploadPromise;
+      const { storagePath, fileName: resolvedFileName } = await uploadPromise;
 
       setUploadProgress(100);
 
@@ -89,21 +91,21 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
       const { jobId } = await createJobFromUpload(
         user.id,
         storagePath,
-        file.name,
+        resolvedFileName || file.name,
         getToken
       );
 
       // Save job to local storage
       const job: Job = {
         id: jobId,
-        youtubeUrl: `upload://${file.name}`,
+        youtubeUrl: `upload://${resolvedFileName || file.name}`,
         status: 'queued',
         progress: 0,
         createdAt: new Date().toISOString(),
         neededMinutes: Math.ceil(file.size / (1024 * 1024 * 60)), // rough estimate
         result: {
           metadata: {
-            title: file.name.replace(/\.[^/.]+$/, ''),
+            title: (resolvedFileName || file.name).replace(/\.[^/.]+$/, ''),
             thumbnail: undefined,
             channel: undefined
           }
@@ -147,7 +149,7 @@ export function FileUploadZone({ className, onUploadSuccess }: FileUploadZonePro
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
     accept: {
-      'video/*': ['.mp4', '.mov', '.avi', '.quicktime']
+      'video/*': ['.mp4', '.mov', '.avi', '.mkv']
     },
     maxFiles: 1,
     onDrop: (acceptedFiles, rejectedFiles) => {

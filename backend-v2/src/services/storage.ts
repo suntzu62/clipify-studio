@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { createReadStream, promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { createLogger } from '../config/logger.js';
@@ -39,11 +39,11 @@ export async function uploadFile(
   logger.info({ bucket, path, filePath, contentType }, 'Uploading file to storage');
 
   try {
-    const fileBuffer = await fs.readFile(filePath);
+    const fileStream = createReadStream(filePath);
 
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(path, fileBuffer, {
+      .upload(path, fileStream as any, {
         contentType,
         upsert: true,
       });
@@ -250,7 +250,7 @@ async function uploadToLocalStorage(
     logger.info({ path, publicUrl, destPath }, 'File uploaded to local storage successfully');
 
     return {
-      path: destPath,
+      path,
       publicUrl,
     };
   } catch (error: any) {

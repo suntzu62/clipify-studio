@@ -11,6 +11,7 @@ import { createLogger } from '../config/logger.js';
 import { downloadFile } from '../lib/supabase.js';
 import { env } from '../config/env.js';
 import { VideoDownloadError, VideoMetadata } from '../types/index.js';
+import { normalizeStoragePath } from '../utils/security.js';
 
 const logger = createLogger('download');
 
@@ -194,7 +195,7 @@ export async function downloadVideo(
     if (sourceType === 'youtube' && youtubeUrl) {
       return await downloadFromYouTube(youtubeUrl);
     } else if (sourceType === 'upload' && uploadPath) {
-      return await downloadFromSupabase(uploadPath);
+      return await downloadFromUploadedStorage(uploadPath);
     } else {
       throw new VideoDownloadError('Invalid source type or missing parameters');
     }
@@ -746,28 +747,32 @@ function extractYouTubeId(url: string): string {
 }
 
 // ============================================
-// FUNÇÕES PRIVADAS - Supabase
+// FUNÇÕES PRIVADAS - Upload Storage
 // ============================================
 
 /**
- * Download de vídeo do Supabase Storage
+ * Download de vídeo do storage configurado para uploads
  */
-async function downloadFromSupabase(uploadPath: string): Promise<DownloadResult> {
-  logger.info({ uploadPath }, 'Downloading from Supabase Storage');
+async function downloadFromUploadedStorage(uploadPath: string): Promise<DownloadResult> {
+  const normalizedUploadPath = normalizeStoragePath(uploadPath);
+  if (!normalizedUploadPath) {
+    throw new VideoDownloadError('Invalid upload path');
+  }
 
-  const bucket = env.supabase.bucket;
-  const tempPath = path.join(
-    os.tmpdir(),
-    `clipify-upload-${Date.now()}-${path.basename(uploadPath)}`
-  );
+  logger.info({ uploadPath: normalizedUploadPath }, 'Downloading uploaded video from storage');
+
+  const tempPath = path.join(os.tmpdir(), `clipify-upload-${Date.now()}-${path.basename(normalizedUploadPath)}`);
 
   try {
-    // Download do Supabase
-    const blob = await downloadFile(bucket, uploadPath);
-    const buffer = Buffer.from(await blob.arrayBuffer());
-
-    // Salvar no sistema de arquivos
-    await fs.writeFile(tempPath, buffer);
+    if (env.supabase.url && env.supabase.serviceKey) {
+      const bucket = env.supabase.bucket;
+      const blob = await downloadFile(bucket, normalizedUploadPath);
+      const buffer = Buffer.from(await blob.arrayBuffer());
+      await fs.writeFile(tempPath, buffer);
+    } else {
+      const sourcePath = path.join(env.localStoragePath || './uploads', normalizedUploadPath);
+      await fs.copyFile(sourcePath, tempPath);
+    }
 
     // Validar arquivo
     const isValid = await validateVideo(tempPath);
@@ -777,9 +782,9 @@ async function downloadFromSupabase(uploadPath: string): Promise<DownloadResult>
 
     // Extrair metadata
     const metadata = await extractMetadata(tempPath);
-    metadata.url = uploadPath;
+    metadata.url = normalizedUploadPath;
 
-    logger.info({ uploadPath, tempPath, metadata }, 'Download from Supabase completed');
+    logger.info({ uploadPath: normalizedUploadPath, tempPath, metadata }, 'Upload download completed');
     return { videoPath: tempPath, metadata };
   } catch (error: any) {
     // Limpar arquivo temporário se existir
@@ -787,9 +792,9 @@ async function downloadFromSupabase(uploadPath: string): Promise<DownloadResult>
       await fs.unlink(tempPath);
     } catch {}
 
-    logger.error({ error: error.message, uploadPath }, 'Supabase download failed');
+    logger.error({ error: error.message, uploadPath: normalizedUploadPath }, 'Upload storage download failed');
     throw new VideoDownloadError(
-      `Failed to download from Supabase: ${error.message}`,
+      `Failed to download uploaded video: ${error.message}`,
       error
     );
   }

@@ -2,6 +2,7 @@ import Fastify, { type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
+import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
@@ -134,6 +135,14 @@ await app.register(cors, {
 
 // Cookie parser (necessario para auth via httpOnly cookies)
 await app.register(cookie);
+
+await app.register(multipart, {
+  limits: {
+    files: 1,
+    parts: 10,
+    fileSize: 5 * 1024 * 1024 * 1024, // 5GB
+  },
+});
 
 app.addHook('onRequest', async (request, reply) => {
   if (!env.security.strictOriginChecks) {

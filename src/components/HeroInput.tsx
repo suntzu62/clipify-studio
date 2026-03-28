@@ -96,7 +96,7 @@ export function HeroInput({ className, onOpenDemo, prefillUrl }: HeroInputProps)
 
     if (!user) {
       localStorage.setItem('cortai:pendingHeroUrl', value);
-      navigate('/auth/login');
+      navigate('/auth/register');
       return;
     }
 

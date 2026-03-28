@@ -105,3 +105,16 @@ export function isSafeMediaFilename(filename: string): boolean {
 
   return /^[A-Za-z0-9._-]+\.(mp4|jpg|jpeg)$/i.test(filename);
 }
+
+export function sanitizeStorageFilename(fileName: string): string {
+  const baseName = fileName
+    .split(/[\\/]/)
+    .pop()
+    ?.normalize('NFKD')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return baseName && baseName.length > 0 ? baseName.slice(0, 120) : 'upload.mp4';
+}

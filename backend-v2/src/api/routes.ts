@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
-import { createReadStream, promises as fs } from 'fs';
+import { createReadStream, createWriteStream, promises as fs } from 'fs';
+import os from 'os';
 import path from 'path';
+import { pipeline } from 'stream/promises';
 import { z } from 'zod';
 import {
   CreateJobSchema,
@@ -31,11 +33,13 @@ import { reprocessClip } from '../services/clip-reprocessor.js';
 import * as db from '../services/database.service.js';
 import * as mp from '../services/mercadopago.service.js';
 import { downloadVideo, cleanupVideo } from '../services/download.js';
+import { uploadFile as uploadToStorage } from '../services/storage.js';
 import {
   getRequestOrigin,
   isAllowedOrigin,
   isSafeIdentifier,
   isSafeMediaFilename,
+  sanitizeStorageFilename,
   isUserOwnedUploadPath,
   isValidYouTubeUrl,
   normalizeStoragePath,
@@ -44,6 +48,14 @@ import {
 const logger = createLogger('routes');
 const dbJobs = db.jobs;
 const tempConfigFallbackStore = new Map<string, ProjectConfig>();
+const MAX_UPLOAD_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
+const UPLOAD_ROUTE_BODY_LIMIT = MAX_UPLOAD_FILE_SIZE + 1024 * 1024;
+const ALLOWED_UPLOAD_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-matroska',
+]);
 const corsOrigins = Array.from(
   new Set([env.frontendUrl, env.baseUrl, ...env.security.corsAllowedOrigins].filter(Boolean))
 );
@@ -255,12 +267,33 @@ async function fetchJobClipSummaries(jobId: string) {
   }
 }
 
+async function isFirstJobForUser(userId: string): Promise<boolean> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::INT AS total FROM usage_records WHERE user_id = $1 AND usage_type = 'minute'`,
+      [userId]
+    );
+    return Number(rows[0]?.total || 0) === 0;
+  } catch (error) {
+    logger.warn({ userId, error }, 'Failed to check first-job status');
+    return false;
+  }
+}
+
 async function enforceUsageLimits(
   reply: FastifyReply,
   userId: string,
   requestedClipCount: number,
   targetDurationSeconds: number
 ): Promise<boolean> {
+  // First-job bonus: never block a user who has never processed a video.
+  // This guarantees every new user reaches the "aha moment" regardless of video length.
+  const firstJob = await isFirstJobForUser(userId);
+  if (firstJob) {
+    logger.info({ userId }, 'First-job bonus: skipping usage limits for new user');
+    return true;
+  }
+
   const [clipLimits, minuteLimits] = await Promise.all([
     mp.checkUserLimits(userId, 'clip'),
     mp.checkUserLimits(userId, 'minute'),
@@ -411,7 +444,122 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // ============================================
-  // CREATE JOB FROM UPLOAD (after file is uploaded to Supabase)
+  // AUTHENTICATED FILE UPLOAD
+  // ============================================
+  app.post('/uploads', {
+    bodyLimit: UPLOAD_ROUTE_BODY_LIMIT,
+    config: {
+      rateLimit: {
+        max: 3,
+        timeWindow: '1 hour',
+      },
+    },
+  }, async (request, reply) => {
+    const requestUserId = requireAuthenticatedUserId(request, reply);
+    if (!requestUserId) {
+      return;
+    }
+
+    if (!(request as any).isMultipart?.()) {
+      return reply.status(400).send({
+        error: 'INVALID_CONTENT_TYPE',
+        message: 'Expected multipart/form-data',
+      });
+    }
+
+    let tempPath: string | null = null;
+
+    try {
+      const part = await (request as any).file({
+        limits: {
+          files: 1,
+          fileSize: MAX_UPLOAD_FILE_SIZE,
+          fields: 10,
+          parts: 11,
+        },
+      });
+
+      if (!part) {
+        return reply.status(400).send({
+          error: 'NO_FILE',
+          message: 'Nenhum arquivo foi enviado',
+        });
+      }
+
+      if (!ALLOWED_UPLOAD_TYPES.has(part.mimetype)) {
+        part.file.resume();
+        return reply.status(400).send({
+          error: 'INVALID_TYPE',
+          message: 'Formato não suportado. Use: MP4, MOV, AVI, MKV',
+        });
+      }
+
+      const originalFileName = part.filename || 'upload.mp4';
+      const safeFileName = sanitizeStorageFilename(originalFileName);
+      const storagePath = `uploads/${requestUserId}/${Date.now()}-${randomUUID().slice(0, 8)}/${safeFileName}`;
+      tempPath = path.join(os.tmpdir(), `clipify-upload-${randomUUID()}-${safeFileName}`);
+
+      await pipeline(part.file, createWriteStream(tempPath));
+
+      if ((part.file as any).truncated) {
+        return reply.status(413).send({
+          error: 'FILE_TOO_LARGE',
+          message: 'Arquivo muito grande. Máximo: 5GB',
+        });
+      }
+
+      const stats = await fs.stat(tempPath);
+      if (stats.size <= 0) {
+        return reply.status(400).send({
+          error: 'EMPTY_FILE',
+          message: 'O arquivo enviado está vazio',
+        });
+      }
+
+      const uploadResult = await uploadToStorage(
+        env.supabase.bucket,
+        storagePath,
+        tempPath,
+        part.mimetype
+      );
+
+      const normalizedUploadPath = normalizeStoragePath(uploadResult.path) || storagePath;
+
+      logger.info({
+        userId: requestUserId,
+        storagePath: normalizedUploadPath,
+        fileName: originalFileName,
+        fileSize: stats.size,
+      }, 'Authenticated upload completed');
+
+      return reply.status(200).send({
+        storagePath: normalizedUploadPath,
+        fileName: originalFileName,
+        fileSize: stats.size,
+      });
+    } catch (error: any) {
+      const requestFileTooLargeError = (app as any).multipartErrors?.RequestFileTooLargeError;
+      if (requestFileTooLargeError && error instanceof requestFileTooLargeError) {
+        return reply.status(413).send({
+          error: 'FILE_TOO_LARGE',
+          message: 'Arquivo muito grande. Máximo: 5GB',
+        });
+      }
+
+      logger.error({ error, userId: requestUserId }, 'Authenticated upload failed');
+      return reply.status(500).send({
+        error: 'UPLOAD_FAILED',
+        message: error?.message || 'Falha ao enviar arquivo',
+      });
+    } finally {
+      if (tempPath) {
+        await fs.rm(tempPath, { force: true }).catch(() => undefined);
+      }
+    }
+  });
+
+  // ============================================
+  // CREATE JOB FROM UPLOAD (after file is uploaded to storage)
   // ============================================
   app.post('/jobs/from-upload', {
     config: {

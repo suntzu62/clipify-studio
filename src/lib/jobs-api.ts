@@ -498,7 +498,7 @@ export async function startJobFromTempConfig(
 
 /**
  * Create a job from an uploaded file
- * Called after file is uploaded to Supabase Storage
+ * Called after file is uploaded to the configured storage backend
  */
 export async function createJobFromUpload(
   userId: string,

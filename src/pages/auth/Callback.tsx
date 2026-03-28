@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
+import { getPostAuthRedirectPath } from '@/lib/pending-hero';
 
 const Callback = () => {
   const [searchParams] = useSearchParams();
@@ -30,7 +31,7 @@ const Callback = () => {
         description: 'Bem-vindo ao Cortaí',
       });
 
-      navigate('/dashboard', { replace: true });
+      navigate(getPostAuthRedirectPath('/dashboard'), { replace: true });
       return;
     } else {
       toast({

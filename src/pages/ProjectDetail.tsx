@@ -191,6 +191,7 @@ export default function ProjectDetail() {
   const [selectedRemixClipId, setSelectedRemixClipId] = useState<string | null>(null);
   const [highlightedReadyClipId, setHighlightedReadyClipId] = useState<string | null>(null);
   const telemetryFired = useRef<'none' | 'completed' | 'failed'>('none');
+  const firstValueTelemetryFired = useRef(false);
   const previousReadyClipIdsRef = useRef<string[]>([]);
 
   // Use unified job status hook
@@ -319,6 +320,18 @@ export default function ProjectDetail() {
           telemetryFired.current = 'completed';
           const clipsCount = jobStatus?.result?.texts?.titles?.length ?? readyCount;
           posthog.capture('pipeline completed', { rootId: job.id, clips: clipsCount });
+
+          // TTV tracking: clips are ready. The real "viewed" event fires only
+          // after the results UI is visible to the user.
+          const allUserJobs = user?.id ? getUserJobs(user.id) : [];
+          const completedJobs = allUserJobs.filter(j => j.status === 'completed');
+          if (completedJobs.length <= 1) {
+            posthog.capture('first_clips_ready', {
+              job_id: job.id,
+              clips_count: clipsCount,
+              timestamp: new Date().toISOString(),
+            });
+          }
         } else if (jobStatus.status === 'failed' && telemetryFired.current === 'none') {
           telemetryFired.current = 'failed';
           posthog.capture('pipeline failed', { rootId: job.id, stage: jobStatus.currentStep || 'unknown' });
@@ -326,6 +339,27 @@ export default function ProjectDetail() {
       } catch {}
     }
   }, [jobStatus, job, user?.id, overallProgress, readyCount]);
+
+  useEffect(() => {
+    if (!showResults || readyCount <= 0 || !job || !user?.id || firstValueTelemetryFired.current) {
+      return;
+    }
+
+    const completedJobs = getUserJobs(user.id).filter((existingJob) => existingJob.status === 'completed');
+    if (completedJobs.length > 1) {
+      return;
+    }
+
+    firstValueTelemetryFired.current = true;
+    try {
+      posthog.capture('first_clip_viewed', {
+        job_id: job.id,
+        clips_count: readyCount,
+        result_type: jobStatus?.status === 'failed' ? 'partial' : 'completed',
+        timestamp: new Date().toISOString(),
+      });
+    } catch {}
+  }, [showResults, readyCount, job, user?.id, jobStatus?.status]);
 
   const handleCopyJobId = () => {
     if (id) {

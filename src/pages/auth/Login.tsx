@@ -10,6 +10,7 @@ import { Chrome } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { friendlyErrorMessage } from '@/lib/error-messages';
 import { getBackendUrl } from '@/lib/backend-url';
+import { getPostAuthRedirectPath } from '@/lib/pending-hero';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -19,7 +20,7 @@ const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as any)?.from?.pathname || '/dashboard';
+  const from = getPostAuthRedirectPath((location.state as any)?.from?.pathname || '/dashboard');
 
   useEffect(() => {
     if (user) {
