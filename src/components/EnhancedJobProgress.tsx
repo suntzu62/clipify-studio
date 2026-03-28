@@ -4,10 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
-import { CheckCircle, Clock, AlertCircle, Loader2, Youtube, Upload } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { CheckCircle, Clock, AlertCircle, Loader2, Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface JobStep {
@@ -81,21 +78,6 @@ export function EnhancedJobProgress({
   className 
 }: EnhancedJobProgressProps) {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const [hasYouTubeConnected, setHasYouTubeConnected] = useState(false);
-  
-  useEffect(() => {
-    const checkYouTubeConnection = async () => {
-      if (!user?.id || !isSupabaseConfigured || !supabase) return;
-      const { data } = await (supabase as any)
-        .from('youtube_accounts')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-      setHasYouTubeConnected(!!data);
-    };
-    checkYouTubeConnection();
-  }, [user?.id]);
   
   const steps = Object.values(STEP_MAPPING);
   
@@ -231,33 +213,16 @@ export function EnhancedJobProgress({
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>YouTube bloqueou este vídeo</AlertTitle>
             <AlertDescription className="space-y-3">
-              {!hasYouTubeConnected ? (
-                <>
-                  <p>O YouTube está impedindo downloads automatizados deste vídeo.</p>
-                  <p className="font-semibold">Solução: Conecte sua conta do YouTube para autenticar os downloads.</p>
-                  <Button 
-                    onClick={() => window.location.href = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/yt-oauth-start`}
-                    variant="default"
-                    className="mt-2"
-                  >
-                    <Youtube className="mr-2 h-4 w-4" />
-                    Conectar YouTube
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <p>Mesmo com autenticação, este vídeo não pôde ser baixado.</p>
-                  <p className="font-semibold">Solução alternativa: Faça upload do arquivo MP4 diretamente.</p>
-                  <Button 
-                    onClick={() => navigate('/projects')}
-                    variant="default"
-                    className="mt-2"
-                  >
-                    <Upload className="mr-2 h-4 w-4" />
-                    Criar Novo Projeto
-                  </Button>
-                </>
-              )}
+              <p>O YouTube está impedindo downloads automatizados deste vídeo.</p>
+              <p className="font-semibold">Solução alternativa: faça upload do arquivo MP4 diretamente.</p>
+              <Button 
+                onClick={() => navigate('/projects')}
+                variant="default"
+                className="mt-2"
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Criar Novo Projeto
+              </Button>
             </AlertDescription>
           </Alert>
         ) : error ? (
