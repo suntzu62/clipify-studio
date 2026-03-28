@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,7 @@ import {
   Crown
 } from 'lucide-react';
 import { QuickCreate } from '@/components/QuickCreate';
-import { StatCard, WorkflowCard, EmptyState } from '@/components/dashboard';
+import { StatCard, WorkflowCard } from '@/components/dashboard';
 import { TiltCard, MouseSpotlight } from '@/components/landing';
 import { getJobStatus, Job } from '@/lib/jobs-api';
 import { deleteUserJob, getUserJobs, updateJobStatus } from '@/lib/storage';
@@ -85,6 +85,7 @@ const Dashboard = () => {
     title?: string;
     thumbnailUrl?: string;
   }>>({});
+  const quickCreateRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
@@ -724,42 +725,72 @@ const Dashboard = () => {
                 </motion.div>
 
                 {recentProjects.length === 0 ? (
-                  <Card className="glass-card">
-                    <CardContent className="p-8">
-                      <EmptyState
-                        icon={Video}
-                        title="Bem-vindo ao Cortaí!"
-                        description="Transforme seus vídeos longos em clips virais em 3 passos simples:"
-                        action={{
-                          label: 'Criar Primeiro Vídeo',
-                          onClick: () => navigate('/projects/new'),
-                        }}
-                      />
-                      <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
-                        <div className="flex gap-3 items-start p-3 rounded-lg bg-white/5">
-                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">1</span>
-                          <div>
-                            <p className="text-sm font-medium text-white">Cole a URL</p>
-                            <p className="text-xs text-white/50">Cole um link do YouTube ou faça upload</p>
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3, duration: 0.5 }}
+                  >
+                    <Card className="glass-card border-primary/20 overflow-hidden">
+                      <CardContent className="p-0">
+                        {/* Hero banner */}
+                        <div className="relative bg-gradient-to-r from-primary/15 via-primary/5 to-transparent px-8 py-6">
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                            <motion.div
+                              initial={{ scale: 0.8, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              transition={{ delay: 0.5, type: 'spring', stiffness: 200 }}
+                              className="flex-shrink-0 w-14 h-14 rounded-2xl bg-gradient-primary flex items-center justify-center shadow-lg"
+                            >
+                              <Sparkles className="w-7 h-7 text-white" />
+                            </motion.div>
+                            <div className="space-y-1">
+                              <h3 className="text-xl font-bold text-foreground">
+                                Crie seu primeiro clip viral agora
+                              </h3>
+                              <p className="text-sm text-muted-foreground">
+                                Cole um link do YouTube abaixo. Em 5 minutos você terá clips prontos para TikTok, Reels e Shorts.
+                              </p>
+                            </div>
                           </div>
                         </div>
-                        <div className="flex gap-3 items-start p-3 rounded-lg bg-white/5">
-                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">2</span>
-                          <div>
-                            <p className="text-sm font-medium text-white">IA processa</p>
-                            <p className="text-xs text-white/50">Detectamos os melhores momentos automaticamente</p>
-                          </div>
+
+                        {/* Inline QuickCreate - o caminho mais curto até o valor */}
+                        <div className="px-8 py-6">
+                          <QuickCreate
+                            ref={quickCreateRef}
+                            userId={user!.id}
+                            getToken={getToken}
+                            onProjectCreated={handleProjectCreated}
+                            variant="compact"
+                            autoFocus
+                          />
                         </div>
-                        <div className="flex gap-3 items-start p-3 rounded-lg bg-white/5">
-                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">3</span>
-                          <div>
-                            <p className="text-sm font-medium text-white">Baixe os clips</p>
-                            <p className="text-xs text-white/50">Prontos para TikTok, Reels e Shorts</p>
+
+                        {/* Social proof + micro-steps */}
+                        <div className="px-8 pb-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/5 pt-4">
+                          <div className="flex items-center gap-6 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1.5">
+                              <Zap className="w-3.5 h-3.5 text-primary" />
+                              Cole a URL
+                            </span>
+                            <ArrowRight className="w-3 h-3 text-muted-foreground/50 hidden sm:block" />
+                            <span className="flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-primary" />
+                              IA detecta os melhores momentos
+                            </span>
+                            <ArrowRight className="w-3 h-3 text-muted-foreground/50 hidden sm:block" />
+                            <span className="flex items-center gap-1.5">
+                              <Play className="w-3.5 h-3.5 text-primary" />
+                              Clips prontos
+                            </span>
                           </div>
+                          <Badge variant="outline" className="text-xs whitespace-nowrap">
+                            Grátis — sem cartão
+                          </Badge>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
                 ) : (
                   <div className="grid gap-4 2xl:grid-cols-2" style={{ perspective: 1000 }}>
                     {recentProjects.map((job, index) => (
