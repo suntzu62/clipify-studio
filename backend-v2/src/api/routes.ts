@@ -1272,6 +1272,15 @@ export async function registerRoutes(app: FastifyInstance) {
           currentStep: deriveCurrentStep('active', progressValue),
           progress: progressData,
         });
+
+        // Forward clip_ready event when a clip finishes rendering
+        const pd = progressData as any;
+        if (pd.data?.clip) {
+          sendSSE('clip_ready', {
+            jobId: eventJobId,
+            clip: pd.data.clip,
+          });
+        }
       }
     });
 

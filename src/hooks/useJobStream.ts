@@ -139,6 +139,28 @@ export const useJobStream = (jobId: string) => {
           }
         });
 
+        eventSource.addEventListener('clip_ready', (event) => {
+          try {
+            const data = JSON.parse((event as MessageEvent).data);
+            if (data?.clip) {
+              setJobStatus(prev => {
+                if (!prev) return prev;
+                const existingClips: any[] = prev.result?.clips || [];
+                if (existingClips.some((c: any) => c.id === data.clip.id)) return prev;
+                return {
+                  ...prev,
+                  result: {
+                    ...prev.result,
+                    clips: [...existingClips, data.clip],
+                  },
+                };
+              });
+            }
+          } catch (err) {
+            console.error('Failed to parse clip_ready event:', err);
+          }
+        });
+
         eventSource.onerror = (event) => {
           setIsConnected(false);
           setError('SSE connection failed - will retry');

@@ -410,6 +410,33 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
             'Clip rendered, uploaded and saved to database'
           );
 
+          // Notify frontend that this clip is ready (progressive delivery)
+          try {
+            await job.updateProgress({
+              jobId: job.data.jobId,
+              step: 'render',
+              progress: 65,
+              message: `Clipe pronto: ${renderedClip.segment.title}`,
+              data: {
+                clip: {
+                  id: renderedClip.id,
+                  title: renderedClip.segment.title,
+                  description: renderedClip.segment.description || renderedClip.segment.reason || '',
+                  hashtags: renderedClip.segment.keywords || [],
+                  downloadUrl: videoUpload.publicUrl,
+                  thumbnailUrl: thumbnailUpload.publicUrl,
+                  duration: renderedClip.duration,
+                  start: renderedClip.segment.start,
+                  end: renderedClip.segment.end,
+                  score: renderedClip.segment.score,
+                  status: 'ready',
+                },
+              },
+            } as any);
+          } catch {
+            // Non-critical: clip is already saved to DB, polling will pick it up
+          }
+
           return {
             clipData,
             remixPackage: renderedClip.segment.remixPackage,
