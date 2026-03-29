@@ -29,7 +29,7 @@ type Props = {
 
 export default function NewProjectDialog({ open, onOpenChange, onCreated }: Props) {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, getToken } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   const form = useForm<Schema>({
@@ -42,7 +42,8 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
       setSubmitting(true);
       await createProject(
         { youtube_url: values.youtube_url.trim() },
-        user?.id
+        user?.id,
+        getToken ?? undefined
       );
       // Telemetry
       try {

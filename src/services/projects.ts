@@ -1,6 +1,7 @@
 import { getUserJobs } from "@/lib/storage";
 import { Job } from "@/lib/jobs-api";
 import { extractVideoId } from "@/lib/youtube-metadata";
+import { getAuthHeader } from "@/lib/auth-token";
 
 export type Project = {
   id: string;
@@ -160,7 +161,7 @@ export async function listProjects(currentUserId?: string) {
   }
 }
 
-export async function createProject(input: CreateProjectInput, currentUserId?: string) {
+export async function createProject(input: CreateProjectInput, currentUserId?: string, getToken?: () => Promise<string | null>) {
   const userId = currentUserId || 'dev-user';
   console.log('[createProject] Creating project via local API for user:', userId);
 
@@ -170,6 +171,7 @@ export async function createProject(input: CreateProjectInput, currentUserId?: s
     headers: {
       'Content-Type': 'application/json',
       ...(DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : {}),
+      ...(await getAuthHeader(getToken)),
     },
     credentials: 'include',
     body: JSON.stringify({
