@@ -347,7 +347,7 @@ export async function processVideo(job: Job<JobData>): Promise<JobResult> {
               : undefined,
             addSubtitles: attempt === 'primary',
             font: subtitlePreferences.font,
-            preset: 'ultrafast',
+            preset: env.render.qualityMode === 'turbo' ? 'ultrafast' : env.render.qualityMode === 'balanced' ? 'veryfast' : 'fast',
             subtitlePreferences,
             parallelismHint: renderConcurrency,
             onProgress: undefined,

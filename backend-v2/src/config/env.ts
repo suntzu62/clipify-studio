@@ -73,10 +73,10 @@ const envSchema = z.object({
   WORKER_LOCK_DURATION_MS: z.string().default('900000'),
   WORKER_STALLED_INTERVAL_MS: z.string().default('30000'),
   WORKER_MAX_STALLED_COUNT: z.string().default('3'),
-  RENDER_SMART_CROP: z.string().default('false'),
+  RENDER_SMART_CROP: z.string().default('true'),
   RENDER_BATCH_CONCURRENCY: z.string().default('6'),
   RENDER_FFMPEG_THREADS: z.string().default('0'),
-  RENDER_QUALITY_MODE: z.enum(['turbo', 'balanced', 'quality']).default('turbo'),
+  RENDER_QUALITY_MODE: z.enum(['turbo', 'balanced', 'quality']).default('balanced'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
