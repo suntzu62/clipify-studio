@@ -68,7 +68,7 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Novo video</DialogTitle>
+          <DialogTitle>Gerar clips virais</DialogTitle>
           <DialogDescription>
             Cole a URL do YouTube para gerar seus clipes.
           </DialogDescription>
@@ -95,7 +95,7 @@ export default function NewProjectDialog({ open, onOpenChange, onCreated }: Prop
                 Cancelar
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Criando..." : "Criar projeto"}
+                {submitting ? "Gerando clips..." : "Gerar clips"}
               </Button>
             </DialogFooter>
           </form>
