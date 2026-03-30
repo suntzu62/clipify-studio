@@ -180,6 +180,26 @@ export async function detectFacesInClip(
 }
 
 /**
+ * Detect faces across the full used portion of a video (all clips combined).
+ * Samples one frame every ~3 seconds to cover the content efficiently.
+ * Much faster than calling detectFacesInClip per clip (N FFmpeg calls → 1).
+ */
+export async function detectFacesInVideo(
+  videoPath: string,
+  startTime: number,
+  endTime: number,
+  _sourceWidth: number,
+  _sourceHeight: number,
+): Promise<FaceRegion[]> {
+  const duration = endTime - startTime;
+  // Sample ~1 frame every 3 seconds, min 3, max 20
+  const sampleCount = Math.min(20, Math.max(3, Math.floor(duration / 3)));
+
+  logger.info({ videoPath, startTime, endTime, sampleCount }, 'Running video-level face detection');
+  return detectFacesInClip(videoPath, startTime, endTime, sampleCount);
+}
+
+/**
  * Get video dimensions using ffprobe
  */
 export function getVideoDimensions(

@@ -8,7 +8,7 @@ import { env } from '../config/env.js';
 import type { HighlightSegment, Transcript, Clip, SubtitlePreferences } from '../types/index.js';
 import { DEFAULT_SUBTITLE_PREFERENCES } from '../types/index.js';
 import { generateASS, adjustFontSize } from '../utils/subtitle-optimizer.js';
-import { detectFacesInClip, calculateSmartCropX, getVideoDimensions } from './face-detection.js';
+import { detectFacesInClip, detectFacesInVideo, calculateSmartCropX, getVideoDimensions } from './face-detection.js';
 
 const logger = createLogger('rendering');
 
@@ -62,6 +62,8 @@ type RenderClipOptions = {
   subtitlePreferences: SubtitlePreferences;
   onProgress?: RenderOptions['onProgress'];
   parallelismHint?: number;
+  // Pre-computed crop X from video-level face detection (avoids per-clip detection)
+  preCachedCropX?: number;
 };
 
 const PRESET_PROFILE = {
@@ -168,6 +170,27 @@ export async function renderClips(
 
   const renderedClips: RenderedClip[] = [];
 
+  // Video-level face detection: run ONCE for the whole video, reuse per clip.
+  // This avoids N separate FFmpeg frame-extraction processes (one per clip).
+  let videoCropX: number | undefined;
+  if (env.render.smartCrop && format === '9:16' && segments.length > 0) {
+    try {
+      const dims = await getVideoDimensions(videoPath);
+      const videoStart = segments[0].start;
+      const videoEnd = segments[segments.length - 1].end;
+      const faces = await detectFacesInVideo(videoPath, videoStart, videoEnd, dims.width, dims.height);
+      const cropOffset = calculateSmartCropX(faces, dims.width, dims.height, 9 / 16);
+      if (!cropOffset.fallback) {
+        videoCropX = cropOffset.x;
+        logger.info({ videoCropX, faceCount: faces.length }, 'Video-level face detection complete');
+      } else {
+        logger.info('No faces detected at video level, clips will use center crop');
+      }
+    } catch (error: any) {
+      logger.warn({ error: error.message }, 'Video-level face detection failed, falling back to per-clip');
+    }
+  }
+
   try {
     // Keep concurrency conservative; shared instances can stall BullMQ lock renewal.
     const concurrency = resolveBatchConcurrency(segments.length);
@@ -208,6 +231,7 @@ export async function renderClips(
               subtitlePreferences,
               onProgress,
               parallelismHint: concurrency,
+              preCachedCropX: videoCropX,
             }
           )
         )
@@ -313,13 +337,15 @@ async function renderSingleClip(
     const scaleParams = 'flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp';
 
     if (options.format === '9:16') {
-      // Vertical format (1080x1920) - Smart face-based cropping
-      // 1. Detect faces to find optimal crop X position
-      // 2. CROP at that position (or center if no face)
-      // 3. SCALE to target resolution
+      // Vertical format - Smart face-based cropping
       let cropX = '(iw-ih*9/16)/2'; // default: center crop
 
-      if (env.render.smartCrop) {
+      if (options.preCachedCropX !== undefined) {
+        // Use pre-computed crop from video-level face detection (fast path)
+        cropX = options.preCachedCropX.toString();
+        logger.info({ clipId, cropX }, 'Using pre-cached face-based smart crop');
+      } else if (env.render.smartCrop) {
+        // Fallback: per-clip detection (slow path, only when no cache)
         try {
           const dims = await getVideoDimensions(videoPath);
           const faces = await detectFacesInClip(videoPath, start, end, 3);
@@ -384,10 +410,11 @@ async function renderSingleClip(
 
     const vf = vfFilters.join(',');
 
+    // aresample is single-pass and fast. loudnorm requires 2 FFmpeg passes (~2x encode time)
+    // for social media short clips the audio difference is imperceptible.
     const isTurboMode = env.render.qualityMode === 'turbo';
-    const af = isTurboMode
-      ? 'aresample=async=1:min_hard_comp=0.100:first_pts=0'
-      : 'loudnorm=I=-14:LRA=11:TP=-1.5';
+    const af = 'aresample=async=1:min_hard_comp=0.100:first_pts=0';
+    void isTurboMode; // kept for other turbo-specific settings below
 
     // Render video
     await new Promise<void>((resolve, reject) => {
